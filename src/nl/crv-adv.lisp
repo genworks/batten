@@ -128,3 +128,43 @@ coefficient would overflow.  NLib: N_CrvNonRatGetFirstDeriv."
             (declare (type fixnum i))
             (setf (aref v (incf j)) (aref u m)))))
       (%make-curve pd v dw))))
+
+(defun crv-planar-offset-get-deriv (cur u d nv ufl od)
+  "Write the first and second derivatives at U of the offset by distance D of
+planar curve CUR into rows 1 and 2 of OD, a point-array of at least 3 rows
+allocated by the caller (row 0 is left alone).  NV is the normal to the
+curve's plane: the curve is offset in the direction NV x T.  UFL +left+ means
+u is in [u_j, u_j+1) (right derivatives), +right+ u in (u_j, u_j+1] (left
+derivatives).  Signals as crv-derivs and crv-get-curvature-deriv do, and
+:num-err when the curvature's division would overflow.  Returns OD.
+NLib: N_CrvPlanarOffsetGetDeriv."
+  (declare (type curve cur) (type double-float u d) (type point nv) (type fixnum ufl)
+           (type point-array od))
+  (let ((dd (make-point-array 3))
+        (d1 (make-point)) (d2 (make-point)) (b (make-point)) (o (make-point))
+        (num 0d0) (den 0d0) (kap 0d0) (kpp 0d0) (f1 0d0) (f2 0d0) (sgn 0d0))
+    (declare (type point-array dd) (type point d1 d2 b o)
+             (type double-float num den kap kpp f1 f2 sgn)
+             (dynamic-extent dd d1 d2 b o))
+    ;; derivatives, the curvature and its derivative
+    (crv-derivs cur u ufl 2 dd)
+    (%point-array-row dd 1 d1)
+    (%point-array-row dd 2 d2)
+    (vector-cross d1 d2 b)
+    (setf num (vector-magnitude b))
+    (setf den (vector-magnitude d1))
+    (setf den (* (* den den) den))
+    (when (float-op-is-bad num den +division+)
+      (nurbs-error :num-err 'crv-planar-offset-get-deriv))
+    (setf kap (/ num den))
+    (setf den (vector-dot b nv))
+    (setf sgn (if (> den 0d0) -1d0 1d0))
+    (setf kpp (crv-get-curvature-deriv cur u ufl))
+    ;; offset derivatives
+    (setf f1 (+ 1d0 (* (* sgn kap) d)))
+    (vector-scale d1 f1 o)
+    (setf (aref od 1 0) (aref o 0) (aref od 1 1) (aref o 1) (aref od 1 2) (aref o 2))
+    (setf f2 (* (* sgn kpp) d))
+    (vector-combine f1 d2 f2 d1 o)
+    (setf (aref od 2 0) (aref o 0) (aref od 2 1) (aref o 1) (aref od 2 2) (aref o 2))
+    od))
