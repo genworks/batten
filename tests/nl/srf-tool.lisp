@@ -274,3 +274,85 @@ N_KnotVectorIsValid refuses."
                    (if (c-flag-error-p (c-srf-elevate-degree sp tt dir sq stp stq))
                        (values t nil)
                        (values nil (list (from-foreign sq :surface)))))))))))
+
+;;; ------------------------------------------------------------- L5-g0
+
+(defun %msc-knots (p pool lo hi)
+  "A clamped degree-P knot vector on [LO, HI] whose interior knots are some of
+the POOL values (fractions of the domain), each up to multiplicity min(P, 2),
+now and then nudged by less or more than the 1e-8 merging tolerance."
+  (let ((interior nil))
+    (dolist (x pool)
+      (when (zerop (rnd 2))
+        (let ((v (+ lo (* (- hi lo) (+ x (case (rnd 8) (0 4.5d-9) (1 3d-8) (2 -2d-9) (t 0d0)))))))
+          (dotimes (j (1+ (rnd (min p 2))))
+            (push v interior)))))
+    (coerce (append (make-list (1+ p) :initial-element lo)
+                    (sort interior #'<)
+                    (make-list (1+ p) :initial-element hi))
+            'batten::real-vector)))
+
+(defun %msc-surfaces ()
+  "(values surfaces k): K+1 random surfaces for N_MakeSrfsCompatible, of
+degrees 1 to 4, rational or not, all 3D or all 2D, mostly sharing their
+domains (exactly) and drawing interior knots from a shared pool."
+  (let* ((k (rnd 4))
+         (two-d (zerop (rnd 6)))
+         (pool-u (let (l) (dotimes (i (1+ (rnd 4)) l) (push (rnd-range 0.05d0 0.95d0) l))))
+         (pool-v (let (l) (dotimes (i (1+ (rnd 4)) l) (push (rnd-range 0.05d0 0.95d0) l))))
+         (ulo (if (zerop (rnd 3)) 0d0 (rnd-range -5d0 5d0))) (uhi (+ ulo 0.5d0 (rnd 5d0)))
+         (vlo (if (zerop (rnd 3)) 0d0 (rnd-range -5d0 5d0))) (vhi (+ vlo 0.5d0 (rnd 5d0)))
+         (share-u (/= 0 (rnd 3))) (share-v (/= 0 (rnd 3)))
+         (surfaces (make-array (1+ k))))
+    (dotimes (i (1+ k))
+      (let* ((p (1+ (rnd 4))) (q (1+ (rnd 4)))
+             (rational (zerop (rnd 3)))
+             (u (if (or share-u (zerop (rnd 3)))
+                    (%msc-knots p pool-u ulo uhi)
+                    (multiple-value-bind (lo hi) (batten-random::random-domain) (%msc-knots p pool-u lo hi))))
+             (v (if (or share-v (zerop (rnd 3)))
+                    (%msc-knots q pool-v vlo vhi)
+                    (multiple-value-bind (lo hi) (batten-random::random-domain) (%msc-knots q pool-v lo hi))))
+             (n+1 (- (length u) p 1)) (m+1 (- (length v) q 1))
+             (net (make-cpoint-net n+1 m+1)))
+        (dotimes (a n+1)
+          (dotimes (b m+1)
+            (let ((w (if rational (rnd-range 0.2d0 5d0) 1d0)))
+              (setf (aref net a b 0) (* w (- (rnd 200d0) 100d0))
+                    (aref net a b 1) (* w (- (rnd 200d0) 100d0))
+                    (aref net a b 2) (if two-d +no-z+ (* w (- (rnd 200d0) 100d0)))
+                    (aref net a b 3) (if rational w +no-w+)))))
+        (setf (svref surfaces i) (batten::%make-surface p q u v net))))
+    (values surfaces k)))
+
+(defun %copy-surface-deep (s)
+  "A copy of surface S sharing no arrays with it."
+  (batten::%make-surface (surface-degree-u s) (surface-degree-v s)
+                         (copy-seq (surface-knots-u s)) (copy-seq (surface-knots-v s))
+                         (%msc-copy-array (surface-cpoints s))))
+
+(defun %msc-copy-array (a)
+  "A fresh copy of double-float array A."
+  (let ((b (make-array (array-dimensions a) :element-type 'double-float)))
+    (dotimes (i (array-total-size a) b)
+      (setf (row-major-aref b i) (row-major-aref a i)))))
+
+(define-oracle-test make-srfs-compatible (:file "srf-tool" :trials 1500)
+  (multiple-value-bind (surfaces k) (%msc-surfaces)
+    (let ((uorv (case (rnd 3) (0 +udir+) (1 +vdir+) (t +uvdir+))))
+      (agree (list :surfaces surfaces :k k :uorv uorv)
+             (let ((sc (map 'simple-vector #'%copy-surface-deep surfaces)))
+               (coerce (batten::make-srfs-compatible sc k uorv) 'list))
+             (with-stacks (s)
+               (cffi:with-foreign-objects ((sp :pointer (1+ k)))
+                 ;; TO-FOREIGN inside WITH-FOREIGN: the copies are freed with it
+                 (with-foreign ((dummy (make-real-vector 1) :real-vector))
+                   (declare (ignore dummy))
+                   (dotimes (i (1+ k))
+                     (setf (cffi:mem-aref sp :pointer i) (to-foreign (svref surfaces i) :surface)))
+                   (let ((failed (c-flag-error-p (c-make-srfs-compatible sp k uorv s))))
+                     (values failed
+                             (unless failed
+                               (let ((out nil))
+                                 (dotimes (i (1+ k) (nreverse out))
+                                   (push (from-foreign (cffi:mem-aref sp :pointer i) :surface) out)))))))))))))
