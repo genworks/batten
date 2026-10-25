@@ -25,6 +25,144 @@ vector KNOTS, as (values ds dl).  NLib: N_BasisGetLongestAndShortestSpans."
             (when (> d dl) (setf dl d)))))
       (values ds dl))))
 
+(defun %basis-adv-list-to-knots (mx out)
+  "A fresh real-vector of MX+1 knots from OUT, the knots pushed in reverse."
+  (declare (type fixnum mx) (type list out))
+  (let ((knx (make-real-vector (1+ mx))))
+    (do ((j mx (1- j)) (l out (cdr l))) ((< j 0))
+      (declare (type fixnum j))
+      (setf (aref knx j) (the double-float (car l))))
+    knx))
+
+(defun get-compatible-knot-array-mult (knr kns p)
+  "The knots to insert into the degree-P knot vectors KNR and KNS (same end
+multiplicities) to merge them, as (values kxr kxs), two fresh real-vectors
+(empty when there is nothing to insert).  When their domains differ by more
+than *ptol* at either end, the vector with the shorter domain is first
+rescaled, in place, onto the longer one's; knots within *ptol* of one another
+count as aligned.  The C fills caller-allocated NL_KNOTVECTORs and sets their
+indexes; Batten's knot vectors carry their length, so they are returned.
+NLib: N_GetCompatibleKnotArrayMult."
+  (declare (type real-vector knr kns) (type fixnum p))
+  (let ((mr (1- (length knr)))
+        (ms (1- (length kns)))
+        (iv (make-real-vector 2)))
+    (declare (type fixnum mr ms) (type real-vector iv))
+    (when (or (> (abs (- (aref knr 0) (aref kns 0))) (the double-float *ptol*))
+              (> (abs (- (aref knr mr) (aref kns ms))) (the double-float *ptol*)))
+      (cond ((> (- (aref knr mr) (aref knr 0)) (- (aref kns ms) (aref kns 0)))
+             (create-interval iv (aref knr 0) (aref knr mr))
+             (basis-reparam kns p iv))
+            (t
+             (create-interval iv (aref kns 0) (aref kns ms))
+             (basis-reparam knr p iv))))
+    (let ((mxr -1) (mxs -1) (xr nil) (xs nil)
+          (i (1+ p)) (j (1+ p)) (ir 0) (js 0) (mlr 0) (mls 0)
+          (ptol *ptol*))
+      (declare (type fixnum mxr mxs i j ir js mlr mls) (type list xr xs)
+               (type double-float ptol))
+      (do () ((not (or (< i (- mr p)) (< j (- ms p)))))
+        (when (< (abs (- (aref knr i) (aref kns j))) ptol)
+          (setf ir i)
+          (do () ((not (and (< i (- mr p)) (= (aref knr i) (aref knr (1+ i)))))) (incf i))
+          (setf mlr (1+ (- i ir)))
+          (setf js j)
+          (do () ((not (and (< j (- ms p)) (= (aref kns j) (aref kns (1+ j)))))) (incf j))
+          (setf mls (1+ (- j js)))
+          (do ((k (1+ mlr) (1+ k))) ((> k mls))
+            (declare (type fixnum k))
+            (incf mxr)
+            (push (aref kns j) xr))
+          (do ((k (1+ mls) (1+ k))) ((> k mlr))
+            (declare (type fixnum k))
+            (incf mxs)
+            (push (aref knr i) xs))
+          (incf i)
+          (incf j))
+        (when (< (aref knr i) (aref kns j))
+          (setf ir i)
+          (do () ((not (and (< i (- mr p)) (= (aref knr i) (aref knr (1+ i)))))) (incf i))
+          (setf mlr (1+ (- i ir)))
+          (do ((k 1 (1+ k))) ((> k mlr))
+            (declare (type fixnum k))
+            (incf mxs)
+            (push (aref knr i) xs))
+          (incf i))
+        (when (> (aref knr i) (aref kns j))
+          (setf js j)
+          (do () ((not (and (< j (- ms p)) (= (aref kns j) (aref kns (1+ j)))))) (incf j))
+          (setf mls (1+ (- j js)))
+          (do ((k 1 (1+ k))) ((> k mls))
+            (declare (type fixnum k))
+            (incf mxr)
+            (push (aref kns j) xr))
+          (incf j)))
+      (values (%basis-adv-list-to-knots mxr xr)
+              (%basis-adv-list-to-knots mxs xs)))))
+
+(defun basis-eval-array (knots p u n flg nmat spn)
+  "Fill NMAT, a real-matrix of at least N+1 rows of P+1, with the non-vanishing
+degree-P basis functions of KNOTS at each of the ascending parameters
+U[0..N]: NMAT[i][0..p] at U[i].  SPN, an index-vector of at least N+1,
+receives the span of each parameter.  FLG is +left+ (u in [u_j, u_j+1)) or
++right+ (u in (u_j, u_j+1]).  Signals :ind-err for a negative N, :inp-err for
+parameters outside the domain, and as basis-find-span does.  Returns NMAT.
+NLib: N_BasisEvalArray."
+  (declare (type real-vector knots u) (type fixnum p n flg) (type real-matrix nmat)
+           (type index-vector spn))
+  (let ((m (1- (length knots)))
+        (js 0)
+        (je n))
+    (declare (type fixnum m js je))
+    (when (< n 0)
+      (nurbs-error :ind-err 'basis-eval-array))
+    (when (or (< (aref u 0) (aref knots 0)) (> (aref u n) (aref knots m)))
+      (nurbs-error :inp-err 'basis-eval-array))
+    ;; special cases for end values
+    (when (= (aref u 0) (aref knots p))
+      (setf (aref nmat 0 0) 1d0
+            (aref spn 0) p
+            js 1)
+      (do ((k 1 (1+ k))) ((> k p))
+        (declare (type fixnum k))
+        (setf (aref nmat 0 k) 0d0)))
+    (when (= (aref u n) (aref knots (- m p)))
+      (setf (aref nmat n p) 1d0
+            (aref spn n) (- m p 1)
+            je (1- n))
+      (dotimes (k p)
+        (setf (aref nmat n k) 0d0)))
+    (when (< je js)
+      (return-from basis-eval-array nmat))
+    (let ((i (basis-find-span knots p (aref u js) flg))
+          (left (make-real-vector (1+ p)))
+          (right (make-real-vector (1+ p))))
+      (declare (type fixnum i) (type real-vector left right) (dynamic-extent left right))
+      (fast
+        (do ((j js (1+ j))) ((> j je))
+          (declare (type fixnum j))
+          (setf (aref spn j) i
+                (aref nmat j 0) 1d0)
+          (let ((uj (aref u j)))
+            (declare (type double-float uj))
+            (do ((k 1 (1+ k))) ((> k p))
+              (declare (type fixnum k))
+              (setf (aref left k) (- uj (aref knots (- (+ i 1) k)))
+                    (aref right k) (- (aref knots (+ i k)) uj))
+              (let ((saved 0d0))
+                (declare (type double-float saved))
+                (dotimes (l k)
+                  (let ((temp (/ (aref nmat j l) (+ (aref right (1+ l)) (aref left (- k l))))))
+                    (declare (type double-float temp))
+                    (setf (aref nmat j l) (+ saved (* (aref right (1+ l)) temp))
+                          saved (* (aref left (- k l)) temp))))
+                (setf (aref nmat j k) saved))))
+          (cond ((= flg +left+)
+                 (do () ((not (and (< j je) (>= (aref u (1+ j)) (aref knots (1+ i)))))) (incf i)))
+                ((= flg +right+)
+                 (do () ((not (and (< j je) (> (aref u (1+ j)) (aref knots (1+ i)))))) (incf i)))))))
+    nmat))
+
 (defun basis-increase-knot-mult (knots p tm)
   "The knots to insert into the degree-P knot vector KNOTS to raise the
 multiplicity of each interior knot by TM, as a fresh real-vector (empty when

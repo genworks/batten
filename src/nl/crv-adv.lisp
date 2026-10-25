@@ -168,3 +168,232 @@ NLib: N_CrvPlanarOffsetGetDeriv."
     (vector-combine f1 d2 f2 d1 o)
     (setf (aref od 2 0) (aref o 0) (aref od 2 1) (aref o 1) (aref od 2 2) (aref o 2))
     od))
+
+;;; ------------------------------------------------------------- L2-g7
+
+(defun crv-offset-get-max-2nd-deriv (cur d nv)
+  "An upper bound on the magnitude of the second derivative of the offset by
+distance D of planar curve CUR (NV the normal to its plane), from sampling
+each Bezier segment at 10p+1 equally spaced parameters.  Signals as
+crv-decompose-bez and crv-planar-offset-get-deriv do.
+NLib: N_CrvOffsetGetMax2ndDeriv."
+  (declare (type curve cur) (type double-float d) (type point nv))
+  (let ((p (curve-degree cur)))
+    (declare (type fixnum p))
+    (multiple-value-bind (bez k) (crv-decompose-bez cur)
+      (declare (type simple-vector bez) (type fixnum k))
+      (let* ((duu 0d0)
+             (mu (* 10 p))
+             (u (make-real-vector (1+ mu)))
+             (od (make-point-array 3))
+             (c2 (make-point)))
+        (declare (type double-float duu) (type fixnum mu) (type real-vector u)
+                 (type point-array od) (type point c2))
+        (do ((i 0 (1+ i))) ((> i k))
+          (declare (type fixnum i))
+          (let* ((al (if (= i 0) 0 1))
+                 (b (svref bez i))
+                 (uk (curve-knots b))
+                 (r (1- (length uk)))
+                 (ui (/ (- (aref uk r) (aref uk 0)) (float mu 1d0))))
+            (declare (type fixnum al r) (type real-vector uk) (type double-float ui))
+            (setf (aref u 0) (aref uk 0)
+                  (aref u mu) (aref uk r))
+            (do ((a 1 (1+ a))) ((> a (1- mu)))
+              (declare (type fixnum a))
+              (setf (aref u a) (+ (aref uk 0) (* (float a 1d0) ui))))
+            (do ((a al (1+ a))) ((> a mu))
+              (declare (type fixnum a))
+              (crv-planar-offset-get-deriv b (aref u a) d nv +left+ od)
+              (setf (aref c2 0) (aref od 2 0) (aref c2 1) (aref od 2 1) (aref c2 2) (aref od 2 2))
+              (let ((muu (pt-magnitude c2)))
+                (declare (type double-float muu))
+                (when (> muu duu)
+                  (setf duu muu))))))
+        duu))))
+
+(defconstant +crv-adv--norem+ 1d25 "NOREM in NL_CrvAdv.cpp: a knot found not removable.")
+
+(defun crv-remove-all-knots (curp tol)
+  "A fresh copy of curve CURP with every knot removed whose removal keeps the
+accumulated error bound within TOL (scaled by the minimum weight for a
+rational curve), cheapest knot first; knots whose removal would push a weight
+outside [*wmin*, *wmax*] stay.  The C writes into a caller's curve, or into
+CURP itself; Batten returns the new curve.  NLib: N_CrvRemoveAllKnots."
+  (declare (type curve curp) (type double-float tol))
+  (let* ((n (curve-n curp))
+         (p (curve-degree curp))
+         (m (curve-m curp))
+         (ns n)
+         (rat nil)
+         (lam 0d0) (oml 0d0))
+    (declare (type fixnum n p m ns) (type double-float lam oml))
+    ;; removal tolerance for rational curves
+    (when (is-crv-rat curp)
+      (multiple-value-bind (wmin wmax pmin pmax) (crv-get-min-max-weights-and-pts curp)
+        (declare (type double-float wmin pmax) (ignore wmax pmin))
+        (setf tol (/ (* tol wmin) (+ 1d0 pmax))
+              rat t)))
+    (let* ((curq (crv-copy curp))
+           (qw (curve-cpoints curq))
+           (uq (curve-knots curq))
+           (rw (make-cpoint-array (1+ (* 2 p))))
+           (br (make-real-vector (1+ m)))
+           (sr (make-index-vector (1+ m)))
+           (er (make-real-vector (1+ m)))
+           (te (make-real-vector (1+ m))))
+      (declare (type curve curq) (type cpoint-array qw rw) (type real-vector uq br er te)
+               (type index-vector sr))
+      (dotimes (i (1+ m))
+        (setf (aref br i) +bigd+
+              (aref sr i) 0
+              (aref er i) 0d0))
+      ;; knot removal errors for each distinct knot
+      (let ((r (1+ p)))
+        (declare (type fixnum r))
+        (do () ((not (<= r n)))
+          (let ((i r))
+            (declare (type fixnum i))
+            (do () ((not (and (<= r n) (= (aref uq r) (aref uq (1+ r)))))) (incf r))
+            (setf (aref sr r) (1+ (- r i)))
+            (setf (aref br r) (crv-remove-knot-max-err curp r (aref sr r)))
+            (incf r))))
+      ;; try to remove each knot
+      (do () (nil)
+        (let ((b (aref br (1+ p)))
+              (s (aref sr (1+ p)))
+              (r (1+ p))
+              (k 0) (l 0)
+              (rmf t))
+          (declare (type double-float b) (type fixnum s r k l))
+          ;; knot with the smallest error
+          (do ((i (+ p 2) (1+ i))) ((> i (- m p 1)))
+            (declare (type fixnum i))
+            (when (< (aref br i) b)
+              (setf b (aref br i)
+                    s (aref sr i)
+                    r i)))
+          ;; no more removable knots: finished
+          (when (or (= b +bigd+) (= b +crv-adv--norem+))
+            (return))
+          ;; error of removal
+          (cond ((oddp (+ p s))
+                 (setf k (truncate (+ p s 1) 2)
+                       l (+ (- r k) p 1))
+                 (let ((alf (/ (- (aref uq r) (aref uq (- r k)))
+                               (- (aref uq (+ (- r k) p 1)) (aref uq (- r k)))))
+                       (bet (/ (- (aref uq r) (aref uq (+ (- r k) 1)))
+                               (- (aref uq (+ (- r k) p 2)) (aref uq (+ (- r k) 1))))))
+                   (declare (type double-float alf bet))
+                   (setf lam (/ alf (+ alf bet))
+                         oml (- 1d0 lam))))
+                (t
+                 (setf k (truncate (+ p s) 2)
+                       l (+ (- r k) p))))
+          (do ((i (- r k) (1+ i))) ((> i l))
+            (declare (type fixnum i))
+            (when (/= (aref uq i) (aref uq (1+ i)))
+              (setf (aref te i) (+ (aref er i) b))
+              (when (> (aref te i) tol)
+                (setf rmf nil)
+                (return))))
+          (cond
+            (rmf
+             ;; error test passed: update the error vector and remove the knot
+             (do ((i (- r k) (1+ i))) ((> i l))
+               (declare (type fixnum i))
+               (when (/= (aref uq i) (aref uq (1+ i)))
+                 (setf (aref er i) (aref te i))))
+             (let* ((fout (truncate (- (* 2 r) s p) 2))
+                    (first (- r p))
+                    (last (- r s))
+                    (off (1- first))
+                    (i first)
+                    (j last)
+                    (ii 1)
+                    (jj (- last off))
+                    (skip nil))
+               (declare (type fixnum fout first last off i j ii jj))
+               (%copy-c-pt-row qw off rw 0)
+               (%copy-c-pt-row qw (1+ last) rw (- (1+ last) off))
+               ;; new control points for one removal step
+               (fast
+                 (do () ((not (> (- j i) 0)))
+                   (let* ((alf (/ (- (aref uq (+ i p 1)) (aref uq i)) (- (aref uq r) (aref uq i))))
+                          (oma (- 1d0 alf))
+                          (bet (/ (- (aref uq (+ j p 1)) (aref uq j)) (- (aref uq (+ j p 1)) (aref uq r))))
+                          (omb (- 1d0 bet)))
+                     (declare (type double-float alf oma bet omb))
+                     (%combine-2-c-pt-rows alf qw i oma rw (1- ii) rw ii)
+                     (%combine-2-c-pt-rows bet qw j omb rw (1+ jj) rw jj)
+                     (incf i) (decf j) (incf ii) (decf jj))))
+               ;; disallowed weights
+               (when rat
+                 (let ((i first) (j last) (wmin +bigd+) (wmax +smad+))
+                   (declare (type fixnum i j) (type double-float wmin wmax))
+                   (do () ((not (> (- j i) 0)))
+                     (let ((wi (aref rw (- i off) 3))
+                           (wj (aref rw (- j off) 3)))
+                       (declare (type double-float wi wj))
+                       (when (< wi wmin) (setf wmin wi))
+                       (when (< wj wmin) (setf wmin wj))
+                       (when (> wi wmax) (setf wmax wi))
+                       (when (> wj wmax) (setf wmax wj))
+                       (incf i) (decf j)))
+                   (when (or (< wmin (the double-float *wmin*)) (> wmax (the double-float *wmax*)))
+                     (setf (aref br r) +crv-adv--norem+
+                           skip t))))
+               (unless skip
+                 ;; save new control points
+                 (when (oddp (+ p s))
+                   (%combine-2-c-pt-rows lam rw (1+ jj) oml rw (1- ii) rw (1+ jj)))
+                 (setf i first
+                       j last)
+                 (fast
+                   (do () ((not (> (- j i) 0)))
+                     (%copy-c-pt-row rw (- i off) qw i)
+                     (%copy-c-pt-row rw (- j off) qw j)
+                     (incf i) (decf j)))
+                 ;; shift down some parameters
+                 (when (= s 1)
+                   (setf (aref er (1- r)) (nl-max (aref er (1- r)) (aref er r))))
+                 (when (> s 1)
+                   (setf (aref sr (1- r)) (1- (aref sr r))))
+                 (do ((i (1+ r) (1+ i))) ((> i m))
+                   (declare (type fixnum i))
+                   (setf (aref br (1- i)) (aref br i)
+                         (aref sr (1- i)) (aref sr i)
+                         (aref er (1- i)) (aref er i)))
+                 ;; shift down knots and control points
+                 (fast
+                   (do ((i (1+ r) (1+ i))) ((> i m))
+                     (declare (type fixnum i))
+                     (setf (aref uq (1- i)) (aref uq i)))
+                   (do ((i (1+ fout) (1+ i))) ((> i n))
+                     (declare (type fixnum i))
+                     (%copy-c-pt-row qw i qw (1- i))))
+                 (decf n)
+                 (decf m)
+                 ;; no more internal knots: finished
+                 (when (= n p)
+                   (return))
+                 ;; update error bounds
+                 (let ((k (nl-max (- r p) (1+ p)))
+                       (l (nl-min n (- (+ r p) s))))
+                   (declare (type fixnum k l))
+                   (do ((i k (1+ i))) ((> i l))
+                     (declare (type fixnum i))
+                     (when (and (/= (aref uq i) (aref uq (1+ i))) (/= (aref br i) +crv-adv--norem+))
+                       (setf (aref br i) (crv-remove-knot-max-err curq i (aref sr i)))))))))
+            (t
+             ;; knot not removable
+             (setf (aref br r) +crv-adv--norem+)))))
+      ;; compact the output curve: it keeps the knots and control points left,
+      ;; as N_CrvSetSizeIndices records them in C
+      (when (< n ns)
+        (setf (curve-knots curq) (subseq uq 0 (1+ m))
+              (curve-cpoints curq) (let ((q (make-cpoint-array (1+ n))))
+                                     (dotimes (i (1+ n) q)
+                                       (%copy-c-pt-row qw i q i))))
+        (crv-compress curq))
+      curq)))

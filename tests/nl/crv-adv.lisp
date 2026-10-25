@@ -43,6 +43,71 @@
                  (let ((failed (c-flag-error-p (c-crv-non-rat-get-first-deriv cur d der sg))))
                    (values failed (unless failed (list (from-foreign der :curve)))))))))))
 
+;;; ------------------------------------------------------------- L2-g7
+
+(defun %crv-adv-planar-curve ()
+  "A random planar curve and the normal to its plane, as (values cur nv): 2D,
+or 3D in the z = 0 plane; now and then a straight line."
+  (let* ((two-d (zerop (rnd 2)))
+         (c (random-curve :two-d two-d :max-degree (if (zerop (rnd 15)) 1 5) :max-extra 8)))
+    (unless two-d
+      (let ((pw (curve-cpoints c)))
+        (dotimes (i (array-dimension pw 0)) (setf (aref pw i 2) 0d0))))
+    ;; now and then a degenerate curve: coincident control points (zero first
+    ;; derivative), which crv-planar-offset-get-deriv rejects
+    (when (zerop (rnd 25))
+      (let ((pw (curve-cpoints c)))
+        (dotimes (i (array-dimension pw 0))
+          (dotimes (k 4) (setf (aref pw i k) (aref pw 0 k))))))
+    (values c (case (rnd 3)
+                (0 (make-point 0d0 0d0 1d0))
+                (1 (make-point 0d0 0d0 -1d0))
+                (t (random-point 1d0))))))
+
+(define-oracle-test crv-offset-get-max-2nd-deriv (:file "crv-adv" :trials 1500)
+  (multiple-value-bind (c nv) (%crv-adv-planar-curve)
+    (let ((d (case (rnd 10) (0 0d0) (t (- (rnd 40d0) 20d0)))))
+      (agree (list :curve c :d d :n nv)
+             (list (batten::crv-offset-get-max-2nd-deriv c d nv))
+             (with-foreign ((cur c :curve) (np nv :point))
+               (with-scalars ((muu :double))
+                 (let ((failed (c-flag-error-p (c-crv-offset-get-max-2nd-deriv cur d np muu))))
+                   (values failed (unless failed (list (cffi:mem-ref muu :double)))))))))))
+
+(defun %crv-adv-removable-curve ()
+  "A random curve with knots inserted (so some are removable exactly), its
+control points now and then perturbed a little (removable within some
+tolerance)."
+  (let* ((c (random-curve :max-degree 5 :max-extra 6))
+         (p (curve-degree c))
+         (knots (curve-knots c))
+         (lo (aref knots 0))
+         (hi (aref knots (1- (length knots)))))
+    (when (plusp (rnd 3))
+      (let ((xs (sort (let (l)
+                        (dotimes (i (1+ (rnd 6)) l)
+                          (let ((x (+ lo (* (- hi lo) (+ 0.03d0 (rnd 0.94d0))))))
+                            (push x l)
+                            (when (and (> p 1) (zerop (rnd 4))) (push x l)))))
+                      #'<)))
+        (setf c (batten::crv-refine c (coerce xs 'batten::real-vector)))))
+    (when (zerop (rnd 3))
+      (let ((eps (expt 10d0 (- (rnd 10)))) (pw (curve-cpoints c)))
+        (dotimes (i (array-dimension pw 0))
+          (dotimes (k 2) (incf (aref pw i k) (* eps (- (rnd 2d0) 1d0)))))))
+    c))
+
+(define-oracle-test crv-remove-all-knots (:file "crv-adv" :trials 3000)
+  (let ((c (%crv-adv-removable-curve))
+        (tol (case (rnd 8) (0 0d0) (1 1d-9) (2 1d-6) (3 1d-3) (4 1d-1) (5 1d0) (6 30d0) (t 1d6))))
+    (agree (list :curve c :tol tol)
+           (list (batten::crv-remove-all-knots c tol))
+           (with-foreign ((cur c :curve))
+             (with-stacks (sq)
+               (with-foreign-out ((q :curve))
+                 (let ((failed (c-flag-error-p (c-crv-remove-all-knots cur tol q sq))))
+                   (values failed (unless failed (list (from-foreign q :curve)))))))))))
+
 (define-oracle-test crv-planar-offset-get-deriv (:file "crv-adv" :trials 8000)
   (let* ((two-d (zerop (rnd 2)))
          ;; now and then a straight line (zero curvature) or a degenerate curve
