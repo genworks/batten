@@ -427,3 +427,29 @@ NLib: N_SrfTranslate."
         (setf (aref pw i j 0) (aref cw 0) (aref pw i j 1) (aref cw 1)
               (aref pw i j 2) (aref cw 2) (aref pw i j 3) (aref cw 3))))
     sur))
+
+;;; ------------------------------------------------------------ level 2, group 2
+
+(defun srf-get-b-box (sur box)
+  "Write the min-max box of the Euclidean control net of surface SUR into BOX
+(a real-vector of 6: xl xr yb yt zn zf) and return BOX.
+NLib: N_SrfGetBBox."
+  (declare (type surface sur) (type real-vector box))
+  (let ((ntl (srf-get-e-net sur 0 (surface-n sur) 0 (surface-m sur))))
+    (declare (type point-net ntl))
+    (e-net-get-b-box ntl box)))
+
+(defun srf-reparam (sur us ue vs ve)
+  "Rescale the knot vectors of SUR in place to the rectangle [US,UE]x[VS,VE];
+a direction whose end parameters already match is left alone.  Returns SUR.
+NLib: N_SrfReparam."
+  (declare (type surface sur) (type double-float us ue vs ve))
+  (let ((r (make-real-vector 4)))
+    (declare (type real-vector r))
+    (create-rectangle r us ue vs ve)
+    (multiple-value-bind (u1 u2 v1 v2) (srf-get-parameter-bounds sur)
+      (declare (type double-float u1 u2 v1 v2))
+      (let ((scaledirs (+ (if (or (/= us u1) (/= ue u2)) +udir+ 0)
+                          (if (or (/= vs v1) (/= ve v2)) +vdir+ 0))))
+        (declare (type fixnum scaledirs))
+        (srf-reparam-to-interval sur r scaledirs)))))

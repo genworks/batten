@@ -429,3 +429,113 @@ NLib: N_CrvReparamToInterval."
               (declare (type fixnum j))
               (setf (aref u j) b)))))))
   cur)
+
+;;; ------------------------------------------------------------ level 2, group 2
+
+(defun crvs-make-rat-compatible (cur k)
+  "Make the curves CUR[0..K] (a simple-vector of curves, modified in place)
+rational-compatible: when any is rational every non-rational one gets unit
+weights, and when any is 3D every 2D one gets wz = 0.  A nil CUR is left
+alone.  Returns CUR.
+NLib: N_CrvsMakeRatCompatible."
+  (declare (type (or null simple-vector) cur) (type fixnum k))
+  (when (null cur)
+    (return-from crvs-make-rat-compatible nil))
+  (let ((allnra t) (all2d t))
+    (dotimes (i (1+ k))
+      (when (is-crv-rat (svref cur i))
+        (setf allnra nil)
+        (return)))
+    (dotimes (i (1+ k))
+      (when (crv-is-3d (svref cur i))
+        (setf all2d nil)
+        (return)))
+    (unless allnra
+      (dotimes (i (1+ k))
+        (unless (is-crv-rat (svref cur i))
+          (crv-non-rat-to-rat (svref cur i)))))
+    (unless all2d
+      (dotimes (i (1+ k))
+        (unless (crv-is-3d (svref cur i))
+          (crv-2d-to-3d (svref cur i))))))
+  cur)
+
+(defun crv-is-planar (cur tol pp nn)
+  "Whether curve CUR is planar to within TOL: returns +true+ with a point on
+the plane written into PP and its unit normal into NN, or +false+ for a curve
+with fewer than three control points, a degenerate curve, a line, or a curve
+some Euclidean control point of which lies farther than TOL from the
+candidate plane.  Signals :geo-err when the candidate normal cannot be
+normalized.
+NLib: N_CrvIsPlanar."
+  (declare (type curve cur) (type double-float tol) (type point pp nn))
+  (let ((n (curve-n cur))
+        (pw (curve-cpoints cur)))
+    (declare (type fixnum n) (type cpoint-array pw))
+    (when (< n 2)
+      (return-from crv-is-planar +false+))
+    (when (crv-is-degen cur)
+      (return-from crv-is-planar +false+))
+    (when (crv-is-line cur tol)
+      (return-from crv-is-planar +false+))
+    (let ((p (make-point-array (1+ n)))
+          (count1 0) (count2 0)
+          (ang 0d0) (d 0d0)
+          (cw (make-cpoint)) (q (make-point))
+          (cg (make-point)) (nn1 (make-point)) (nn2 (make-point))
+          (v1 (make-point)) (v2 (make-point)) (vn (make-point))
+          (pa (make-point)) (pb (make-point)) (pc (make-point)))
+      (declare (type point-array p) (type fixnum count1 count2)
+               (type double-float ang d)
+               (dynamic-extent cw q cg nn1 nn2 v1 v2 vn pa pb pc))
+      (dotimes (ii (1+ n))
+        (%row-c-pt pw ii cw)
+        (c-pt-to-pt-euclid cw q)
+        (%pt-row q p ii))
+      ;; candidate point on the plane and normal vector
+      (dotimes (ii (1+ n))
+        (%row-pt p ii q)
+        (sum-2-pts cg q cg)
+        (when (and (> ii 0) (< ii n))
+          (%row-pt p (1- ii) pa)
+          (%row-pt p ii pb)
+          (%row-pt p (1+ ii) pc)
+          (vector-dir pa pb v1)
+          (vector-dir pb pc v2)
+          ;; the C ignores N_VectorsAngle's error, leaving ANG as it was
+          (handler-case (setf ang (vectors-angle v1 v2))
+            (nurbs-error () nil))
+          (vector-cross v1 v2 vn)
+          (let ((bad (handler-case (progn (vector-normalize vn vn) nil)
+                         (nurbs-error () t))))
+            (unless bad
+              (cond ((> count1 0)
+                     (setf d (vector-dot vn nn1))
+                     (when (< d 0d0)
+                       (vector-scale vn -1d0 vn)))
+                    ((> count2 0)
+                     (setf d (vector-dot vn nn2))
+                     (when (< d 0d0)
+                       (vector-scale vn -1d0 vn)))))
+            (if (or bad (< ang 1d0) (> ang 179d0))
+                (unless bad
+                  (vector-sum nn2 vn nn2)
+                  (incf count2))
+                (progn
+                  (vector-sum nn1 vn nn1)
+                  (incf count1))))))
+      (when (= (+ count1 count2) 0)
+        (return-from crv-is-planar +false+))
+      (scale-pt (/ 1d0 (+ (float n 1d0) 1d0)) cg pp)
+      (if (> count1 0)
+          (vector-scale nn1 (/ 1d0 (float count1 1d0)) nn)
+          (vector-scale nn2 (/ 1d0 (float count2 1d0)) nn))
+      (vector-normalize nn nn)
+      ;; check flatness
+      (multiple-value-bind (a b c dd) (plane-pt-normal-to-implicit pp nn)
+        (declare (type double-float a b c dd))
+        (dotimes (ii (1+ n))
+          (%row-pt p ii q)
+          (when (> (abs (dist-signed-pt-plane a b c dd q)) tol)
+            (return-from crv-is-planar +false+))))
+      +true+)))
