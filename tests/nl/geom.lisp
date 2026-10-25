@@ -838,3 +838,47 @@ onto an end or beyond it, P on the segment, and P anywhere."
                                (list (from-foreign d :point) (cffi:mem-ref r :double)
                                      (cffi:mem-ref cfl :short))
                                (list (cffi:mem-ref cfl :short)))))))))))
+
+;;; ------------------------------------------------------------- L4-g1
+
+(define-oracle-test line-fit-pts (:file "geom" :trials 3000)
+  (let* ((count (1+ (rnd 20)))
+         (pts (random-points count (case (rnd 3) (0 1d0) (1 100d0) (t 1d4))))
+         (n (case (rnd 25) (0 -1) (t (1- count)))))
+    (case (rnd 7)
+      (0                                  ; collinear points
+       (let ((a (random-point)) (d (random-point 1d0)))
+         (dotimes (i count)
+           (let ((s (rnd-range -10d0 10d0)))
+             (dotimes (k 3) (setf (aref pts i k) (+ (aref a k) (* s (aref d k)))))))))
+      (1                                  ; nearly collinear
+       (let ((a (random-point)) (d (random-point 1d0)))
+         (dotimes (i count)
+           (let ((s (rnd-range -10d0 10d0)))
+             (dotimes (k 3) (setf (aref pts i k) (+ (aref a k) (* s (aref d k)) (rnd-range -1d-3 1d-3))))))))
+      (2                                  ; on an axis-parallel line
+       (let ((k (rnd 3)))
+         (dotimes (i count)
+           (dotimes (l 3) (unless (= l k) (setf (aref pts i l) (aref pts 0 l)))))))
+      (3                                  ; all the same point
+       (dotimes (i count) (dotimes (k 3) (setf (aref pts i k) (aref pts 0 k))))))
+    ;; 2D: every z +no-z+, or only the first.  (The C's restored +no-z+ in V
+    ;; makes the distance computation fail for every 2D input.)
+    (case (rnd 12)
+      (0 (dotimes (i count) (setf (aref pts i 2) +no-z+)))
+      (1 (setf (aref pts 0 2) +no-z+)))
+    (let ((lp (make-point-array count)))
+      (dotimes (i (array-total-size pts)) (setf (row-major-aref lp i) (row-major-aref pts i)))
+      (agree (list pts n)
+             (let ((c (make-point)) (v (make-point)))
+               (multiple-value-bind (era erm) (batten::line-fit-pts lp n c v)
+                 (list c v era erm lp)))
+             (with-foreign ((pp pts :point-array))
+               (with-foreign-out ((c :point) (v :point))
+                 (with-scalars ((era :double) (erm :double))
+                   (let ((err (c-flag-error-p (c-line-fit-pts pp n c v era erm))))
+                     (values err
+                             (unless err
+                               (list (from-foreign c :point) (from-foreign v :point)
+                                     (cffi:mem-ref era :double) (cffi:mem-ref erm :double)
+                                     (from-foreign pp :point-array count))))))))))))

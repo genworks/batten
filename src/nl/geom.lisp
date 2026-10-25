@@ -1076,3 +1076,50 @@ NLib: N_CalcCircCenterAndRadius."
         (declare (type double-float ra rb rc rr))
         (vector-copy cc d)
         (values rr +true+)))))
+
+;;; ------------------------------------------------------------- L4-g1
+
+(defun line-fit-pts (p n c v)
+  "The best fitting line to the points P[0..N], 2D or 3D: writes the centroid
+into C and the unit direction into V (line-fit-3d-pts) and returns the
+average and the maximum distance of the points from the line.  When P[0] is
+2D the z of every point is zeroed for the fit and set to +no-z+ afterwards,
+in P itself, and C and V come out 2D.  As in the C, a failure of the fit is
+ignored unless there are no points to measure (N below 0), when it is
+signaled after all.  Signals what dist-pt-inf-line signals.
+NLib: N_LineFitPts."
+  (declare (type point-array p) (type fixnum n) (type point c v))
+  (let ((is-2d nil)
+        (fit-error nil)
+        (lsg (%make-lineseg (make-point) (make-point) +unbounded+))
+        (pi* (make-point))
+        (da 0d0) (dm 0d0))
+    (declare (type double-float da dm) (type point pi*) (dynamic-extent pi*))
+    ;; 2D points: z temporarily 0
+    (when (= (aref p 0 2) +no-z+)
+      (setf is-2d t)
+      (dotimes (ii (1+ n))
+        (setf (aref p ii 2) 0d0)))
+    ;; the fit; the C keeps its error flag only when no distance follows
+    (handler-case (line-fit-3d-pts p n c v)
+      (nurbs-error (e) (setf fit-error e)))
+    (when is-2d
+      (dotimes (ii (1+ n))
+        (setf (aref p ii 2) +no-z+))
+      (setf (aref c 2) +no-z+
+            (aref v 2) +no-z+))
+    ;; the errors
+    (create-line-start-dir-vector lsg c v +unbounded+)
+    (setf da 0d0
+          dm -1d0)
+    (dotimes (ii (1+ n))
+      (%row-pt p ii pi*)
+      (let ((d (dist-pt-inf-line lsg pi*)))
+        (declare (type double-float d))
+        (when (> d dm)
+          (setf dm d))
+        (setf da (+ da d))))
+    (setf da (/ da (+ (float n 1d0) 1d0)))
+    (when (and fit-error (< n 0))
+      (error fit-error))
+    (values da dm)))

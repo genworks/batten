@@ -46,3 +46,42 @@
                    (values failed (unless failed
                                     (list (from-foreign sur :surface) (from-foreign cur :curve)
                                           (from-foreign wp :point)))))))))))
+
+;;; ------------------------------------------------------------- L4-g1
+
+(defun %sc-copy-curve (c)
+  "A fresh copy of curve C."
+  (%make-curve (curve-degree c) (copy-seq (curve-knots c))
+               (let* ((a (curve-cpoints c))
+                      (b (make-array (array-dimensions a) :element-type 'double-float)))
+                 (dotimes (i (array-total-size a) b)
+                   (setf (row-major-aref b i) (row-major-aref a i))))))
+
+(define-oracle-test create-ruled-srf-from-boundary-crvs (:file "srf-common" :trials 2000)
+  (let* ((two-d (zerop (rnd 5)))
+         (rat (rnd 4))                    ; 0 neither, 1 P, 2 Q, 3 both rational
+         (cp (random-curve :max-degree 4 :max-extra 6 :two-d two-d :rational (oddp rat)))
+         (cq (case (rnd 4)
+               ;; the same knots as P
+               (0 (let ((c (random-curve :max-degree 4 :max-extra 6 :two-d two-d :rational (>= rat 2))))
+                    (if (and (= (curve-degree c) (curve-degree cp)))
+                        c
+                        (let ((d (%sc-copy-curve cp)))
+                          (dotimes (i (1+ (curve-n d)) d)
+                            (let ((w (if (>= rat 2) (+ 0.2d0 (rnd 4.8d0)) 1d0)))
+                              (dotimes (k 3)
+                                (unless (= (aref (curve-cpoints d) i k) +no-z+)
+                                  (setf (aref (curve-cpoints d) i k) (* w (- (rnd 200d0) 100d0)))))
+                              (setf (aref (curve-cpoints d) i 3) (if (>= rat 2) w +no-w+))))))))
+               (t (random-curve :max-degree 4 :max-extra 6 :two-d two-d :rational (>= rat 2)))))
+         (dir (case (rnd 30) (0 7) (t (if (zerop (rnd 2)) +udir+ +vdir+)))))
+    (agree (list :p cp :q cq :dir dir)
+           (let ((lp (%sc-copy-curve cp)) (lq (%sc-copy-curve cq)))
+             (list (batten::create-ruled-srf-from-boundary-crvs lp lq dir) lp lq))
+           (with-foreign ((fp cp :curve) (fq cq :curve))
+             (with-stacks (sg)
+               (with-foreign-out ((sur :surface))
+                 (let ((failed (c-flag-error-p (c-create-ruled-srf-from-boundary-crvs fp fq dir sur sg))))
+                   (values failed (unless failed
+                                    (list (from-foreign sur :surface) (from-foreign fp :curve)
+                                          (from-foreign fq :curve)))))))))))
