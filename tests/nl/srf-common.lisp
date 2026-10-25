@@ -85,3 +85,65 @@
                    (values failed (unless failed
                                     (list (from-foreign sur :surface) (from-foreign fp :curve)
                                           (from-foreign fq :curve)))))))))))
+
+;;; ------------------------------------------------------------- L7-g1
+
+(defun %sc-revolve-inputs ()
+  "A random profile curve, axis and angle for N_CreateRevolvedSrf, as (values
+cur s tv al ctp): the curve rational or not, 2D or not, now and then with
+control points on the axis (all of them, rarely); the axis direction now and
+then a coordinate axis, rarely zero; the angle mostly in (0, 360], now and
+then a right angle multiple or outside; quadratic or quintic circles, quartic
+ones only below 241 degrees (the C's weight array holds 9), rarely an unknown
+kind."
+  (let* ((c (random-curve :max-degree 5 :max-extra 6))
+         (pw (curve-cpoints c))
+         (n+1 (array-dimension pw 0))
+         (s (if (zerop (rnd 4)) (make-point 0d0 0d0 0d0) (random-point 50d0)))
+         (tv (case (rnd 40)
+               (0 (make-point 0d0 0d0 0d0))
+               ((1 2 3 4 5 6) (make-point 0d0 0d0 (if (zerop (rnd 2)) 1d0 -3d0)))
+               ((7 8 9) (make-point 0d0 1d0 0d0))
+               (t (random-point 5d0))))
+         (al (case (rnd 12)
+               (0 90d0) (1 180d0) (2 270d0) (3 360d0)
+               (4 (rnd-range 0.1d0 5d0))
+               (5 (rnd-range 360d0 500d0))
+               (6 (- (rnd 100d0)))
+               (t (rnd-range 0.1d0 360d0))))
+         (ctp (case (rnd 40)
+                (0 1)
+                ((1 2 3 4) (if (and (> al 0d0) (< al 240d0)) +quartic+ +quadratic+))
+                (t (if (zerop (rnd 2)) +quadratic+ +quintic+)))))
+    ;; control points on the axis (in a 2D curve's z = 0 plane only when the
+    ;; axis lies in it)
+    (let ((on (case (rnd 12) (0 :all) ((1 2 3) :some) (t nil))))
+      (when on
+        (let ((two-d (= (aref pw 0 2) +no-z+)))
+          (dotimes (i n+1)
+            (when (or (eq on :all) (zerop (rnd 3)))
+              (let* ((k (rnd-range -20d0 20d0))
+                     (x (+ (aref s 0) (* k (aref tv 0))))
+                     (y (+ (aref s 1) (* k (aref tv 1))))
+                     (z (+ (aref s 2) (* k (aref tv 2))))
+                     (w (aref pw i 3))
+                     (ww (if (= w +no-w+) 1d0 w)))
+                (unless (and two-d (/= z 0d0))
+                  (setf (aref pw i 0) (* ww x)
+                        (aref pw i 1) (* ww y))
+                  (unless two-d (setf (aref pw i 2) (* ww z))))))))))
+    (values c s tv al ctp)))
+
+(define-oracle-test create-revolved-srf (:file "srf-common" :trials 1000)
+  (multiple-value-bind (c s tv al ctp) (%sc-revolve-inputs)
+    (agree (list :curve c :s s :t tv :al al :ctp ctp)
+           (let ((cc (%sc-copy-curve c)) (ss (copy-seq s)) (tt (copy-seq tv)))
+             ;; CUR is made rational and 3D in place; S and T come back unchanged
+             (list (batten::create-revolved-srf cc ss tt al ctp) cc ss tt))
+           (with-foreign ((cur c :curve) (sp s :point) (tp tv :point))
+             (with-stacks (sg)
+               (with-foreign-out ((sur :surface))
+                 (let ((failed (c-flag-error-p (c-create-revolved-srf cur sp tp al ctp sur sg))))
+                   (values failed (unless failed
+                                    (list (from-foreign sur :surface) (from-foreign cur :curve)
+                                          (from-foreign sp :point) (from-foreign tp :point)))))))))))
