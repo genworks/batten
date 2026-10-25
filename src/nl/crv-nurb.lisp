@@ -271,3 +271,56 @@ NLib: N_CrvGetCurvatureDeriv."
       (when (float-op-is-bad num den +division+)
         (nurbs-error :num-err 'crv-get-curvature-deriv))
       (/ num den))))
+
+;;; ------------------------------------------------------------ level 1, group 4
+
+(defun %reverse-knots (u m v)
+  "Write the knots U[0..M] reversed into V[0..M] (V may be U):
+V[i] = U[0] + U[M] - U[M-i], except that a knot equal to an end value takes
+the other end value exactly.  Returns V.  NLib's inline NI_ReverseKnots
+(NLI_Math.h)."
+  (declare (type real-vector u v) (type fixnum m))
+  (fast
+    (let* ((u0 (aref u 0)) (um (aref u m)) (c (+ u0 um)))
+      (declare (type double-float u0 um c))
+      (do ((i 0 (1+ i))) ((> i (truncate m 2)) v)
+        (declare (type fixnum i))
+        (let ((a (aref u i)) (b (aref u (- m i))))
+          (declare (type double-float a b))
+          (setf (aref v i) (if (= b um) u0 (if (= b u0) um (- c b))))
+          (setf (aref v (- m i)) (if (= a um) u0 (if (= a u0) um (- c a)))))))))
+
+(defun crv-reverse (cur-p &optional cur-q)
+  "Reverse the direction of curve CUR-P: the same curve traced out the other
+way.  With CUR-Q the very object CUR-P the reversal is done in place;
+otherwise (CUR-Q nil, NLib's NULL curve) a fresh reversed curve is made.
+Returns the reversed curve.
+NLib: N_CrvReverse."
+  (declare (type curve cur-p))
+  (let* ((n (curve-n cur-p)) (m (curve-m cur-p)) (p (curve-degree cur-p))
+         (pw (curve-cpoints cur-p)) (up (curve-knots cur-p))
+         (aw (make-cpoint)) (bw (make-cpoint)))
+    (declare (type fixnum n m p) (type cpoint-array pw) (type real-vector up)
+             (dynamic-extent aw bw))
+    (cond
+      ((eq cur-q cur-p)
+       (let ((k (truncate n 2)))
+         (declare (type fixnum k))
+         (do ((i 0 (1+ i))) ((> i k))
+           (declare (type fixnum i))
+           (%row-c-pt pw i aw)
+           (%row-c-pt pw (- n i) bw)
+           (swap-c-pts aw bw)
+           (%c-pt-row aw pw i)
+           (%c-pt-row bw pw (- n i))))
+       (%reverse-knots up m up)
+       cur-p)
+      (t
+       (let ((qw (make-cpoint-array (1+ n))) (uq (make-real-vector (1+ m))))
+         (declare (type cpoint-array qw) (type real-vector uq))
+         (dotimes (i (1+ n))
+           (%row-c-pt pw (- n i) aw)
+           (copy-c-pt aw bw)
+           (%c-pt-row bw qw i))
+         (%reverse-knots up m uq)
+         (%make-curve p uq qw))))))

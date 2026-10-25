@@ -438,3 +438,234 @@ NLib: N_CalcCircArcDerivs."
         (0 (setf alf gam bet del)))
       (combine-2-pts alf x bet y tmp)
       (setf (aref d i 0) (aref tmp 0) (aref d i 1) (aref tmp 1) (aref d i 2) (aref tmp 2)))))
+
+;;; ------------------------------------------------------------ level 1, group 4
+
+(defun vector-cross-ref (a b c)
+  "C = A x B, for vectors C passes by reference.
+NLib: N_VectorCrossRef."
+  (declare (type point a b c))
+  (with-point (ax ay az) a
+    (with-point (bx by bz) b
+      (set-point c (- (* ay bz) (* az by)) (- (* az bx) (* ax bz)) (- (* ax by) (* ay bx))))))
+
+(defun vector-directed-angle (r v)
+  "The directed angle in degrees, 0 to 360, from reference vector R to vector
+V in 2D: counterclockwise angles beyond 180 come out as 360 minus the
+unsigned angle.  Signals :geo-err when the cosine cannot be formed (a zero
+vector).
+NLib: N_VectorDirectedAngle."
+  (declare (type point r v))
+  (let ((dot (vector-dot r v))
+        (mr (vector-magnitude r))
+        (mv (vector-magnitude v)))
+    (declare (type double-float dot mr mv))
+    (when (float-op-is-bad dot (* mr mv) +division+)
+      (nurbs-error :geo-err 'vector-directed-angle))
+    (let ((arg (/ dot (* mr mv))))
+      (declare (type double-float arg))
+      (when (> arg 1d0) (setf arg 1d0))
+      (when (< arg -1d0) (setf arg -1d0))
+      (let* ((rad (the double-float (acos arg)))
+             (ang (* 180d0 (/ rad +pi+)))
+             (n (make-point)))
+        (declare (type double-float rad ang) (dynamic-extent n))
+        (vector-perpendicular r n)
+        (setf dot (vector-dot v n))
+        (when (< dot 0d0)
+          (setf ang (- 360d0 ang)))
+        ang))))
+
+(defun isect-line-line (ls1 ls2 p)
+  "Intersect lines LS1 and LS2 in the least-squares sense: write the midpoint of
+the closest points into P.  Returns (values flg t1 t2), FLG +true+ when the
+lines meet within their bounds and +false+ when they are parallel or a bounded
+line misses; T1 and T2 (the parameters on each line) and P are written only
+when FLG is +true+, and T1 and T2 are 0 otherwise.  Signals :geo-err for a
+zero direction and :num-err when a division fails.
+NLib: N_IsectLineLine."
+  (declare (type lineseg ls1 ls2) (type point p))
+  (let ((p21 (make-point)) (v1 (make-point)) (v2 (make-point))
+        (p1 (make-point)) (p2 (make-point)))
+    (declare (dynamic-extent p21 v1 v2 p1 p2))
+    (let* ((bd1 (line-get-data ls1 p1 v1))
+           (bd2 (line-get-data ls2 p2 v2))
+           (m1 (vector-normalize v1 v1))
+           (m2 (vector-normalize v2 v2)))
+      (declare (type fixnum bd1 bd2) (type double-float m1 m2))
+      (vector-dir p1 p2 p21)
+      (let* ((a00 (vector-dot v1 v1))
+             (a01 (vector-dot v1 v2))
+             (a11 (vector-dot v2 v2))
+             (b0 (vector-dot v1 p21))
+             (b1 (vector-dot v2 p21))
+             (den (- (* a00 a11) (* a01 a01))))
+        (declare (type double-float a00 a01 a11 b0 b1 den))
+        (when (< (abs den) (the double-float *zctl*))
+          (return-from isect-line-line (values +false+ 0d0 0d0)))
+        (let ((numa (- (* b0 a11) (* b1 a01)))
+              (numb (- (* b0 a01) (* b1 a00))))
+          (declare (type double-float numa numb))
+          (when (or (float-op-is-bad numa den +division+) (float-op-is-bad numb den +division+))
+            (nurbs-error :num-err 'isect-line-line))
+          (let ((alpha (/ numa den))
+                (beta (/ numb den)))
+            (declare (type double-float alpha beta))
+            (when (or (float-op-is-bad alpha m1 +division+) (float-op-is-bad beta m2 +division+))
+              (nurbs-error :num-err 'isect-line-line))
+            (let ((u1 (/ alpha m1))
+                  (u2 (/ beta m2)))
+              (declare (type double-float u1 u2))
+              (when (and (= bd1 +true+) (or (< u1 0d0) (> u1 1d0)))
+                (return-from isect-line-line (values +false+ 0d0 0d0)))
+              (when (and (= bd2 +true+) (or (< u2 0d0) (> u2 1d0)))
+                (return-from isect-line-line (values +false+ 0d0 0d0)))
+              (vector-pt-along-vector p1 alpha v1 p1)
+              (vector-pt-along-vector p2 beta v2 p2)
+              (combine-2-pts 0.5d0 p1 0.5d0 p2 p)
+              (values +true+ u1 u2))))))))
+
+(defun isect-line-plane (lsg pln p)
+  "Intersect line LSG with plane PLN, writing the intersection into P.  Returns
+(values flg t): FLG +true+ when they meet, +false+ when they are parallel or a
+bounded line misses; T is the line parameter, written (as the C writes it)
+whenever they are not parallel and 0 when they are; P is written only when
+FLG is +true+.  Signals :geo-err for a zero direction or normal and :num-err
+when a division fails.
+NLib: N_IsectLinePlane."
+  (declare (type lineseg lsg) (type plane pln) (type point p))
+  (let ((pl (make-point)) (v (make-point)) (n (make-point))
+        (q (make-point)) (r (make-point)))
+    (declare (dynamic-extent pl v n q r))
+    (let ((bnd (line-get-data lsg q v)))
+      (declare (type fixnum bnd))
+      (plane-get-data pln r n)
+      (let ((mv (vector-normalize v v)))
+        (declare (type double-float mv))
+        (vector-normalize n n)
+        (vector-dir q r pl)
+        (let ((den (vector-dot v n)))
+          (declare (type double-float den))
+          (when (< (abs den) (the double-float *ltol*))
+            (return-from isect-line-plane (values +false+ 0d0)))
+          (let ((num (vector-dot pl n)))
+            (declare (type double-float num))
+            (when (float-op-is-bad num den +division+)
+              (nurbs-error :num-err 'isect-line-plane))
+            (let ((alpha (/ num den)))
+              (declare (type double-float alpha))
+              (when (float-op-is-bad alpha mv +division+)
+                (nurbs-error :num-err 'isect-line-plane))
+              (let ((tt (/ alpha mv)))
+                (declare (type double-float tt))
+                (when (and (= bnd +true+) (or (< tt 0d0) (> tt 1d0)))
+                  (return-from isect-line-plane (values +false+ tt)))
+                (vector-pt-along-vector q alpha v p)
+                (values +true+ tt)))))))))
+
+(defun dist-c-polygon (pw n)
+  "The length of the control polygon PW[0..N], summing the Euclidean distances
+of consecutive control points.
+NLib: N_DistCPolygon."
+  (declare (type cpoint-array pw) (type fixnum n))
+  (let ((len 0d0) (a (make-cpoint)) (b (make-cpoint)))
+    (declare (type double-float len) (dynamic-extent a b))
+    (do ((i 1 (1+ i))) ((> i n) len)
+      (declare (type fixnum i))
+      (%row-c-pt pw (1- i) a)
+      (%row-c-pt pw i b)
+      (incf len (dist-cpt-cpt a b)))))
+
+(defun dist-signed-pt-plane (a b c d p)
+  "The signed distance of point P from the plane a*x + b*y + c*z + d = 0, (A B
+C) its unit normal.
+NLib: N_DistSignedPtPlane."
+  (declare (type double-float a b c d) (type point p))
+  (multiple-value-bind (x y z) (pt-to-xyz p)
+    (declare (type double-float x y z))
+    (+ (+ (+ (* a x) (* b y)) (* c z)) d)))
+
+(defun b-box-get-diagonal (box)
+  "The length of the diagonal of min-max box BOX.
+NLib: N_BBoxGetDiagonal."
+  (declare (type real-vector box))
+  (let ((pll (make-point)) (pur (make-point)))
+    (declare (dynamic-extent pll pur))
+    (multiple-value-bind (xl xr yb yt zn zf) (get-b-box-data box)
+      (declare (type double-float xl xr yb yt zn zf))
+      (pt-from-xyz xl yb zn pll)
+      (pt-from-xyz xr yt zf pur)
+      (dist-pt-pt pll pur))))
+
+(defun create-line-pt-pt (lsg ps pe flg)
+  "Make LSG the line from PS to PE (direction PE - PS) with bounding flag FLG
+(+bounded+ or +unbounded+).  Returns LSG.
+NLib: N_CreateLinePtPt."
+  (declare (type lineseg lsg) (type point ps pe) (type fixnum flg))
+  (let ((v (make-point)) (s (make-point)))
+    (declare (dynamic-extent v s))
+    (vector-copy ps s)
+    (vector-dir s pe v)
+    (create-line-start-dir-vector lsg s v flg)))
+
+(defun plane-pt-normal-to-implicit (p n)
+  "The normalized implicit equation a*x + b*y + c*z + d = 0 of the plane
+through P with normal N, as (values a b c d).  Signals :geo-err for a zero
+normal.
+NLib: N_PlanePtNormalToImplicit."
+  (declare (type point p n))
+  (let ((nn (make-point)))
+    (declare (dynamic-extent nn))
+    (vector-copy n nn)
+    (vector-normalize-ref nn)
+    (multiple-value-bind (a b c) (pt-to-xyz nn)
+      (declare (type double-float a b c))
+      (let ((dot (vector-dot p nn)))
+        (declare (type double-float dot))
+        (values a b c (- dot))))))
+
+(defun line-implicit-to-pt-vector (a b c p v)
+  "Convert the 2D line a*x + b*y + c = 0 to a point P on it and its unit
+direction V, both written.  Returns P.  Signals :geo-err when A and B are
+both zero and :num-err when the division fails.
+NLib: N_LineImplicitToPtVector."
+  (declare (type double-float a b c) (type point p v))
+  (pt-from-xyz b (- a) 0d0 v)
+  (vector-normalize-ref v)
+  (let ((x 0d0) (y 0d0))
+    (declare (type double-float x y))
+    (if (> (abs a) (abs b))
+        (let ((num (- (+ (* b b) c))))
+          (declare (type double-float num))
+          (when (float-op-is-bad num a +division+)
+            (nurbs-error :num-err 'line-implicit-to-pt-vector))
+          (setf x (/ num a) y b))
+        (let ((num (- (+ (* a a) c))))
+          (declare (type double-float num))
+          (when (float-op-is-bad num b +division+)
+            (nurbs-error :num-err 'line-implicit-to-pt-vector))
+          (setf x a y (/ num b))))
+    (pt-from-xyz x y 0d0 p)))
+
+(defun pts-are-colinear (a b c tol)
+  "True when points A, B and C are collinear within TOL: two of them closer
+than TOL, or the third point's perpendicular distance from the longest side
+below TOL (a point projecting outside that side counts as collinear, as in
+the C).  A failed distance computation counts as not collinear.
+NLib: N_PtsAreColinear."
+  (declare (type point a b c) (type double-float tol))
+  (let ((dab (dist-sq-pt-pt a b))
+        (dbc (dist-sq-pt-pt b c))
+        (dca (dist-sq-pt-pt c a))
+        (tol2 (* tol tol)))
+    (declare (type double-float dab dbc dca tol2))
+    (flet ((perp-below-tol (q s e)
+             (let ((d (handler-case (dist-perp-pt-line-seg q s e)
+                        (nurbs-error () (return-from pts-are-colinear nil)))))
+               (declare (type double-float d))
+               (< d tol))))
+      (cond ((or (< dab tol2) (< dbc tol2) (< dca tol2)) t)
+            ((and (> dab dbc) (> dab dca)) (perp-below-tol c a b))
+            ((and (> dbc dca) (> dbc dab)) (perp-below-tol a b c))
+            ((and (> dca dab) (> dca dbc)) (perp-below-tol b c a))
+            (t nil)))))
