@@ -391,3 +391,41 @@ fewer than three control points."
                      (values (c-flag-error-p rc)
                              (list (cffi:mem-ref flt :short)
                                    (from-foreign pp :point) (from-foreign nn :point)))))))))))
+
+;;; ------------------------------------------------------------ level 7, group 2
+
+(defun %coincident-partner (c)
+  "A curve to compare with C: a copy, a refined or degree-elevated copy (the
+same curve), a copy nudged by a small amount, a copy on another domain, or an
+unrelated curve."
+  (let ((d (batten::crv-copy c)))
+    (case (rnd 8)
+      (0 d)
+      (1 (let* ((u (curve-knots d))
+                (lo (aref u 0)) (hi (aref u (1- (length u))))
+                (x (make-real-vector (1+ (rnd 3)))))
+           (dotimes (i (length x)) (setf (aref x i) (rnd-range (+ lo (* 0.05d0 (- hi lo))) (- hi (* 0.05d0 (- hi lo))))))
+           (batten::crv-refine d (sort x #'<))))
+      (2 (if (< (curve-degree d) 7) (batten::crv-elevate-degree d (1+ (rnd 2))) d))
+      (3 (let ((pw (curve-cpoints d)) (eps (case (rnd 3) (0 1d-9) (1 1d-6) (t 1d-3))))
+           (setf (aref pw (rnd (array-dimension pw 0)) 0)
+                 (+ (aref pw (rnd (array-dimension pw 0)) 0) eps))
+           d))
+      (4 (let ((u (curve-knots d)))
+           ;; another domain: the compatible maker moves both to [0, 1]
+           (dotimes (i (length u)) (setf (aref u i) (+ (* 2d0 (aref u i)) 1d0)))
+           d))
+      (5 (random-curve :rational (batten::is-crv-rat c) :two-d (not (batten::crv-is-3d c))))
+      (t (random-curve)))))
+
+(define-oracle-test crvs-are-coincident (:file "crv-basic" :trials 2000)
+  (let* ((c (random-curve :max-degree 6 :max-extra 8))
+         (d (%coincident-partner c))
+         (tol (case (rnd 5) (0 0d0) (1 1d-9) (2 1d-6) (3 1d-2) (t 10d0))))
+    (agree (list :cur-p c :cur-q d :tol tol)
+           (let ((cp (batten::crv-copy c)) (cq (batten::crv-copy d)))
+             (list (if (batten::crvs-are-coincident cp cq tol) 1 0) cp cq))
+           (with-foreign ((cp c :curve) (cq d :curve))
+             (with-stacks (s)
+               (let ((r (c-crvs-are-coincident cp cq tol s)))
+                 (values nil (list r (from-foreign cp :curve) (from-foreign cq :curve)))))))))
