@@ -155,3 +155,76 @@ with knots[r] /= knots[r+1], and its multiplicity; NIL when there is none."
                    (if (c-flag-error-p (c-srf-remove-one-knot sp r mult f l dir cmr))
                        (values t nil)
                        (values nil (list (cffi:mem-ref cmr :double)))))))))))
+
+(defun %patch-param (knots)
+  "A parameter for a patch corner in the domain of KNOTS: inside, an end, an
+existing knot, or within the C's 1e-8 snapping tolerance of a knot (an end
+knot nudged outward snaps back onto it)."
+  (let* ((lo (aref knots 0)) (hi (aref knots (1- (length knots))))
+         (k (aref knots (rnd (length knots)))))
+    (case (rnd 12)
+      (0 lo)
+      (1 hi)
+      ((2 3) k)
+      ((4 5) (let ((x (+ k (- (rnd 1.8d-8) 0.9d-8))))
+               ;; an end knot nudged outward snaps back; keep others inside
+               (if (or (= k lo) (= k hi)) x (max lo (min hi x)))))
+      (t (rnd-range lo hi)))))
+
+(defun %patch-interval (knots)
+  "Two corner parameters (values a b) in the domain of KNOTS, usually a < b,
+now and then reversed or equal (NLib refuses those)."
+  (let ((a (%patch-param knots)) (b (%patch-param knots)))
+    ;; equal corners are refused; draw again so most trials get a patch
+    (dotimes (i 4)
+      (when (< (abs (- a b)) 2d-8)
+        (setf b (%patch-param knots))))
+    (case (rnd 40)
+      (0 (values a a))
+      (1 (values (max a b) (min a b)))
+      (t (values (min a b) (max a b))))))
+
+(define-oracle-test srf-extract-patch (:file "srf-tool" :trials 6000)
+  (let ((s (%srf-tool-surface)))
+    (multiple-value-bind (ul ur) (%patch-interval (surface-knots-u s))
+      (multiple-value-bind (vl vr) (%patch-interval (surface-knots-v s))
+        (agree (list :surface s :ul ul :ur ur :vl vl :vr vr)
+               (list (batten::srf-extract-patch s ul ur vl vr))
+               (with-foreign ((sp s :surface))
+                 (with-foreign-out ((sq :surface))
+                   (with-stacks (stp)
+                     (with-stacks (stq)
+                       (if (c-flag-error-p (c-srf-extract-patch sp ul ur vl vr sq stp stq))
+                           (values t nil)
+                           (values nil (list (from-foreign sq :surface)))))))))))))
+
+(defun %spoil-knots (knots p)
+  "A copy of the clamped degree-P KNOTS whose start multiplicity is P, which
+N_KnotVectorIsValid refuses."
+  (let ((k (copy-seq knots)))
+    (setf (aref k p) (* 0.5d0 (+ (aref k p) (aref k (1+ p)))))
+    k))
+
+(define-oracle-test srf-elevate-degree (:file "srf-tool" :trials 4000)
+  (let* ((s0 (%srf-tool-surface))
+         (dir (%srf-tool-dir))
+         (tt (case (rnd 30) (0 -1) (1 (- 18 (rnd 2))) (t (rnd 4))))
+         (s (if (zerop (rnd 25))
+                (batten::%make-surface (surface-degree-u s0) (surface-degree-v s0)
+                                       (if (= dir batten::+vdir+)
+                                           (surface-knots-u s0)
+                                           (%spoil-knots (surface-knots-u s0) (surface-degree-u s0)))
+                                       (if (= dir batten::+vdir+)
+                                           (%spoil-knots (surface-knots-v s0) (surface-degree-v s0))
+                                           (surface-knots-v s0))
+                                       (surface-cpoints s0))
+                s0)))
+    (agree (list :surface s :t tt :dir dir)
+           (list (batten::srf-elevate-degree s tt dir))
+           (with-foreign ((sp s :surface))
+             (with-foreign-out ((sq :surface))
+               (with-stacks (stp)
+                 (with-stacks (stq)
+                   (if (c-flag-error-p (c-srf-elevate-degree sp tt dir sq stp stq))
+                       (values t nil)
+                       (values nil (list (from-foreign sq :surface)))))))))))
