@@ -7,6 +7,110 @@
 
 (in-package :batten)
 
+(defun srf-eval-pt-grid (sur u v nn mm ufl vfl s)
+  "Write the points of surface SUR at the grid (U[i], V[j]), i <= NN, j <= MM,
+into S, a point-net the caller allocates of at least (1+ NN) by (1+ MM):
+S[i][j] is the point at (U[i], V[j]).  U and V ascend; UFL and VFL are +left+
+or +right+.  The net is contracted first in whichever direction costs fewer
+operations.  Signals :ind-err for a negative NN or MM, :par-err when U or V
+leaves the domain, and as basis-eval-array does.  Returns S.
+NLib: N_SrfEvalPtGrid."
+  (declare (type surface sur) (type real-vector u v) (type fixnum nn mm ufl vfl)
+           (type point-net s))
+  (let* ((nu (surface-n sur)) (mv (surface-m sur))
+         (pw (surface-cpoints sur))
+         (p (surface-degree-u sur)) (q (surface-degree-v sur))
+         (uk (surface-knots-u sur)) (vk (surface-knots-v sur))
+         (r (1- (length uk))) (ss (1- (length vk))))
+    (declare (type fixnum nu mv p q r ss) (type cpoint-net pw) (type real-vector uk vk))
+    ;; check parameters
+    (when (or (< nn 0) (< mm 0))
+      (nurbs-error :ind-err 'srf-eval-pt-grid))
+    (when (or (< (aref u 0) (aref uk 0)) (> (aref u nn) (aref uk r)))
+      (nurbs-error :par-err 'srf-eval-pt-grid))
+    (when (or (< (aref v 0) (aref vk 0)) (> (aref v mm) (aref vk ss)))
+      (nurbs-error :par-err 'srf-eval-pt-grid))
+    ;; non-vanishing B-splines
+    (let ((bu (make-real-matrix (1+ nn) (1+ p)))
+          (bv (make-real-matrix (1+ mm) (1+ q)))
+          (usp (make-index-vector (1+ nn)))
+          (vsp (make-index-vector (1+ mm))))
+      (declare (type real-matrix bu bv) (type index-vector usp vsp))
+      (basis-eval-array uk p u nn ufl bu usp)
+      (basis-eval-array vk q v mm vfl bv vsp)
+      (let ((tw (make-cpoint-array (1+ (nl-max nu mv))))
+            (sw (make-cpoint))
+            (pt (make-point)))
+        (declare (type cpoint-array tw) (type cpoint sw) (type point pt))
+        (macrolet ((blend (alpha ax ay az aw bx by bz bw)
+                     ;; N_VectorBlendCPt: B = B + alpha*A, honoring A's NOZ and NOW
+                     `(let ((al ,alpha) (x ,ax) (y ,ay) (z ,az) (w ,aw))
+                        (declare (type double-float al x y z w))
+                        (setf ,bx (+ ,bx (* al x))
+                              ,by (+ ,by (* al y))
+                              ,bz (if (/= z +no-z+) (+ ,bz (* al z)) +no-z+)
+                              ,bw (if (/= w +no-w+) (+ ,bw (* al w)) +no-w+)))))
+          (flet ((out (n m)
+                   (declare (type fixnum n m))
+                   (c-pt-to-pt-euclid sw pt)
+                   (%pt-net pt s n m)))
+            (if (< (* mm (+ (* nu q) (* nn p))) (* nn (+ (* mv p) (* mm q))))
+                ;; for every grid v point
+                (dotimes (m (1+ mm))
+                  (let ((s0 (- (aref vsp m) q)))
+                    (declare (type fixnum s0))
+                    ;; Tw[i] = Sum_j NV[m][j] * Pw[i][s0+j]
+                    (fast
+                      (do ((i (- (aref usp 0) p) (1+ i))) ((> i (aref usp nn)))
+                        (declare (type fixnum i))
+                        (setf (aref tw i 0) 0d0 (aref tw i 1) 0d0
+                              (aref tw i 2) 0d0 (aref tw i 3) 0d0)
+                        (dotimes (j (1+ q))
+                          (blend (aref bv m j)
+                                 (aref pw i (+ s0 j) 0) (aref pw i (+ s0 j) 1)
+                                 (aref pw i (+ s0 j) 2) (aref pw i (+ s0 j) 3)
+                                 (aref tw i 0) (aref tw i 1) (aref tw i 2) (aref tw i 3)))))
+                    ;; for every grid u point: S[n][m] = Sum_i NU[n][i] * Tw[r0+i]
+                    (dotimes (n (1+ nn))
+                      (let ((r0 (- (aref usp n) p)))
+                        (declare (type fixnum r0))
+                        (fast
+                          (setf (aref sw 0) 0d0 (aref sw 1) 0d0 (aref sw 2) 0d0 (aref sw 3) 0d0)
+                          (dotimes (i (1+ p))
+                            (blend (aref bu n i)
+                                   (aref tw (+ r0 i) 0) (aref tw (+ r0 i) 1)
+                                   (aref tw (+ r0 i) 2) (aref tw (+ r0 i) 3)
+                                   (aref sw 0) (aref sw 1) (aref sw 2) (aref sw 3))))
+                        (out n m)))))
+                ;; for every grid u point
+                (dotimes (n (1+ nn))
+                  (let ((r0 (- (aref usp n) p)))
+                    (declare (type fixnum r0))
+                    ;; Tw[j] = Sum_i NU[n][i] * Pw[r0+i][j]
+                    (fast
+                      (do ((j (- (aref vsp 0) q) (1+ j))) ((> j (aref vsp mm)))
+                        (declare (type fixnum j))
+                        (setf (aref tw j 0) 0d0 (aref tw j 1) 0d0
+                              (aref tw j 2) 0d0 (aref tw j 3) 0d0)
+                        (dotimes (i (1+ p))
+                          (blend (aref bu n i)
+                                 (aref pw (+ r0 i) j 0) (aref pw (+ r0 i) j 1)
+                                 (aref pw (+ r0 i) j 2) (aref pw (+ r0 i) j 3)
+                                 (aref tw j 0) (aref tw j 1) (aref tw j 2) (aref tw j 3)))))
+                    ;; S[n][m] = Sum_j NV[m][j] * Tw[s0+j]
+                    (dotimes (m (1+ mm))
+                      (let ((s0 (- (aref vsp m) q)))
+                        (declare (type fixnum s0))
+                        (fast
+                          (setf (aref sw 0) 0d0 (aref sw 1) 0d0 (aref sw 2) 0d0 (aref sw 3) 0d0)
+                          (dotimes (j (1+ q))
+                            (blend (aref bv m j)
+                                   (aref tw (+ s0 j) 0) (aref tw (+ s0 j) 1)
+                                   (aref tw (+ s0 j) 2) (aref tw (+ s0 j) 3)
+                                   (aref sw 0) (aref sw 1) (aref sw 2) (aref sw 3))))
+                        (out n m)))))))))))
+  s)
+
 (defun srf-eval-pt-normal-deriv (sur u v ufl vfl nd)
   "Write the first and second derivatives of the unit normal of surface SUR
 at (U, V) into ND, a point-net of at least 3 by 3: ND[1][0] = N_u,
