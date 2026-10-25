@@ -2,14 +2,24 @@
 ;;;; SPDX-FileCopyrightText: Copyright (c) 2026 Genworks International
 ;;;; SPDX-License-Identifier: Apache-2.0
 ;;;;
-;;;; Ported from NLib's NL_DataStruct.h, NL_Geometry.h and NL_Nurbsdef.h
-;;;; (usd-brep source/SMLib/inc).  Modified: Lisp structures and conditions
-;;;; in place of C structs, error flags and memory stacks.
+;;;; Ported from NLib's NL_DataStruct.h, NL_Geometry.h, NL_Nurbsdef.h and
+;;;; NL_Globals.cpp (usd-brep source/SMLib).  Modified: Lisp structures,
+;;;; arrays and conditions in place of C structs, error flags and memory
+;;;; stacks.  PORTING.md describes how each C type maps.
 
 (in-package :batten)
 
+;;; ------------------------------------------------------------------ types
+
 (deftype real-vector () '(simple-array double-float (*)))
 (deftype real-matrix () '(simple-array double-float (* *)))
+(deftype point () '(simple-array double-float (3)))        ; NL_POINT, NL_VECTOR
+(deftype cpoint () '(simple-array double-float (4)))       ; NL_CPOINT (wx wy wz w)
+(deftype point-array () '(simple-array double-float (* 3)))   ; NL_POINT[], NL_EPOLYGON
+(deftype cpoint-array () '(simple-array double-float (* 4)))  ; NL_CPOINT[], NL_CPOLYGON
+(deftype point-net () '(simple-array double-float (* * 3)))   ; NL_POINT**, NL_ENET
+(deftype cpoint-net () '(simple-array double-float (* * 4)))  ; NL_CPOINT**, NL_CNET
+(deftype index-vector () '(simple-array fixnum (*)))         ; NL_INDEX[]
 (deftype index () '(integer 0 #.(1- array-dimension-limit)))
 
 (defmacro fast (&body body)
@@ -17,71 +27,180 @@
 arguments are already declared or checked, as NLib's C trusts its inputs."
   `(locally (declare (optimize (speed 3) (safety 0) (debug 0))) ,@body))
 
-;;; NL_MAXDEG and NL_MAXDER.
-(defconstant +max-degree+ 17)
-(defconstant +max-derivative+ 4)
+;;; ---------------------------------------------- constants not in constants.lisp
 
-;;; NL_NOZ and NL_NOW: a control point whose z is +no-z+ is 2D, and one whose
-;;; w is +no-w+ is non-rational.  Kept as NLib has them, inside the
-;;; coordinate arrays, so that every ported routine reads them as its C
-;;; source does.
+;;; NL_BIGD, NL_SMAD; NL_NOZ marks a 2D control point (z = +no-z+), NL_NOW a
+;;; non-rational one (w = +no-w+).  They stay inside the coordinate arrays,
+;;; as in NLib, so every ported routine reads them as its C source does.
+(defconstant +bigd+ most-positive-double-float)
+(defconstant +smad+ least-positive-normalized-double-float)
 (defconstant +no-z+ most-positive-double-float)
 (defconstant +no-w+ most-negative-double-float)
+(defconstant +infinite+ most-positive-double-float)
+(defconstant +undefined+ most-negative-double-float)
 
-;;; NL_SMAD and NL_BIGD.
-(defconstant +smallest-double+ least-positive-normalized-double-float)
-(defconstant +biggest-double+ most-positive-double-float)
+;;; NL_PascalTri: binomial coefficients through degree 17.
+(defconstant +pascal-tri+
+  (if (boundp '+pascal-tri+)
+      (symbol-value '+pascal-tri+)
+      (let ((a (make-array '(18 18) :element-type 'fixnum :initial-element 0)))
+        (dotimes (k 18 a)
+          (setf (aref a k 0) 1)
+          (do ((j 1 (1+ j))) ((> j k))
+            (setf (aref a k j) (+ (aref a (1- k) (1- j))
+                                  (if (< j k) (aref a (1- k) j) 0)))))))
+  "NLib's NL_PascalTri[18][18].")
+
+;;; ----------------------------------------------------- NLib's global tolerances
+
+;;; NL_PUBLIC variables in NL_Globals.cpp: ported routines read these.
+(defvar *mtol* 1d-7 "NL_MTOL, model space tolerance.")
+(defvar *ptol* 1d-12 "NL_PTOL, parameter space tolerance.")
+(defvar *wtol* 1d-3 "NL_WTOL, weight tolerance.")
+(defvar *ltol* 1d-9 "NL_LTOL, parallel line tolerance (radians).")
+(defvar *ludt* 1d-9 "NL_LUDT, LU-decomposition tolerance.")
+(defvar *zdtl* 1d-8 "NL_ZDTL, zero discriminant tolerance.")
+(defvar *zctl* 1d-12 "NL_ZCTL, zero coefficient tolerance.")
+(defvar *wmin* 1d-3 "NL_WMIN, minimum weight.")
+(defvar *wmax* 100d0 "NL_WMAX, maximum weight.")
+(defvar *dmax* 17 "NL_DMAX, maximum degree.")
+(defvar *itlim* 50 "NL_ITLIM, maximum number of iterations.")
+(defvar *recurselim* 20 "NL_RECURSELIM, maximum recursion levels.")
+(defvar *ccplim* 1000 "NL_CCPLIM, maximum curve control points.")
+
+;;; ------------------------------------------------------------ NLib's macros
+
+(defmacro nl-min (x y) "NL_MIN: (x < y) ? x : y" (let ((a (gensym)) (b (gensym))) `(let ((,a ,x) (,b ,y)) (if (< ,a ,b) ,a ,b))))
+(defmacro nl-max (x y) "NL_MAX: (x > y) ? x : y" (let ((a (gensym)) (b (gensym))) `(let ((,a ,x) (,b ,y)) (if (> ,a ,b) ,a ,b))))
+(defmacro nl-min3 (x y z)
+  "NL_MIN3" (let ((a (gensym)) (b (gensym)) (c (gensym)))
+              `(let ((,a ,x) (,b ,y) (,c ,z)) (if (and (< ,a ,b) (< ,a ,c)) ,a (if (< ,b ,c) ,b ,c)))))
+(defmacro nl-max3 (x y z)
+  "NL_MAX3" (let ((a (gensym)) (b (gensym)) (c (gensym)))
+              `(let ((,a ,x) (,b ,y) (,c ,z)) (if (and (> ,a ,b) (> ,a ,c)) ,a (if (> ,b ,c) ,b ,c)))))
+
+(declaim (inline nl-sign nl-siab))
+(defun nl-sign (x)
+  "NL_SIGN: 1.0 for positive X, else -1.0 -- zero included."
+  (declare (type double-float x))
+  (if (> x 0d0) 1d0 -1d0))
+(defun nl-siab (a b)
+  "NL_SIAB: |a| with the sign of b (b >= 0 counts as positive)."
+  (declare (type double-float a b))
+  (if (>= b 0d0) (abs a) (- (abs a))))
+
+;;; ------------------------------------------------------------------ errors
 
 (define-condition nurbs-error (error)
   ((code :initarg :code :reader nurbs-error-code)
    (routine :initarg :routine :reader nurbs-error-routine))
   (:report (lambda (c stream)
-             (format stream "NURBS error ~s in ~s."
-                     (nurbs-error-code c) (nurbs-error-routine c))))
-  (:documentation "Signaled where NLib sets NL_ERROR and returns NL_YES.  The
-code names the NLib error: :parameter (NL_PAR_ERR), :numeric (NL_NUM_ERR),
-:call (NL_CAL_ERR), :input (NL_INP_ERR), :max-derivative (NL_MXD_ERR)."))
+             (format stream "NURBS error ~s in ~s." (nurbs-error-code c) (nurbs-error-routine c))))
+  (:documentation "Signaled where NLib sets NL_ERROR and returns NL_YES.  The code is
+the NLib error constant's name as a keyword: NL_PAR_ERR is :par-err, NL_NUM_ERR
+is :num-err, NL_GEO_ERR is :geo-err, and so on."))
 
 (defun nurbs-error (code routine)
   (error 'nurbs-error :code code :routine routine))
 
-;;; A NURBS curve: NL_CURVE with its control polygon and knot vector flattened.
-;;; CPOINTS holds the homogeneous control points Pw[0..n] four doubles apiece,
-;;; (wx wy wz w), with +no-z+ and +no-w+ as above.  KNOTS is U[0..m].
+;;; --------------------------------------------------------- points and arrays
+
+(declaim (inline make-point make-cpoint))
+(defun make-point (&optional (x 0d0) (y 0d0) (z 0d0))
+  (let ((p (make-array 3 :element-type 'double-float)))
+    (setf (aref p 0) (float x 1d0) (aref p 1) (float y 1d0) (aref p 2) (float z 1d0))
+    p))
+(defun make-cpoint (&optional (wx 0d0) (wy 0d0) (wz 0d0) (w +no-w+))
+  (let ((p (make-array 4 :element-type 'double-float)))
+    (setf (aref p 0) (float wx 1d0) (aref p 1) (float wy 1d0)
+          (aref p 2) (float wz 1d0) (aref p 3) (float w 1d0))
+    p))
+
+(defun make-real-vector (n) (make-array n :element-type 'double-float :initial-element 0d0))
+(defun make-real-matrix (rows cols) (make-array (list rows cols) :element-type 'double-float :initial-element 0d0))
+(defun make-point-array (n) (make-array (list n 3) :element-type 'double-float :initial-element 0d0))
+(defun make-cpoint-array (n) (make-array (list n 4) :element-type 'double-float :initial-element 0d0))
+(defun make-point-net (n m) (make-array (list n m 3) :element-type 'double-float :initial-element 0d0))
+(defun make-cpoint-net (n m) (make-array (list n m 4) :element-type 'double-float :initial-element 0d0))
+(defun make-index-vector (n) (make-array n :element-type 'fixnum :initial-element 0))
+
+;;; ------------------------------------------------------------------ curves
+
+;;; NL_CURVE: degree p, knot vector U[0..m], control polygon Pw[0..n] as an
+;;; (n+1) x 4 array of homogeneous control points.
 (defstruct (curve (:constructor %make-curve (degree knots cpoints)))
   (degree 0 :type fixnum)
-  (knots (make-array 0 :element-type 'double-float) :type real-vector)
-  (cpoints (make-array 0 :element-type 'double-float) :type real-vector))
+  (knots (make-real-vector 0) :type real-vector)
+  (cpoints (make-cpoint-array 0) :type cpoint-array))
 
 (declaim (inline curve-n curve-m))
-(defun curve-n (curve)
-  "Highest control point index, NLib's n."
-  (1- (floor (length (curve-cpoints curve)) 4)))
-(defun curve-m (curve)
-  "Highest knot index, NLib's m."
-  (1- (length (curve-knots curve))))
+(defun curve-n (curve) "NLib's n: highest control point index." (1- (array-dimension (curve-cpoints curve) 0)))
+(defun curve-m (curve) "NLib's m: highest knot index." (1- (length (curve-knots curve))))
 
-(defun curve-rational-p (curve)
-  "True when the curve's control points carry weights.  NLib: N_IsCrvRat."
-  (/= (aref (curve-cpoints curve) 3) +no-w+))
+;;; ----------------------------------------------------------------- surfaces
+
+;;; NL_SURFACE: degrees p (u) and q (v), knot vectors U and V, control net
+;;; Pw[0..n][0..m] as an (n+1) x (m+1) x 4 array.
+(defstruct (surface (:constructor %make-surface (degree-u degree-v knots-u knots-v cpoints)))
+  (degree-u 0 :type fixnum)
+  (degree-v 0 :type fixnum)
+  (knots-u (make-real-vector 0) :type real-vector)
+  (knots-v (make-real-vector 0) :type real-vector)
+  (cpoints (make-cpoint-net 0 0) :type cpoint-net))
+
+(declaim (inline surface-n surface-m))
+(defun surface-n (s) "NLib's n: highest control point index in u." (1- (array-dimension (surface-cpoints s) 0)))
+(defun surface-m (s) "NLib's m: highest control point index in v." (1- (array-dimension (surface-cpoints s) 1)))
+
+;;; ------------------------------------------------ curve and surface functions
+
+;;; NL_CFUN: a scalar B-spline function -- degree p, knots U, values fu[0..n].
+(defstruct (cfun (:constructor %make-cfun (degree knots vals)))
+  (degree 0 :type fixnum)
+  (knots (make-real-vector 0) :type real-vector)
+  (vals (make-real-vector 0) :type real-vector))
+
+;;; NL_SFUN: a scalar tensor-product function -- degrees p, q, knots U, V,
+;;; values fuv[0..n][0..m].
+(defstruct (sfun (:constructor %make-sfun (degree-u degree-v knots-u knots-v vals)))
+  (degree-u 0 :type fixnum)
+  (degree-v 0 :type fixnum)
+  (knots-u (make-real-vector 0) :type real-vector)
+  (knots-v (make-real-vector 0) :type real-vector)
+  (vals (make-real-matrix 0 0) :type real-matrix))
+
+;;; ------------------------------------------------------- small geometric objects
+
+;;; NL_LINESEG and NL_PLANE.  NL_INTERVAL, NL_RECTANGLE and NL_MINMAXBOX are
+;;; real-vectors of 2, 4 and 6 in the C field order (ul ur), (ul ur vb vt),
+;;; (xl xr yb yt zn zf).
+(defstruct (lineseg (:constructor %make-lineseg (p v bounded)))
+  (p (make-point) :type point)
+  (v (make-point) :type point)
+  (bounded 0 :type fixnum))
+
+(defstruct (plane (:constructor %make-plane (p n)))
+  (p (make-point) :type point)
+  (n (make-point) :type point))
+
+;;; ------------------------------------------------------ convenient construction
 
 (defun make-curve (degree knots points &key weights two-d)
   "A NURBS curve from Euclidean POINTS (a sequence of 3-sequences), KNOTS and
-DEGREE.  With WEIGHTS the curve is rational and its homogeneous control points
-are (w*x w*y w*z w); without, w is +no-w+.  With TWO-D, z is +no-z+."
+DEGREE.  With WEIGHTS the curve is rational: control points (w*x w*y w*z w);
+without, w is +no-w+.  With TWO-D, z is +no-z+."
   (let* ((n+1 (length points))
-         (cpoints (make-array (* 4 n+1) :element-type 'double-float))
+         (cpoints (make-cpoint-array n+1))
          (knots (map 'real-vector (lambda (k) (float k 1d0)) knots)))
     (unless (= (length knots) (+ n+1 degree 1))
-      (nurbs-error :input 'make-curve))
+      (nurbs-error :inp-err 'make-curve))
     (let ((i 0))
       (map nil (lambda (point weight)
-                 (let ((w (if weights (float weight 1d0) 1d0))
-                       (base (* 4 i)))
-                   (setf (aref cpoints base) (* w (float (elt point 0) 1d0))
-                         (aref cpoints (+ base 1)) (* w (float (elt point 1) 1d0))
-                         (aref cpoints (+ base 2)) (if two-d +no-z+ (* w (float (elt point 2) 1d0)))
-                         (aref cpoints (+ base 3)) (if weights w +no-w+))
+                 (let ((w (if weights (float weight 1d0) 1d0)))
+                   (setf (aref cpoints i 0) (* w (float (elt point 0) 1d0))
+                         (aref cpoints i 1) (* w (float (elt point 1) 1d0))
+                         (aref cpoints i 2) (if two-d +no-z+ (* w (float (elt point 2) 1d0)))
+                         (aref cpoints i 3) (if weights w +no-w+))
                    (incf i)))
            points (or weights (make-list n+1 :initial-element 1))))
     (%make-curve degree knots cpoints)))

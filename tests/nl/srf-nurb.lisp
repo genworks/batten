@@ -1,0 +1,73 @@
+;;;; SPDX-FileCopyrightText: Copyright (c) 2026 Genworks International
+;;;; SPDX-License-Identifier: Apache-2.0
+;;;;
+;;;; Differential tests for src/nl/srf-nurb.lisp against NLib.
+
+(in-package :batten-tests)
+
+(defun some-surface () (random-surface :two-d (zerop (rnd 5))))
+
+(define-oracle-test srf-eval-pt (:file "srf-nurb" :trials 3000)
+  (let* ((s (some-surface))
+         (u (random-parameter (surface-knots-u s))) (v (random-parameter (surface-knots-v s)))
+         (ufl (random-side)) (vfl (random-side)))
+    (agree (list :surface s :u u :v v)
+           (list (batten::srf-eval-pt s u v ufl vfl (make-point)))
+           (with-foreign ((sp s :surface))
+             (with-foreign-out ((pt :point))
+               (values (c-flag-error-p (c-srf-eval-pt sp u v ufl vfl pt))
+                       (list (from-foreign pt :point))))))))
+
+(define-oracle-test srf-derivs (:file "srf-nurb" :trials 3000)
+  (let* ((s (some-surface))
+         (u (random-parameter (surface-knots-u s))) (v (random-parameter (surface-knots-v s)))
+         (ufl (random-side)) (vfl (random-side))
+         (udr (rnd 3)) (vdr (if (zerop (rnd 2)) udr (rnd 3)))
+         (mfl (if (zerop (rnd 2)) +true+ +false+))
+         (upper (and (= mfl +true+) (= udr vdr))))
+    (flet ((only-computed (net)
+             ;; with the upper-half flag the C leaves the rest unwritten
+             (when upper
+               (dotimes (k (1+ udr))
+                 (dotimes (l (1+ vdr))
+                   (when (> (+ k l) udr) (dotimes (c 3) (setf (aref net k l c) 0d0))))))
+             net))
+      (agree (list :surface s :u u :v v :udr udr :vdr vdr :mfl mfl)
+             (list (only-computed (batten::srf-derivs s u v ufl vfl mfl udr vdr
+                                                      (make-point-net (1+ udr) (1+ vdr)))))
+             (with-foreign ((sp s :surface))
+               (with-foreign-out ((sd :point-net (1+ udr) (1+ vdr)))
+                 (values (c-flag-error-p (c-srf-derivs sp u v ufl vfl mfl udr vdr sd))
+                         (list (only-computed (from-foreign sd :point-net (1+ udr) (1+ vdr)))))))))))
+
+(define-oracle-test srf-basis-derivs (:file "srf-nurb" :trials 2000)
+  (let* ((s (some-surface))
+         (p (surface-degree-u s)) (q (surface-degree-v s))
+         (u (random-parameter (surface-knots-u s))) (v (random-parameter (surface-knots-v s)))
+         (ufl (random-side)) (vfl (random-side))
+         (udr (rnd 3)) (vdr (rnd 3)))
+    (agree (list :surface s :u u :v v :udr udr :vdr vdr)
+           (let ((bd (make-array (list (1+ udr) (1+ vdr) (1+ p) (1+ q)) :element-type 'double-float
+                                                                     :initial-element 0d0)))
+             (multiple-value-bind (usp vsp) (batten::srf-basis-derivs s u v ufl vfl +false+ udr vdr bd)
+               (list usp vsp bd)))
+           (with-foreign ((sp s :surface))
+             (with-foreign-out ((bd :basis-derivatives))
+               (with-scalars ((usp :long) (vsp :long))
+                 (values (c-flag-error-p (c-srf-basis-derivs sp u v ufl vfl +false+ udr vdr bd usp vsp))
+                         (list (cffi:mem-ref usp :long) (cffi:mem-ref vsp :long)
+                               (from-foreign bd :basis-derivatives (1+ udr) (1+ vdr) (1+ p) (1+ q))))))))))
+
+(define-oracle-test srf-eval-pt-pt-deriv-normal (:file "srf-nurb" :trials 3000)
+  (let* ((s (random-surface))
+         (u (random-parameter (surface-knots-u s))) (v (random-parameter (surface-knots-v s)))
+         (ufl (random-side)) (vfl (random-side)))
+    (agree (list :surface s :u u :v v)
+           (let ((p (make-point)) (su (make-point)) (sv (make-point)) (n (make-point)))
+             (batten::srf-eval-pt-pt-deriv-normal s u v ufl vfl p su sv n)
+             (list p su sv n))
+           (with-foreign ((sp s :surface))
+             (with-foreign-out ((p :point) (su :point) (sv :point) (n :point))
+               (values (c-flag-error-p (c-srf-eval-pt-pt-deriv-normal sp u v ufl vfl p su sv n))
+                       (list (from-foreign p :point) (from-foreign su :point)
+                             (from-foreign sv :point) (from-foreign n :point))))))))

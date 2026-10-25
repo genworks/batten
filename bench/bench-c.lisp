@@ -9,12 +9,12 @@
 (defun time-c (curve params evals der)
   (declare (type real-vector params) (type fixnum evals))
   (let ((np (length params)))
-    (batten-oracle:with-c-curve (cur curve)
+    (batten-oracle:with-foreign ((cur curve :curve))
       (cffi:with-foreign-object (out :double (* 3 (1+ (or der 0))))
         (* 1d9 (/ (best-of
                    (if der
-                       (lambda () (dotimes (i evals) (batten-oracle::%crv-derivs cur (aref params (mod i np)) 1 der out)))
-                       (lambda () (dotimes (i evals) (batten-oracle::%crv-eval cur (aref params (mod i np)) 1 out)))))
+                       (lambda () (dotimes (i evals) (batten-oracle::c-crv-derivs cur (aref params (mod i np)) 1 der out)))
+                       (lambda () (dotimes (i evals) (batten-oracle::c-crv-eval cur (aref params (mod i np)) 1 out)))))
                   evals))))))
 
 (defun run-bench-c (&key (evals 1000000) (seed 20261025))

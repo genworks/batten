@@ -1,132 +1,73 @@
 ;;;; SPDX-FileCopyrightText: Copyright (c) 2026 Genworks International
 ;;;; SPDX-License-Identifier: Apache-2.0
 ;;;;
-;;;; The oracle: NLib's own C functions, from an SMLib 10 build, through CFFI.
-;;;; Every ported routine is checked against the routine it came from.
+;;;; The oracle: NLib's own C, built by tools/build-oracle.sh, through CFFI.
+;;;; oracle-bindings.lisp declares C-<lisp name> for every routine; this file
+;;;; loads the libraries and defines NLib's structs; marshal.lisp moves Batten
+;;;; objects in and out of them.
 
 (defpackage :batten-oracle
   (:use :common-lisp :batten)
-  (:export #:load-oracle #:with-c-curve
-           #:c-find-span #:c-basis-functions #:c-basis-derivatives
-           #:c-curve-point #:c-curve-derivatives))
+  (:export #:load-oracle #:*oracle-dir*
+           #:with-stacks #:with-foreign #:with-foreign-out #:with-scalars
+           #:to-foreign #:from-foreign #:foreign-free-object
+           #:c-flag-error-p))
 
 (in-package :batten-oracle)
 
-(defun load-oracle (&optional (path (or (uiop:getenv "BATTEN_ORACLE_LIB")
-                                        "/projects/tmp-shots/smlib-port/out/smlib64.so")))
-  "Load the SMLib 10 library whose NLib functions are the oracle."
-  (cffi:load-foreign-library path))
+(defvar *oracle-dir*
+  (or (uiop:getenv "BATTEN_ORACLE_DIR") "/projects/tmp-shots/batten-scratch/oracle/")
+  "Where build-oracle.sh put libnlib-oracle.so and libnlib-oracle-shims.so.")
 
-;;; NL_INDEX is long, NL_FLAG and NL_DEGREE are short.
-(cffi:defcstruct nl-cpolygon (n :long) (pw :pointer))
+(defun load-oracle (&optional (dir *oracle-dir*))
+  "Load NLib and the shims from DIR."
+  (let ((dir (uiop:ensure-directory-pathname dir)))
+    (cffi:load-foreign-library (merge-pathnames "libnlib-oracle.so" dir))
+    (cffi:load-foreign-library (merge-pathnames "libnlib-oracle-shims.so" dir))))
+
+(defun c-flag-error-p (flag)
+  "True when an NL_FLAG return value says the C routine failed (NL_YES)."
+  (and (integerp flag) (/= flag 0)))
+
+;;; NLib's structs, as laid out by the C compiler: NL_INDEX long, NL_FLAG and
+;;; NL_DEGREE short, NL_REAL double.
+(cffi:defcstruct nl-point (x :double) (y :double) (z :double))
+(cffi:defcstruct nl-cpoint (x :double) (y :double) (z :double) (w :double))
 (cffi:defcstruct nl-knotvector (m :long) (u :pointer))
+(cffi:defcstruct nl-cpolygon (n :long) (pw :pointer))
+(cffi:defcstruct nl-cnet (n :long) (m :long) (pw :pointer))
 (cffi:defcstruct nl-curve (pol :pointer) (p :short) (knt :pointer))
+(cffi:defcstruct nl-surface (net :pointer) (p :short) (q :short) (knu :pointer) (knv :pointer))
+(cffi:defcstruct nl-cvalue (n :long) (fu :pointer))
+(cffi:defcstruct nl-cfun (cvl :pointer) (p :short) (knt :pointer))
+(cffi:defcstruct nl-svalue (n :long) (m :long) (fuv :pointer))
+(cffi:defcstruct nl-sfun (svl :pointer) (p :short) (q :short) (knu :pointer) (knv :pointer))
+(cffi:defcstruct nl-epolygon (n :long) (pts :pointer))
+(cffi:defcstruct nl-enet (n :long) (m :long) (pts :pointer))
+(cffi:defcstruct nl-interval (ul :double) (ur :double))
+(cffi:defcstruct nl-rectangle (ul :double) (ur :double) (vb :double) (vt :double))
+(cffi:defcstruct nl-minmaxbox (xl :double) (xr :double) (yb :double) (yt :double) (zn :double) (zf :double))
+(cffi:defcstruct nl-lineseg (p (:struct nl-point)) (v (:struct nl-point)) (bounded :short))
+(cffi:defcstruct nl-plane (p (:struct nl-point)) (n (:struct nl-point)))
 
-(defconstant +nl-left+ 1)
-(defconstant +nl-right+ 2)
+;;; NL_STACKS is opaque here: 352 bytes in SMLib 10, allocated generously.
+(defconstant +stacks-bytes+ 1024)
 
-(defun side-flag (side) (ecase side (:left +nl-left+) (:right +nl-right+)))
+(defmacro with-stacks ((var) &body body)
+  "Bind VAR to an initialized NL_STACKS for BODY; everything C allocates from it
+is freed afterwards, so read results out inside BODY."
+  `(let ((,var (cffi:foreign-alloc :uint8 :count +stacks-bytes+ :initial-element 0)))
+     (unwind-protect
+          (progn (c-init-nurbs ,var) ,@body)
+       (c-end-nurbs ,var)
+       (cffi:foreign-free ,var))))
 
-(cffi:defcfun ("N_BasisFindSpan" %find-span) :short
-  (knt :pointer) (p :short) (u :double) (flg :short) (spn :pointer))
-(cffi:defcfun ("N_BasisEval" %basis-eval) :short
-  (knt :pointer) (p :short) (u :double) (flg :short) (n :pointer) (spn :pointer))
-(cffi:defcfun ("N_BasisDerivs" %basis-derivs) :short
-  (knt :pointer) (p :short) (u :double) (flg :short) (der :long) (nd :pointer) (spn :pointer))
-(cffi:defcfun ("N_CrvEval" %crv-eval) :short
-  (cur :pointer) (u :double) (flg :short) (c :pointer))
-(cffi:defcfun ("N_CrvDerivs" %crv-derivs) :short
-  (cur :pointer) (u :double) (flg :short) (der :long) (cd :pointer))
-
-(defun copy-to-foreign (vector)
-  (let* ((n (length vector))
-         (ptr (cffi:foreign-alloc :double :count (max n 1))))
-    (dotimes (i n ptr)
-      (setf (cffi:mem-aref ptr :double i) (aref vector i)))))
-
-(defmacro with-c-knots ((ptr knots) &body body)
-  (let ((u (gensym "U")))
-    `(let* ((,u (copy-to-foreign ,knots))
-            (,ptr (cffi:foreign-alloc '(:struct nl-knotvector))))
-       (unwind-protect
-            (progn
-              (setf (cffi:foreign-slot-value ,ptr '(:struct nl-knotvector) 'm) (1- (length ,knots))
-                    (cffi:foreign-slot-value ,ptr '(:struct nl-knotvector) 'u) ,u)
-              ,@body)
-         (cffi:foreign-free ,ptr)
-         (cffi:foreign-free ,u)))))
-
-(defmacro with-c-curve ((ptr curve) &body body)
-  "Bind PTR to a freshly built NL_CURVE copy of CURVE for BODY."
-  (let ((c (gensym "C")) (pw (gensym "PW")) (pol (gensym "POL")) (knt (gensym "KNT")))
-    `(let* ((,c ,curve)
-            (,pw (copy-to-foreign (curve-cpoints ,c)))
-            (,pol (cffi:foreign-alloc '(:struct nl-cpolygon)))
-            (,ptr (cffi:foreign-alloc '(:struct nl-curve))))
-       (with-c-knots (,knt (curve-knots ,c))
-         (unwind-protect
-              (progn
-                (setf (cffi:foreign-slot-value ,pol '(:struct nl-cpolygon) 'n) (curve-n ,c)
-                      (cffi:foreign-slot-value ,pol '(:struct nl-cpolygon) 'pw) ,pw
-                      (cffi:foreign-slot-value ,ptr '(:struct nl-curve) 'pol) ,pol
-                      (cffi:foreign-slot-value ,ptr '(:struct nl-curve) 'p) (curve-degree ,c)
-                      (cffi:foreign-slot-value ,ptr '(:struct nl-curve) 'knt) ,knt)
-                ,@body)
-           (cffi:foreign-free ,ptr)
-           (cffi:foreign-free ,pol)
-           (cffi:foreign-free ,pw))))))
-
-;;; Each c- function answers (values result error-p) where error-p is true
-;;; when the C routine returned NL_YES.
-
-(defun c-find-span (knots p u side)
-  (with-c-knots (knt knots)
-    (cffi:with-foreign-object (spn :long)
-      (let ((err (%find-span knt p u (side-flag side) spn)))
-        (values (cffi:mem-ref spn :long) (/= err 0))))))
-
-(defun c-basis-functions (knots p u side)
-  "(values n-vector span error-p)"
-  (with-c-knots (knt knots)
-    (cffi:with-foreign-objects ((n :double (1+ p)) (spn :long))
-      (let ((err (%basis-eval knt p u (side-flag side) n spn))
-            (out (make-array (1+ p) :element-type 'double-float)))
-        (dotimes (i (1+ p)) (setf (aref out i) (cffi:mem-aref n :double i)))
-        (values out (cffi:mem-ref spn :long) (/= err 0))))))
-
-(defun c-basis-derivatives (knots p u side der)
-  "(values nd-matrix span error-p)"
-  (with-c-knots (knt knots)
-    (let* ((rows (1+ der)) (cols (1+ p))
-           (data (cffi:foreign-alloc :double :count (* rows cols)))
-           (rowptrs (cffi:foreign-alloc :pointer :count rows)))
-      (unwind-protect
-           (cffi:with-foreign-object (spn :long)
-             (dotimes (k rows)
-               (setf (cffi:mem-aref rowptrs :pointer k)
-                     (cffi:inc-pointer data (* 8 k cols))))
-             (let ((err (%basis-derivs knt p u (side-flag side) der rowptrs spn))
-                   (out (make-array (list rows cols) :element-type 'double-float)))
-               (dotimes (k rows)
-                 (dotimes (j cols)
-                   (setf (aref out k j) (cffi:mem-aref data :double (+ (* k cols) j)))))
-               (values out (cffi:mem-ref spn :long) (/= err 0))))
-        (cffi:foreign-free rowptrs)
-        (cffi:foreign-free data)))))
-
-(defun c-curve-point (curve u side)
-  (with-c-curve (cur curve)
-    (cffi:with-foreign-object (pt :double 3)
-      (let ((err (%crv-eval cur u (side-flag side) pt))
-            (out (make-array 3 :element-type 'double-float)))
-        (dotimes (i 3) (setf (aref out i) (cffi:mem-aref pt :double i)))
-        (values out (/= err 0))))))
-
-(defun c-curve-derivatives (curve u der side)
-  (with-c-curve (cur curve)
-    (cffi:with-foreign-object (cd :double (* 3 (1+ der)))
-      (let ((err (%crv-derivs cur u (side-flag side) der cd))
-            (out (make-array (list (1+ der) 3) :element-type 'double-float)))
-        (dotimes (k (1+ der))
-          (dotimes (i 3) (setf (aref out k i) (cffi:mem-aref cd :double (+ (* 3 k) i)))))
-        (values out (/= err 0))))))
+(defmacro with-scalars (bindings &body body)
+  "BINDINGS: ((var type) ...), each a fresh foreign cell (zeroed) for a C scalar
+output argument; read with (cffi:mem-ref var type)."
+  `(cffi:with-foreign-objects ,(mapcar (lambda (b) (list (first b) (second b))) bindings)
+     ,@(mapcar (lambda (b) `(setf (cffi:mem-ref ,(first b) ,(second b)) ,(ecase (second b)
+                                                                            ((:double) 0d0)
+                                                                            ((:long :short :int :unsigned-long) 0))))
+               bindings)
+     ,@body))

@@ -26,7 +26,7 @@ random order -- and return a 64-bit digest of every result bit."
     (dotimes (i trials)
       (let* ((c (random-curve))
              (u (random-parameter (curve-knots c)))
-             (der (rnd (1+ +max-derivative+))))
+             (der (rnd (1+ +maxder+))))
         (handler-case
             (let ((p (curve-point c u))
                   (d (curve-derivatives c u der)))

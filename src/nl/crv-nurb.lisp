@@ -4,76 +4,55 @@
 ;;;;
 ;;;; Ported from NLib's NL_CrvNurb.cpp (usd-brep source/SMLib/src).
 ;;;; Modified: translated to Common Lisp; results written into caller arrays
-;;;; or returned fresh, in place of NL_POINT output parameters.
+;;;; as the C writes its NL_POINT output parameters.
 
 (in-package :batten)
 
-(deftype point3 () '(simple-array double-float (3)))
-
-(defun curve-point! (curve u result &key (side :left))
-  "Write the point of CURVE at parameter U into RESULT, a 3-vector of doubles,
-and return RESULT.  SIDE (:left or :right) picks the span at a knot.
-NLib: N_CrvEval."
-  (declare (type curve curve) (type double-float u) (type point3 result))
-  (let* ((knots (curve-knots curve))
-         (cpoints (curve-cpoints curve))
-         (p (curve-degree curve))
-         (m (1- (length knots))))
-    (declare (type real-vector knots cpoints) (type fixnum p m))
+(defun crv-eval (cur u flg c)
+  "Write the point of curve CUR at parameter U into point C and return C.
+FLG (+left+ or +right+) picks the span at a knot.  NLib: N_CrvEval."
+  (declare (type curve cur) (type double-float u) (type fixnum flg) (type point c))
+  (let* ((knots (curve-knots cur))
+         (pw (curve-cpoints cur))
+         (p (curve-degree cur)))
+    (declare (type real-vector knots) (type cpoint-array pw) (type fixnum p))
+    (knot-vector-is-param-out-of-bounds knots u 'crv-eval)
     (fast
-      (when (or (< u (aref knots 0)) (> u (aref knots m)))
-        (nurbs-error :parameter 'curve-point!))
       (let ((n (make-array (1+ p) :element-type 'double-float)))
         (declare (dynamic-extent n))
-        (let* ((spn (basis-functions! knots p u side n))
+        (let* ((spn (basis-eval knots p u flg n))
                (j (- spn p))
                (cx 0d0) (cy 0d0) (cz 0d0) (cw 0d0))
           (declare (type fixnum spn j) (type double-float cx cy cz cw))
           (do ((i j (1+ i))) ((> i spn))
             (declare (type fixnum i))
-            (let* ((alpha (aref n (- i j)))
-                   (base (* 4 i))
-                   (z (aref cpoints (+ base 2)))
-                   (w (aref cpoints (+ base 3))))
-              (declare (type double-float alpha z w) (type fixnum base))
-              (setf cx (+ cx (* alpha (aref cpoints base)))
-                    cy (+ cy (* alpha (aref cpoints (+ base 1))))
+            (let ((alpha (aref n (- i j)))
+                  (z (aref pw i 2))
+                  (w (aref pw i 3)))
+              (declare (type double-float alpha z w))
+              (setf cx (+ cx (* alpha (aref pw i 0)))
+                    cy (+ cy (* alpha (aref pw i 1)))
                     cz (if (/= z +no-z+) (+ cz (* alpha z)) +no-z+)
                     cw (if (/= w +no-w+) (+ cw (* alpha w)) +no-w+))))
-          (multiple-value-bind (x y z) (homogeneous-to-euclid cx cy cz cw)
-            (setf (aref result 0) x (aref result 1) y (aref result 2) z))
-          result)))))
+          (multiple-value-bind (x y z) (%homogeneous-to-euclid cx cy cz cw)
+            (set-point c x y z)))))))
 
-(defun curve-point (curve u &key (side :left))
-  "The point of CURVE at parameter U, a fresh 3-vector of doubles."
-  (curve-point! curve (float u 1d0) (make-array 3 :element-type 'double-float)
-                :side side))
-
-(defconstant +pascal+
-  (if (boundp '+pascal+)
-      (symbol-value '+pascal+)
-      (make-array '(5 5) :element-type 'fixnum
-                         :initial-contents '((1 0 0 0 0) (1 1 0 0 0) (1 2 1 0 0)
-                                             (1 3 3 1 0) (1 4 6 4 1))))
-  "Binomial coefficients through +max-derivative+, NLib's tri[][].")
-
-(defun curve-derivatives! (curve u der result &key (side :left))
-  "Write the point of CURVE at U and its derivatives up to order DER into
-RESULT, a (1+ DER) by 3 array of doubles: RESULT[k] is the kth derivative.
-Return RESULT.  DER is at most +max-derivative+.  NLib: N_CrvDerivs."
-  (declare (type curve curve) (type double-float u) (type fixnum der)
-           (type real-matrix result))
-  (let* ((p (curve-degree curve))
-         (knots (curve-knots curve))
-         (cpoints (curve-cpoints curve))
+(defun crv-derivs (cur u flg der cd)
+  "Write the point of curve CUR at U and its derivatives up to order DER into
+CD, a point-array of at least (1+ DER) rows: CD[k] is the kth derivative.
+Return CD.  DER is at most +maxder+.  NLib: N_CrvDerivs."
+  (declare (type curve cur) (type double-float u) (type fixnum flg der) (type point-array cd))
+  (let* ((p (curve-degree cur))
+         (knots (curve-knots cur))
+         (pw (curve-cpoints cur))
          (m (1- (length knots))))
-    (declare (type fixnum p m) (type real-vector knots cpoints))
+    (declare (type fixnum p m) (type real-vector knots) (type cpoint-array pw))
     (when (or (< u (aref knots 0)) (> u (aref knots m)))
-      (nurbs-error :parameter 'curve-derivatives!))
-    (when (> der +max-derivative+)
-      (nurbs-error :max-derivative 'curve-derivatives!))
+      (nurbs-error :par-err 'crv-derivs))
+    (when (> der +maxder+)
+      (nurbs-error :mxd-err 'crv-derivs))
     (fast
-      (let* ((nsp (find-span knots p u side))
+      (let* ((nsp (basis-find-span knots p u flg))
              (mder (min p der))
              (p+1 (1+ p))
              (der+1 (1+ der))
@@ -94,7 +73,6 @@ Return RESULT.  DER is at most +max-derivative+.  NLib: N_CrvDerivs."
           (do ((k (1+ p) (1+ k))) ((> k der))
             (declare (type fixnum k))
             (dotimes (j p+1) (setf (bd k j) 0d0)))
-          ;; the basis functions
           (setf (ndu 0 0) 1d0)
           (do ((j 1 (1+ j))) ((> j p))
             (declare (type fixnum j))
@@ -104,8 +82,8 @@ Return RESULT.  DER is at most +max-derivative+.  NLib: N_CrvDerivs."
               (declare (type double-float saved))
               (dotimes (r j)
                 (setf (ndu j r) (+ (aref right (1+ r)) (aref left (- j r))))
-                (when (float-op-bad-p (ndu r (1- j)) (ndu j r) :division)
-                  (nurbs-error :numeric 'curve-derivatives!))
+                (when (float-op-is-bad (ndu r (1- j)) (ndu j r) +division+)
+                  (nurbs-error :num-err 'crv-derivs))
                 (let ((temp (/ (ndu r (1- j)) (ndu j r))))
                   (declare (type double-float temp))
                   (setf (ndu r j) (+ saved (* (aref right (1+ r)) temp))
@@ -113,7 +91,6 @@ Return RESULT.  DER is at most +max-derivative+.  NLib: N_CrvDerivs."
               (setf (ndu j j) saved)))
           (dotimes (j p+1)
             (setf (bd 0 j) (ndu j p)))
-          ;; the derivatives
           (dotimes (r p+1)
             (let ((s1 0) (s2 1))
               (declare (type fixnum s1 s2))
@@ -138,7 +115,6 @@ Return RESULT.  DER is at most +max-derivative+.  NLib: N_CrvDerivs."
                     (incf d (* (a s2 k) (ndu r pk))))
                   (setf (bd k r) d)
                   (rotatef s1 s2)))))
-          ;; the factors p!/(p-k)!
           (let ((r p))
             (declare (type fixnum r))
             (do ((k 1 (1+ k))) ((> k mder))
@@ -146,30 +122,28 @@ Return RESULT.  DER is at most +max-derivative+.  NLib: N_CrvDerivs."
               (dotimes (j p+1)
                 (setf (bd k j) (* (bd k j) (float r 1d0))))
               (setf r (* r (- p k)))))
-          ;; rational: derivatives of the rational basis functions
-          (when (/= (aref cpoints 3) +no-w+)
+          (when (/= (aref pw 0 3) +no-w+)
             (dotimes (k der+1)
               (setf (aref dd k) 0d0)
               (do ((j (- nsp p) (1+ j))) ((> j nsp))
                 (declare (type fixnum j))
-                (incf (aref dd k) (* (aref cpoints (+ (* 4 j) 3)) (bd k (+ (- j nsp) p))))))
+                (incf (aref dd k) (* (aref pw j 3) (bd k (+ (- j nsp) p))))))
             (dotimes (i p+1)
-              (let ((w (aref cpoints (+ (* 4 (+ (- nsp p) i)) 3))))
+              (let ((w (aref pw (+ (- nsp p) i) 3)))
                 (declare (type double-float w))
                 (dotimes (k der+1)
                   (let ((d (* w (bd k i))))
                     (declare (type double-float d))
                     (do ((j 1 (1+ j))) ((> j k))
                       (declare (type fixnum j))
-                      (decf d (* (* (float (aref +pascal+ k j) 1d0) (aref dd j))
+                      (decf d (* (* (float (aref +pascal-tri+ k j) 1d0) (aref dd j))
                                  (bd (- k j) i))))
                     (setf (bd k i) (/ d (aref dd 0))))))))
-          ;; the Euclidean control points of the span, then the sums
           (let ((j (- nsp p)))
             (declare (type fixnum j))
             (do ((i j (1+ i))) ((> i nsp))
               (declare (type fixnum i))
-              (multiple-value-bind (x y z) (cpoint-to-euclid cpoints i)
+              (multiple-value-bind (x y z) (%cpoint-row-to-euclid pw i)
                 (setf (aref px (- i j)) x (aref py (- i j)) y (aref pz (- i j)) z))))
           (dotimes (k der+1)
             (let ((cx 0d0) (cy 0d0) (cz 0d0))
@@ -180,12 +154,5 @@ Return RESULT.  DER is at most +max-derivative+.  NLib: N_CrvDerivs."
                   (incf cx (* d (aref px i)))
                   (incf cy (* d (aref py i)))
                   (incf cz (* d (aref pz i)))))
-              (setf (aref result k 0) cx (aref result k 1) cy (aref result k 2) cz)))
-          result)))))
-
-(defun curve-derivatives (curve u der &key (side :left))
-  "The point of CURVE at U and its derivatives up to order DER, as a fresh
-(1+ DER) by 3 array of doubles."
-  (curve-derivatives! curve (float u 1d0) der
-                      (make-array (list (1+ der) 3) :element-type 'double-float)
-                      :side side))
+              (setf (aref cd k 0) cx (aref cd k 1) cy (aref cd k 2) cz)))
+          cd)))))
