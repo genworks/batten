@@ -699,3 +699,62 @@ with CLOSED a closed loop whose last point is exactly the first."
            (list (batten::fit-crv-pts-normals pts nrm kk p))
            (with-foreign ((pp pts :point-array) (np nrm :point-array))
              (%cf2-c-curve (cur sg) (c-fit-crv-pts-normals pp np kk p cur sg))))))
+
+;;; ------------------------------------------------------------- L6-g0
+
+(defun %cf6-arc-points (count)
+  "COUNT points for fit-arc-to-pts in the xy plane (z 0, or +no-z+ now and
+then): on a circular arc with noise, on a line with noise, or random."
+  (let* ((pts (make-point-array count))
+         ;; 2D points fail in line-fit-pts on both sides (the +no-z+ of the
+         ;; 2D line reaches dist-pt-inf-line), so they come rarely
+         (two-d (zerop (rnd 15)))
+         (cx (- (rnd 100d0) 50d0)) (cy (- (rnd 100d0) 50d0))
+         (r (rnd-range 0.5d0 40d0))
+         (a0 (rnd-range -3.2d0 3.2d0))
+         (sweep (if (zerop (rnd 4)) (* 2 pi) (rnd-range 0.2d0 6d0)))
+         (noise (case (rnd 4) (0 0d0) (1 1d-6) (2 1d-3) (t 0.05d0)))
+         (dx (- (rnd 2d0) 1d0)) (dy (- (rnd 2d0) 1d0))
+         (mode (rnd 8)))
+    (dotimes (i count pts)
+      (let ((x 0d0) (y 0d0))
+        (case mode
+          ((0 1)                        ; a line
+           (let ((tt (rnd-range -10d0 10d0)))
+             (setf x (+ cx (* tt dx)) y (+ cy (* tt dy)))))
+          (2 (setf x (- (rnd 200d0) 100d0) y (- (rnd 200d0) 100d0)))
+          (t (let ((th (+ a0 (rnd sweep))))
+               (setf x (+ cx (* r (cos th))) y (+ cy (* r (sin th)))))))
+        (setf (aref pts i 0) (+ x (* noise (- (rnd 2d0) 1d0)))
+              (aref pts i 1) (+ y (* noise (- (rnd 2d0) 1d0)))
+              (aref pts i 2) (if two-d +no-z+ 0d0))))))
+
+;;; P is changed in place for 2D points (line-fit-pts), so each side gets a
+;;; copy and the copies are compared too.
+(define-oracle-test fit-arc-to-pts (:file "crv-fit" :trials 4000)
+  (let* ((n (if (zerop (rnd 30)) 0 (1+ (rnd 15))))
+         (pts (%cf6-arc-points (1+ n)))
+         (tol (case (rnd 4) (0 1d-3) (1 1d-6) (2 0.1d0) (t (expt 10d0 (- (rnd-range 0d0 6d0))))))
+         (etp (case (rnd 16) (0 0) ((1 2 3 4 5 6 7) +maximum+) (t +average+)))
+         (arc (if (zerop (rnd 3)) batten::+no+ batten::+yes+))
+         (cit (elt (list +quadratic+ +quartic+ +quintic+) (rnd 3))))
+    (agree (list :n n :tol tol :etp etp :arc arc :cit cit :pts pts)
+           (let ((lp (%cf6-copy-array pts)))
+             (multiple-value-bind (cur cut era erm) (batten::fit-arc-to-pts lp n tol etp arc cit)
+               (list cur cut era erm lp)))
+           (with-foreign ((pp pts :point-array))
+             (with-stacks (sg)
+               (with-scalars ((cut :short) (era :double) (erm :double))
+                 (with-foreign-out ((cur :curve))
+                   (let ((err (c-flag-error-p (c-fit-arc-to-pts pp n tol etp arc cit cur cut era erm sg))))
+                     (values err
+                             (unless err
+                               (list (from-foreign cur :curve) (cffi:mem-ref cut :short)
+                                     (cffi:mem-ref era :double) (cffi:mem-ref erm :double)
+                                     (from-foreign pp :point-array (1+ n)))))))))))))
+
+(defun %cf6-copy-array (a)
+  "A fresh copy of the 2D double-float array A."
+  (let ((b (make-array (array-dimensions a) :element-type 'double-float)))
+    (dotimes (i (array-total-size a) b)
+      (setf (row-major-aref b i) (row-major-aref a i)))))

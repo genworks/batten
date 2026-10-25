@@ -1830,3 +1830,13 @@ NLib: N_MakeSrfsCompatible."
       (when (and (/= uorv +udir+) (> (length (the real-vector (svref kvx i))) 0))
         (setf (svref sur i) (srf-insert-knots (svref sur i) (svref kvx i) +vdir+)))))
   sur)
+
+;;; ------------------------------------------------------------- L6-g0
+
+(defun make-srfs-compatible-uv (sur k)
+  "Make the surfaces SUR[0..K] (a simple-vector of surfaces, changed in place)
+compatible in both directions: make-srfs-compatible with +uvdir+.  Returns
+SUR.  Signals what make-srfs-compatible signals.
+NLib: N_MakeSrfsCompatibleUV."
+  (declare (type simple-vector sur) (type fixnum k))
+  (make-srfs-compatible sur k +uvdir+))
