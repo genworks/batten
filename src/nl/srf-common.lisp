@@ -195,3 +195,77 @@ NLib: N_CreateRuledSrfFromBoundaryCrvs."
              (setf (aref v j) 0d0
                    (aref v (+ 2 j)) 1d0))))
         (%make-surface ps qs u v sw)))))
+
+;;; ------------------------------------------------------------- L7-g1
+
+(defun create-revolved-srf (cur s tv al ctp)
+  "A fresh surface of revolution: curve CUR revolved by the angle AL (degrees,
+clockwise looking along TV) about the axis through S along TV.  The u
+direction is the circle, of the kind CTP names (+quadratic+ or +quintic+; the
+C's weight array holds 9, so +quartic+ only below 241 degrees), the v
+direction CUR's.  Each control point is revolved about its projection on the
+axis, weighted with its own weight; one on the axis (closer than *mtol*) stays
+there, with the circle's weights.  CUR is made rational and 3D in place first,
+as the C does.  Signals :inp-err when a projection fails, :cal-err when every
+control point is on the axis or for another CTP, and what the projection and
+the circle signal.
+NLib: N_CreateRevolvedSrf."
+  (declare (type curve cur) (type point s tv) (type double-float al) (type fixnum ctp))
+  (multiple-value-bind (al n p r) (crv-get-conic-data ctp 0d0 al)
+    (declare (type double-float al) (type fixnum n p r))
+    (let ((pw (curve-cpoints cur))
+          (m (curve-n cur))
+          (q (curve-degree cur))
+          (v (curve-knots cur))
+          (ss (curve-m cur)))
+      (declare (type cpoint-array pw) (type fixnum m q ss) (type real-vector v))
+      ;; make the profile curve 3D rational
+      (unless (is-crv-rat cur)
+        (crv-non-rat-to-rat cur))
+      (unless (crv-is-3d cur)
+        (crv-2d-to-3d cur))
+      (let ((qw (make-cpoint-net (1+ n) (1+ m)))
+            (uq (make-real-vector (1+ r)))
+            (vq (make-real-vector (1+ ss)))
+            (wi (make-real-vector 9))
+            (lst (%make-lineseg (make-point) (make-point) +unbounded+))
+            (allrzero t)
+            (cura nil)
+            (a (make-point)) (c (make-point)) (x (make-point)) (y (make-point))
+            (cp (make-cpoint)))
+        (declare (type cpoint-net qw) (type real-vector uq vq wi) (type lineseg lst)
+                 (type point a c x y) (type cpoint cp))
+        ;; the circle weights
+        (calc-circ-weights 0d0 al ctp wi)
+        ;; the surface control points
+        (create-line-start-dir-vector lst s tv +unbounded+)
+        (dotimes (j (1+ m))
+          (c-pt-to-pt-euclid (%row-c-pt pw j cp) a)
+          (let ((wp (aref pw j 3)))
+            (declare (type double-float wp))
+            (when (= (the fixnum (values (project-pt-line lst a c))) +false+)
+              (nurbs-error :inp-err 'create-revolved-srf))
+            (vector-diff a c x)
+            (let ((rad (vector-magnitude x)))
+              (declare (type double-float rad))
+              (if (< rad (the double-float *mtol*))
+                  (dotimes (i (1+ n))
+                    (%c-pt-net (weight c (* (aref wi i) wp) cp) qw i j))
+                  (progn
+                    (setf allrzero nil)
+                    (vector-cross tv x y)
+                    (setf cura (create-circ-arc c x y rad 0d0 al ctp))
+                    (let ((aw (curve-cpoints cura)))
+                      (declare (type cpoint-array aw))
+                      (dotimes (i (1+ n))
+                        (%c-pt-net (scale-c-pt wp (%row-c-pt aw i cp) cp) qw i j))))))))
+        (when allrzero
+          (nurbs-error :cal-err 'create-revolved-srf))
+        ;; the knots
+        (let ((u (curve-knots cura)))
+          (declare (type real-vector u))
+          (dotimes (i (1+ r))
+            (setf (aref uq i) (aref u i))))
+        (dotimes (j (1+ ss))
+          (setf (aref vq j) (aref v j)))
+        (%make-surface p q uq vq qw)))))
