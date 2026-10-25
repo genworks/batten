@@ -1062,3 +1062,13 @@ NLib: N_CrvsMakeCompatibleKnotTol."
           (when (>= (1- (length x)) 0)
             (%crv-tool-become-crv (svref cur i) (crv-refine (svref cur i) x)))))))
   cur)
+
+;;; ------------------------------------------------------------- L6-g1
+
+(defun crvs-make-compatible (cur k)
+  "Make the curves CUR[0..K] (a simple-vector of curves, each modified in
+place) compatible: crvs-make-compatible-knot-tol with the default knot
+tolerance (KNOT-TOL 0).  Returns CUR.
+NLib: N_CrvsMakeCompatible."
+  (declare (type (or null simple-vector) cur) (type fixnum k))
+  (crvs-make-compatible-knot-tol cur k 0d0))

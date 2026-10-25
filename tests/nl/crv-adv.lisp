@@ -349,3 +349,111 @@ knots, or a single Bezier segment."
                (with-foreign-out ((der :curve))
                  (let ((failed (c-flag-error-p (c-crv-get-rat-second-deriv cur der sg))))
                    (values failed (unless failed (list (from-foreign der :curve)))))))))))
+
+;;; ------------------------------------------------------------- L6-g1
+
+(defun %crv-adv-removable-set ()
+  "K and K+1 random curves for N_CrvsMakeCompatibleApprox, as (values curves
+k): on one domain mostly (now and then each its own), each refined now and
+then with knots shared by all (so that some are removable exactly from every
+curve), its control points now and then perturbed a little; rational or not
+and 2D or not, all alike or each at random."
+  (let* ((k (rnd 4))
+         (curves (make-array (1+ k)))
+         (lo (if (zerop (rnd 3)) 0d0 (rnd-range -10d0 10d0)))
+         (hi (+ lo 0.5d0 (rnd 10d0)))
+         (own (zerop (rnd 10)))
+         (rat (case (rnd 3) (0 t) (1 nil) (t :random)))
+         (two-d (case (rnd 4) (0 t) (1 :random) (t nil)))
+         (xs (sort (let (l)
+                     (dotimes (i (1+ (rnd 6)) l)
+                       (let ((x (+ lo (* (- hi lo) (+ 0.03d0 (rnd 0.94d0))))))
+                         (push x l)
+                         (when (zerop (rnd 4)) (push x l)))))
+                   #'<))
+         (refine (plusp (rnd 4))))
+    (dotimes (i (1+ k))
+      (let ((c (if own
+                   (random-curve :max-degree 5 :max-extra 6 :rational rat :two-d two-d)
+                   (%crv-adv-curve-on lo hi :max-degree 5 :max-extra 6 :rational rat :two-d two-d))))
+        (when (and refine (not own))
+          (let ((ys (remove-if (lambda (x)
+                                 ;; keep multiplicities within the degree
+                                 (>= (+ (count x xs) (count x (curve-knots c))) (curve-degree c)))
+                               xs)))
+            (when ys
+              (setf c (batten::crv-refine c (coerce ys 'batten::real-vector))))))
+        (when (zerop (rnd 3))
+          (let ((eps (expt 10d0 (- (rnd 10)))) (pw (curve-cpoints c)))
+            (dotimes (i (array-dimension pw 0))
+              (dotimes (j 2) (incf (aref pw i j) (* eps (- (rnd 2d0) 1d0)))))))
+        (setf (svref curves i) c)))
+    (values curves k)))
+
+(define-oracle-test crvs-make-compatible-approx (:file "crv-adv" :trials 3000)
+  (multiple-value-bind (curves k) (%crv-adv-removable-set)
+    (let ((tol (case (rnd 9)
+                 (0 0d0) (1 1d-9) (2 1d-6) (3 1d-3) (4 1d-1) (5 1d0) (6 30d0) (7 1d6) (t 1d-2))))
+      (agree (list :curves curves :k k :tol tol)
+             (let ((copies (map 'simple-vector #'batten::crv-copy curves)))
+               (batten::crvs-make-compatible-approx copies k tol)
+               (coerce copies 'list))
+             (with-foreign ()
+               (with-stacks (s)
+                 (let ((arr (batten-oracle::falloc :pointer (1+ k))))
+                   (dotimes (i (1+ k))
+                     (setf (cffi:mem-aref arr :pointer i)
+                           (batten-oracle::to-foreign (svref curves i) :curve)))
+                   (let ((failed (c-flag-error-p (c-crvs-make-compatible-approx arr k tol s))))
+                     (values failed
+                             (unless failed
+                               (let (out)
+                                 (dotimes (i (1+ k) (nreverse out))
+                                   (push (from-foreign (cffi:mem-aref arr :pointer i) :curve)
+                                         out)))))))))))))
+
+(defun %crv-adv-piecewise-curve ()
+  "A random curve whose interior knots come in runs: mostly multiplicity the
+degree (piecewise Bezier), now and then one less, or single knots, so that
+some runs are full and the knots between them are rescaled; now and then a
+plain RANDOM-CURVE.  Rational or not, 2D or not."
+  (let* ((c (random-curve :max-degree 5 :max-extra 6))
+         (p (curve-degree c))
+         (lo (aref (curve-knots c) 0))
+         (hi (aref (curve-knots c) (1- (length (curve-knots c))))))
+    (if (zerop (rnd 6))
+        c
+        (let* ((breaks (sort (let (l) (dotimes (i (rnd 5) l)
+                                        (push (+ lo (* (- hi lo) (+ 0.03d0 (rnd 0.94d0)))) l)))
+                             #'<))
+               (interior nil))
+          (dolist (b breaks)
+            (let ((mult (case (rnd 6) (0 1) (1 (max 1 (1- p))) (t p))))
+              (dotimes (j mult) (push b interior))))
+          (setf interior (sort interior #'<))
+          (let* ((n+1 (+ p 1 (length interior)))
+                 (knots (coerce (append (make-list (1+ p) :initial-element lo)
+                                        interior
+                                        (make-list (1+ p) :initial-element hi))
+                                'batten::real-vector))
+                 (rat (zerop (rnd 2)))
+                 (two-d (zerop (rnd 5)))
+                 (pw (make-cpoint-array n+1)))
+            (dotimes (i n+1)
+              (let ((w (if rat (+ 0.2d0 (rnd 4.8d0)) 1d0)))
+                (setf (aref pw i 0) (* w (- (rnd 200d0) 100d0))
+                      (aref pw i 1) (* w (- (rnd 200d0) 100d0))
+                      (aref pw i 2) (if two-d +no-z+ (* w (- (rnd 200d0) 100d0)))
+                      (aref pw i 3) (if rat w +no-w+))))
+            (%make-curve p knots pw))))))
+
+(define-oracle-test srf-reparam-mult-knots (:file "crv-adv" :trials 800)
+  (let ((c (%crv-adv-piecewise-curve))
+        (tol (case (rnd 5) (0 1d-3) (1 1d-6) (2 1d-9) (t 1d-4))))
+    (agree (list :curve c :tol tol)
+           (list (batten::srf-reparam-mult-knots c tol))
+           (with-foreign ((cp c :curve))
+             (with-stacks (sg)
+               (with-foreign-out ((q :curve))
+                 (let ((failed (c-flag-error-p (c-srf-reparam-mult-knots cp tol q sg))))
+                   (values failed (unless failed (list (from-foreign q :curve)))))))))))

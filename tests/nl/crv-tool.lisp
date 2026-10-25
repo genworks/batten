@@ -389,3 +389,32 @@ rational or not, 2D or not, each at random."
                                      (dotimes (i (1+ k) (nreverse out))
                                        (push (from-foreign (cffi:mem-aref arr :pointer i) :curve)
                                              out))))))))))))))
+
+;;; ------------------------------------------------------------- L6-g1
+
+(define-oracle-test crvs-make-compatible (:file "crv-tool" :trials 2000)
+  (multiple-value-bind (curves k) (%crv-tool-curve-set)
+    (if (zerop (rnd 50))
+        ;; now and then no curve array at all
+        (agree (list :curves nil :k k)
+               (list (batten::crvs-make-compatible nil k))
+               (with-stacks (s)
+                 (values (c-flag-error-p (c-crvs-make-compatible (cffi:null-pointer) k s))
+                         (list nil))))
+        (agree (list :curves curves :k k)
+               (let ((copies (map 'simple-vector #'batten::crv-copy curves)))
+                 (batten::crvs-make-compatible copies k)
+                 (coerce copies 'list))
+               (with-foreign ()
+                 (with-stacks (s)
+                   (let ((arr (batten-oracle::falloc :pointer (1+ k))))
+                     (dotimes (i (1+ k))
+                       (setf (cffi:mem-aref arr :pointer i)
+                             (batten-oracle::to-foreign (svref curves i) :curve)))
+                     (let ((failed (c-flag-error-p (c-crvs-make-compatible arr k s))))
+                       (values failed
+                               (unless failed
+                                 (let (out)
+                                   (dotimes (i (1+ k) (nreverse out))
+                                     (push (from-foreign (cffi:mem-aref arr :pointer i) :curve)
+                                           out)))))))))))))
