@@ -530,3 +530,30 @@ NLib: N_CreateEllipticalArcAngTypeTol."
         (weight p w cw)
         (%c-pt-row cw pw i))
       cur)))
+
+;;; ------------------------------------------------------------- L6-g1
+
+(defun calc-circ-weights (as ae ctp w)
+  "Write into W (caller-allocated, 9 entries suffice) the weights of the unit
+circle or circular arc from angle AS to angle AE in degrees of conic kind CTP
+(+quadratic+ or +quintic+; whatever create-circ-arc accepts), and return the
+highest index written.  Signals what create-circ-arc signals.
+NLib: N_CalcCircWeights."
+  (declare (type double-float as ae) (type fixnum ctp) (type real-vector w))
+  (let* ((cura (create-circ-arc (make-point 0d0 0d0 0d0) (make-point 1d0 0d0 0d0)
+                                (make-point 0d0 1d0 0d0) 1d0 as ae ctp))
+         (aw (curve-cpoints cura))
+         (n (1- (array-dimension aw 0))))
+    (declare (type cpoint-array aw) (type fixnum n))
+    (do ((i 0 (1+ i))) ((> i n))
+      (declare (type fixnum i))
+      (setf (aref w i) (aref aw i 3)))
+    n))
+
+(defun create-elliptical-arc (c x y r1 r2 as ae ctp)
+  "A fresh NURBS ellipse or elliptical arc: create-elliptical-arc-ang-type-tol
+with angle tolerance 0.01 degrees and ATP 0 (AS and AE are angles of the point
+on the circle of radius R1).
+NLib: N_CreateEllipticalArc."
+  (declare (type point c x y) (type double-float r1 r2 as ae) (type fixnum ctp))
+  (create-elliptical-arc-ang-type-tol c x y r1 r2 as ae 0.01d0 0 ctp))
