@@ -154,3 +154,449 @@
              (with-scalars ((d :double))
                (c-pt-magnitude ap d)
                (values nil (list (cffi:mem-ref d :double))))))))
+
+;;; ------------------------------------------------------------ L0-g0 routines
+
+(defun %copy-array (a)
+  "A fresh copy of the double-float array A, of any rank."
+  (let ((b (make-array (array-dimensions a) :element-type 'double-float)))
+    (dotimes (i (array-total-size a) b)
+      (setf (row-major-aref b i) (row-major-aref a i)))))
+
+(defun %same-kind-cpoints (n &key (two-d (zerop (rnd 3))) (rational (zerop (rnd 2))))
+  "A cpoint-array of N control points all of one kind (2D or 3D, rational or
+not): NLib's blends of mixed kinds overflow on +no-z+."
+  (let ((a (batten::make-cpoint-array n)))
+    (dotimes (i n a)
+      (let ((cp (random-cpoint :two-d two-d :rational rational)))
+        (dotimes (k 4) (setf (aref a i k) (aref cp k)))))))
+
+(define-oracle-test c-pt-to-pt-and-w (:file "math" :trials 3000)
+  (let ((pw (some-cpoint)))
+    (agree pw
+           (let* ((p (make-point)) (w (batten::c-pt-to-pt-and-w pw p))) (list p w))
+           (with-foreign ((a pw :cpoint))
+             (with-foreign-out ((p :point))
+               (with-scalars ((w :double))
+                 (c-c-pt-to-pt-and-w a p w)
+                 (values nil (list (from-foreign p :point) (cffi:mem-ref w :double)))))))))
+
+(define-oracle-test scale-c-pt-xyz (:file "math" :trials 3000)
+  (let ((alpha (some-scalar)) (aw (some-cpoint)))
+    (agree (list alpha aw)
+           (list (batten::scale-c-pt-xyz alpha aw (make-cpoint)))
+           (with-foreign ((a aw :cpoint))
+             (with-foreign-out ((b :cpoint))
+               (c-scale-c-pt-xyz alpha a b)
+               (values nil (list (from-foreign b :cpoint))))))))
+
+;;; NL_RMATRIX as laid out by the C compiler: n, m (long), RM (pointer),
+;;; mtp (enum, int), bw (long) -- 40 bytes.
+(defun %foreign-rmatrix (n m rm mtp bw)
+  "A foreign NL_RMATRIX with these members (RM a foreign NL_REAL** or null),
+freed with the enclosing WITH-FOREIGN."
+  (let ((p (batten-oracle::falloc :uint8 40)))
+    (setf (cffi:mem-ref p :long 0) n
+          (cffi:mem-ref p :long 8) m
+          (cffi:mem-ref p :pointer 16) rm
+          (cffi:mem-ref p :int 24) mtp
+          (cffi:mem-ref p :long 32) bw)
+    p))
+
+(defun %rmatrix-to-foreign (rma)
+  "A foreign copy of a Batten rmatrix, storage included."
+  (%foreign-rmatrix (batten::rmatrix-n rma) (batten::rmatrix-m rma)
+                    (if (batten::rmatrix-rm rma)
+                        (to-foreign (batten::rmatrix-rm rma) :real-matrix)
+                        (cffi:null-pointer))
+                    (batten::rmatrix-mtp rma) (batten::rmatrix-bw rma)))
+
+(defun %rmatrix-members (p)
+  "(values n m rm mtp bw) of a foreign NL_RMATRIX."
+  (values (cffi:mem-ref p :long 0) (cffi:mem-ref p :long 8) (cffi:mem-ref p :pointer 16)
+          (cffi:mem-ref p :int 24) (cffi:mem-ref p :long 32)))
+
+(defun %random-rmatrix (rows cols mtp &key (bw (max rows 1)) (scale 2d0))
+  (batten::make-rmatrix (1- rows) (1- cols) (random-real-matrix rows cols scale) mtp bw))
+
+(defun %random-transform ()
+  "A 4x4 matrix with a small projective row, so the denominators stay away
+from zero."
+  (let ((rm (random-real-matrix 4 4 2d0)))
+    (dotimes (j 3) (setf (aref rm 3 j) (if (zerop (rnd 3)) 0d0 (rnd-range -0.002d0 0.002d0))))
+    (setf (aref rm 3 3) (if (zerop (rnd 3)) 1d0 (rnd-range 0.5d0 2d0)))
+    rm))
+
+(define-oracle-test transform-c-pt (:file "math" :trials 3000)
+  (let* ((pw (some-cpoint)) (rm (%random-transform))
+         (rma (batten::make-rmatrix 3 3 rm batten::+mt-full+ 4)))
+    (agree (list pw rm)
+           (list (batten::transform-c-pt pw rma (make-cpoint)))
+           (with-foreign ((a pw :cpoint) (rmp rm :real-matrix))
+             (with-foreign-out ((q :cpoint))
+               (c-transform-c-pt a (%foreign-rmatrix 3 3 rmp 0 4) q)
+               (values nil (list (from-foreign q :cpoint))))))))
+
+(define-oracle-test scale-c-pt-with-pt-and-vector (:file "math" :trials 3000)
+  (let ((pw (some-cpoint)) (c (random-point)) (f (random-point 3d0)))
+    (agree (list pw c f)
+           (list (batten::scale-c-pt-with-pt-and-vector pw c f (make-cpoint)))
+           (with-foreign ((a pw :cpoint) (cp c :point) (fp f :point))
+             (with-foreign-out ((q :cpoint))
+               (c-scale-c-pt-with-pt-and-vector a cp fp q)
+               (values nil (list (from-foreign q :cpoint))))))))
+
+(define-oracle-test pt-to-xyz (:file "math" :trials 1000)
+  (let ((p (random-point)))
+    (agree p
+           (multiple-value-list (batten::pt-to-xyz p))
+           (with-foreign ((pp p :point))
+             (with-scalars ((x :double) (y :double) (z :double))
+               (c-pt-to-xyz pp x y z)
+               (values nil (list (cffi:mem-ref x :double) (cffi:mem-ref y :double)
+                                 (cffi:mem-ref z :double))))))))
+
+(define-oracle-test pt-from-xyz (:file "math" :trials 1000)
+  (let ((x (some-scalar)) (y (some-scalar)) (z (some-scalar)))
+    (agree (list x y z)
+           (list (batten::pt-from-xyz x y z (make-point)))
+           (with-foreign-out ((p :point))
+             (c-pt-from-xyz x y z p)
+             (values nil (list (from-foreign p :point)))))))
+
+(macrolet ((def (name c-fn)
+             `(define-oracle-test ,name (:file "math" :trials 1000)
+                (let ((v (some-scalar)) (pw (some-cpoint)))
+                  (agree (list v pw)
+                         (list (,(find-symbol (string name) :batten) v (copy-seq pw)))
+                         (with-foreign ((p pw :cpoint))
+                           (,c-fn v p)
+                           (values nil (list (from-foreign p :cpoint)))))))))
+  (def c-pt-set-x c-c-pt-set-x)
+  (def c-pt-set-y c-c-pt-set-y)
+  (def c-pt-set-z c-c-pt-set-z)
+  (def c-pt-set-w c-c-pt-set-w))
+
+(define-oracle-test c-pt-rat-deriv (:file "math" :trials 3000)
+  ;; mostly rational control points; a non-rational one multiplies D by
+  ;; NL_NOW (-DBL_MAX), so keep |D| < 1 there to stay finite
+  (let* ((rational (plusp (rnd 4)))
+         (pw (random-cpoint :rational rational :two-d (zerop (rnd 4))))
+         (d (random-point (if rational 100d0 1d0)))
+         (wd (some-scalar)))
+    (agree (list pw d wd)
+           (list (batten::c-pt-rat-deriv pw d wd (make-cpoint)))
+           (with-foreign ((a pw :cpoint) (dp d :point))
+             (with-foreign-out ((dw :cpoint))
+               (c-c-pt-rat-deriv a dp wd dw)
+               (values nil (list (from-foreign dw :cpoint))))))))
+
+(define-oracle-test c-pt-to-pt (:file "math" :trials 2000)
+  (let ((pw (some-cpoint)))
+    (agree pw
+           (list (batten::c-pt-to-pt pw (make-point)))
+           (with-foreign ((a pw :cpoint))
+             (with-foreign-out ((p :point))
+               (c-c-pt-to-pt a p)
+               (values nil (list (from-foreign p :point))))))))
+
+(define-oracle-test swap-reals (:file "math" :trials 1000)
+  (let ((a (some-scalar)) (b (some-scalar)))
+    (agree (list a b)
+           (multiple-value-list (batten::swap-reals a b))
+           (with-scalars ((ap :double) (bp :double))
+             (setf (cffi:mem-ref ap :double) a (cffi:mem-ref bp :double) b)
+             (c-swap-reals ap bp)
+             (values nil (list (cffi:mem-ref ap :double) (cffi:mem-ref bp :double)))))))
+
+(define-oracle-test shell-sort-real (:file "math" :trials 3000)
+  (let* ((len (1+ (rnd 40)))
+         (a (random-real-vector len)))
+    ;; repeated values now and then
+    (when (zerop (rnd 2))
+      (dotimes (i (rnd len)) (setf (aref a (rnd len)) (aref a (rnd len)))))
+    (agree a
+           (list (batten::shell-sort-real (copy-seq a) (1- len)))
+           (with-foreign ((ap a :real-vector))
+             (c-shell-sort-real ap (1- len))
+             (values nil (list (from-foreign ap :real-vector len)))))))
+
+(define-oracle-test swap-c-pts (:file "math" :trials 1000)
+  (let ((pw (some-cpoint)) (qw (some-cpoint)))
+    (agree (list pw qw)
+           (let ((p (copy-seq pw)) (q (copy-seq qw))) (batten::swap-c-pts p q) (list p q))
+           (with-foreign ((p pw :cpoint) (q qw :cpoint))
+             (c-swap-c-pts p q)
+             (values nil (list (from-foreign p :cpoint) (from-foreign q :cpoint)))))))
+
+(define-oracle-test pascal-tri-row (:file "math" :trials 200)
+  (let* ((row (rnd 18)) (size (1+ row)))
+    (agree row
+           (list (batten::pascal-tri-row (make-array (list size size) :element-type 'fixnum :initial-element 0) row))
+           (with-foreign ()
+             (let* ((data (batten-oracle::falloc :long (* size size)))
+                    (rows (batten-oracle::row-pointers data size (* 8 size))))
+               (c-pascal-tri-row rows row)
+               (let ((out (make-array (list size size) :element-type 'fixnum)))
+                 (dotimes (i size) (dotimes (j size) (setf (aref out i j) (cffi:mem-aref data :long (+ (* i size) j)))))
+                 (values nil (list out))))))))
+
+(define-oracle-test create-real-matrix (:file "math" :trials 500)
+  (let* ((n (1- (rnd 5))) (m (1- (rnd 5))) (mtp (rnd 4)) (bw (1- (rnd 5)))
+         (rm (if (zerop (rnd 4)) nil (random-real-matrix (+ 2 (rnd 3)) (+ 2 (rnd 3))))))
+    (agree (list n m mtp bw (and rm t))
+           (let ((r (batten::create-real-matrix (batten::make-rmatrix) n m rm mtp bw)))
+             (list (batten::rmatrix-n r) (batten::rmatrix-m r) (eq rm (batten::rmatrix-rm r))
+                   (batten::rmatrix-mtp r) (batten::rmatrix-bw r)))
+           (with-foreign ()
+             (let ((rmp (if rm (to-foreign rm :real-matrix) (cffi:null-pointer)))
+                   (r (%foreign-rmatrix -1 -1 (cffi:null-pointer) 0 0)))
+               (c-create-real-matrix r n m rmp mtp bw)
+               (multiple-value-bind (cn cm crm cmtp cbw) (%rmatrix-members r)
+                 (values nil (list cn cm (cffi:pointer-eq crm rmp) cmtp cbw))))))))
+
+(define-oracle-test real-matrix-define (:file "math" :trials 500)
+  (let* ((n (1- (rnd 5))) (m (1- (rnd 5))) (mtp (rnd 4)) (bw (1- (rnd 5)))
+         (rm (random-real-matrix 3 3)))
+    (agree (list n m mtp bw)
+           (let ((r (batten::real-matrix-define (batten::make-rmatrix 2 2 rm 0 3) n m mtp bw)))
+             (list (batten::rmatrix-n r) (batten::rmatrix-m r) (eq rm (batten::rmatrix-rm r))
+                   (batten::rmatrix-mtp r) (batten::rmatrix-bw r)))
+           (with-foreign ((rmp rm :real-matrix))
+             (let ((r (%foreign-rmatrix 2 2 rmp 0 3)))
+               (c-real-matrix-define r n m mtp bw)
+               (multiple-value-bind (cn cm crm cmtp cbw) (%rmatrix-members r)
+                 (values nil (list cn cm (cffi:pointer-eq crm rmp) cmtp cbw))))))))
+
+(define-oracle-test get-max-index-real-matrix (:file "math" :trials 500)
+  (let* ((n (1- (rnd 6))) (m (1- (rnd 6))) (rm (random-real-matrix 2 2)))
+    (agree (list n m)
+           (multiple-value-list (batten::get-max-index-real-matrix (batten::make-rmatrix n m rm 0 1)))
+           (with-foreign ((rmp rm :real-matrix))
+             (with-scalars ((cn :long) (cm :long))
+               (c-get-max-index-real-matrix (%foreign-rmatrix n m rmp 0 1) cn cm)
+               (values nil (list (cffi:mem-ref cn :long) (cffi:mem-ref cm :long))))))))
+
+(define-oracle-test real-matrix-is-null (:file "math" :trials 1000)
+  (let* ((n (- (rnd 4) 1)) (m (- (rnd 4) 1)) (bw (- (rnd 4) 1)) (mtp (rnd 4))
+         (rm (if (zerop (rnd 3)) nil (random-real-matrix 2 2))))
+    (agree (list n m bw (and rm t))
+           (list (if (batten::real-matrix-is-null (batten::make-rmatrix n m rm mtp bw)) 1 0))
+           (with-foreign ()
+             (let ((rmp (if rm (to-foreign rm :real-matrix) (cffi:null-pointer))))
+               (values nil (list (c-real-matrix-is-null (%foreign-rmatrix n m rmp mtp bw)))))))))
+
+(defun %rmatrix-list (n m rm mtp bw)
+  (list n m mtp bw rm))
+
+(define-oracle-test real-matrix-multiply (:file "math" :trials 3000)
+  (let* ((mta (if (zerop (rnd 12)) 3 (rnd 3)))
+         (mtb (if (zerop (rnd 12)) 3 (rnd 3)))
+         (full (and (= mta 0) (= mtb 0)))
+         ;; the triangular cases index as if square: keep them square
+         (sq (rnd 6))
+         (na (if full (rnd 6) sq)) (ma (if full (rnd 6) sq)) (mb (if full (rnd 6) sq))
+         (nb (if (zerop (rnd 15)) (+ ma 1) ma))
+         (rma (%random-rmatrix (1+ na) (1+ ma) mta))
+         (rmb (%random-rmatrix (1+ nb) (1+ mb) mtb))
+         (null-c (zerop (rnd 2)))
+         ;; an existing product matrix, now and then too small
+         (cn (if (zerop (rnd 8)) (max 0 (1- na)) (+ na (rnd 2))))
+         (cm (if (zerop (rnd 8)) (max 0 (1- mb)) (+ mb (rnd 2))))
+         (crm (random-real-matrix (1+ cn) (1+ cm))))
+    (flet ((mask (lst)
+             ;; with NULL rmc, the triangle LL*LL / UR*UR leave unwritten is
+             ;; whatever the allocator left: compare only what was computed
+             (destructuring-bind (n m mtp bw rm) lst
+               (declare (ignore mtp bw))
+               (when (and null-c rm (= mta mtb) (/= mta 0))
+                 (dotimes (i (1+ n))
+                   (dotimes (j (1+ m))
+                     (when (if (= mta 1) (> j i) (< j i)) (setf (aref rm i j) 0d0)))))
+               lst)))
+      (agree (list :mta mta :mtb mtb :na na :ma ma :nb nb :mb mb :null-c null-c :cn cn :cm cm)
+             (let ((rmc (if null-c (batten::make-rmatrix) (batten::make-rmatrix cn cm (%copy-array crm) 0 1))))
+               (batten::real-matrix-multiply rma rmb rmc)
+               (list (mask (%rmatrix-list (batten::rmatrix-n rmc) (batten::rmatrix-m rmc)
+                                          (batten::rmatrix-rm rmc) (batten::rmatrix-mtp rmc)
+                                          (batten::rmatrix-bw rmc)))))
+             (with-stacks (s)
+               (with-foreign ()
+                 (let* ((a (%rmatrix-to-foreign rma)) (b (%rmatrix-to-foreign rmb))
+                        (c (if null-c
+                               (%foreign-rmatrix -1 -1 (cffi:null-pointer) 0 0)
+                               (%foreign-rmatrix cn cm (to-foreign crm :real-matrix) 0 1)))
+                        (err (c-flag-error-p (c-real-matrix-multiply a b c s))))
+                   (if err
+                       (values t nil)
+                       (multiple-value-bind (n m rm mtp bw) (%rmatrix-members c)
+                         (values nil (list (mask (%rmatrix-list n m (if null-c
+                                                                        (from-foreign rm :real-matrix (1+ n) (1+ m))
+                                                                        (from-foreign rm :real-matrix (1+ cn) (1+ cm)))
+                                                                mtp bw)))))))))))))
+
+(defun %random-band-rmatrix (n mtp bw)
+  "An (N+1)-row matrix of type MTP: full (N+1)x(N+1), or banded with rows of
+BW elements."
+  (if (= mtp batten::+mt-banded+)
+      (batten::make-rmatrix n n (random-real-matrix (1+ n) bw 2d0) mtp bw)
+      (batten::make-rmatrix n n (random-real-matrix (1+ n) (1+ n) 2d0) mtp bw)))
+
+(defun %random-matrix-type-and-bw (n)
+  "A matrix type among full, lower-left, upper-right and banded, with an odd
+bandwidth for the banded."
+  (let ((mtp (rnd 4)))
+    (values mtp (if (= mtp 3) (1+ (* 2 (rnd (1+ (min n 3))))) (1+ n)))))
+
+(define-oracle-test real-matrix-multiply-pt-array (:file "math" :trials 3000)
+  (multiple-value-bind (mtp bw) (%random-matrix-type-and-bw 6)
+    (let* ((n (rnd 7)) (rma (%random-band-rmatrix n mtp bw)) (p (random-points (1+ n))))
+      (agree (list :mtp mtp :bw bw :n n)
+             (list (batten::real-matrix-multiply-pt-array rma p (batten::make-point-array (1+ n))))
+             (with-foreign ((pp p :point-array))
+               (with-foreign-out ((q :point-array (1+ n)))
+                 (let ((err (c-flag-error-p (c-real-matrix-multiply-pt-array (%rmatrix-to-foreign rma) pp q))))
+                   (values err (list (from-foreign q :point-array (1+ n)))))))))))
+
+(define-oracle-test real-matrix-multiply-c-pt-array (:file "math" :trials 3000)
+  (multiple-value-bind (mtp bw) (%random-matrix-type-and-bw 6)
+    (let* ((n (rnd 7)) (rma (%random-band-rmatrix n mtp bw)) (pw (%same-kind-cpoints (1+ n))))
+      (agree (list :mtp mtp :bw bw :n n)
+             (list (batten::real-matrix-multiply-c-pt-array rma pw (batten::make-cpoint-array (1+ n))))
+             (with-foreign ((pp pw :cpoint-array))
+               (with-foreign-out ((q :cpoint-array (1+ n)))
+                 (let ((err (c-flag-error-p (c-real-matrix-multiply-c-pt-array (%rmatrix-to-foreign rma) pp q))))
+                   (values err (list (from-foreign q :cpoint-array (1+ n)))))))))))
+
+(defun %dominant-rmatrix (n mtp bw &key (bad-pivot 10))
+  "A square (full) or banded matrix whose diagonal dominates, so LU without
+pivoting goes through; one time in BAD-PIVOT a diagonal element is tiny or
+zero."
+  (let* ((rma (%random-band-rmatrix n mtp bw)) (a (batten::rmatrix-rm rma))
+         (sbw (floor bw 2)) (banded (= mtp batten::+mt-banded+)))
+    (dotimes (i (1+ n))
+      (let ((col (if banded sbw i)) (sum 0d0))
+        (dotimes (j (array-dimension a 1)) (unless (= j col) (incf sum (abs (aref a i j)))))
+        (setf (aref a i col) (* (if (zerop (rnd 2)) 1d0 -1d0) (+ sum 0.5d0 (rnd 3d0))))))
+    (when (zerop (rnd bad-pivot))
+      (setf (aref a (rnd (1+ n)) (if banded sbw (rnd (1+ n)))) (if (zerop (rnd 2)) 0d0 1d-12)))
+    rma))
+
+(defun %wrong-shape (rma)
+  "Now and then make RMA non-square (:ind-err) or lower-left (:inp-err)."
+  (case (rnd 20)
+    (0 (setf (batten::rmatrix-m rma) (max 0 (1- (batten::rmatrix-m rma)))))
+    (1 (setf (batten::rmatrix-mtp rma) batten::+mt-lowerleft+)))
+  rma)
+
+(define-oracle-test real-matrix-lu-decompose (:file "math" :trials 3000)
+  (let* ((n (rnd 9)) (banded (zerop (rnd 2)))
+         (bw (if banded (1+ (* 2 (rnd (1+ (min n 3))))) (1+ n)))
+         (rma (%wrong-shape (%dominant-rmatrix n (if banded 3 0) bw)))
+         (rm (batten::rmatrix-rm rma)))
+    (agree (list :n n :bw bw :mtp (batten::rmatrix-mtp rma) :m (batten::rmatrix-m rma))
+           (let ((r (batten::copy-rmatrix rma)))
+             (setf (batten::rmatrix-rm r) (%copy-array rm))
+             (batten::real-matrix-lu-decompose r)
+             (list (batten::rmatrix-rm r)))
+           (with-foreign ((rmp rm :real-matrix))
+             (let ((err (c-flag-error-p (c-real-matrix-lu-decompose
+                                         (%foreign-rmatrix n (batten::rmatrix-m rma) rmp
+                                                           (batten::rmatrix-mtp rma) bw)))))
+               (values err (list (from-foreign rmp :real-matrix (array-dimension rm 0) (array-dimension rm 1)))))))))
+
+(defun %lu-rmatrix (n)
+  "An LU-decomposed matrix for the solvers: full or banded, now and then with
+a zero pivot, now and then the wrong shape."
+  (let* ((banded (zerop (rnd 2)))
+         (bw (if banded (1+ (* 2 (rnd (1+ (min n 3))))) (1+ n)))
+         (rma (%dominant-rmatrix n (if banded 3 0) bw :bad-pivot 15)))
+    (handler-case (batten::real-matrix-lu-decompose rma)
+      (nurbs-error () nil))
+    (%wrong-shape rma)))
+
+(define-oracle-test real-matrix-for-back (:file "math" :trials 3000)
+  (let* ((n (rnd 9)) (rma (%lu-rmatrix n))
+         (ptp (case (rnd 25) (0 3) (t (if (zerop (rnd 2)) batten::+epoint+ batten::+hpoint+))))
+         (a (if (= ptp batten::+epoint+) (random-points (1+ n)) (%same-kind-cpoints (1+ n)))))
+    (agree (list :n n :ptp ptp :mtp (batten::rmatrix-mtp rma) :bw (batten::rmatrix-bw rma))
+           (list (batten::real-matrix-for-back rma a ptp (batten::make-cpoint-array (1+ n))))
+           (with-stacks (s)
+             (with-foreign ((ap a (if (= ptp batten::+epoint+) :point-array :cpoint-array)))
+               (with-foreign-out ((qw :cpoint-array (1+ n)))
+                 (let ((err (c-flag-error-p (c-real-matrix-for-back (%rmatrix-to-foreign rma) ap ptp qw s))))
+                   (values err (list (from-foreign qw :cpoint-array (1+ n)))))))))))
+
+(define-oracle-test real-matrix-right-for-back (:file "math" :trials 3000)
+  (let* ((n (rnd 9)) (rma (%lu-rmatrix n)) (y (random-real-vector (1+ n))))
+    (agree (list :n n :mtp (batten::rmatrix-mtp rma) :bw (batten::rmatrix-bw rma))
+           (list (batten::real-matrix-right-for-back rma y (batten::make-real-vector (1+ n))))
+           (with-foreign ((yp y :real-vector))
+             (with-foreign-out ((x :real-vector (1+ n)))
+               (let ((err (c-flag-error-p (c-real-matrix-right-for-back (%rmatrix-to-foreign rma) yp x))))
+                 (values err (list (from-foreign x :real-vector (1+ n))))))))))
+
+(define-oracle-test real-matrix-for-back-pivot (:file "math" :trials 3000)
+  (let* ((n (rnd 9))
+         (rma (%wrong-shape (%dominant-rmatrix n 0 (1+ n) :bad-pivot 15)))
+         (ind (let ((v (batten::make-index-vector (1+ n))))
+                (dotimes (i (1+ n) v) (setf (aref v i) i))))
+         (b (random-real-vector (1+ n))))
+    ;; a random permutation, and now and then leading zeros in b
+    (dotimes (i (1+ n)) (rotatef (aref ind i) (aref ind (rnd (1+ n)))))
+    (when (zerop (rnd 3)) (dotimes (i (rnd (1+ n))) (setf (aref b i) 0d0)))
+    (agree (list :n n :ind ind :mtp (batten::rmatrix-mtp rma))
+           (list (batten::real-matrix-for-back-pivot rma ind (copy-seq b)))
+           (with-foreign ((ip ind :index-vector) (bp b :real-vector))
+             (let ((err (c-flag-error-p (c-real-matrix-for-back-pivot (%rmatrix-to-foreign rma) ip bp))))
+               (values err (list (from-foreign bp :real-vector (1+ n)))))))))
+
+(define-oracle-test real-matrix-single-value-decompose (:file "math" :trials 2000)
+  (let* ((m (rnd 9)) (n (if (zerop (rnd 15)) (1+ m) (rnd (1+ m))))
+         (a (random-real-matrix (1+ m) (1+ n) 10d0)))
+    ;; rank deficiency now and then: a zero column, a repeated column, a zero row
+    (case (rnd 6)
+      (0 (let ((j (rnd (1+ n)))) (dotimes (i (1+ m)) (setf (aref a i j) 0d0))))
+      (1 (let ((j (rnd (1+ n))) (k (rnd (1+ n)))) (dotimes (i (1+ m)) (setf (aref a i j) (aref a i k)))))
+      (2 (let ((i (rnd (1+ m)))) (dotimes (j (1+ n)) (setf (aref a i j) 0d0)))))
+    (agree (list :m m :n n :a a)
+           (let ((aa (%copy-array a)) (w (batten::make-real-vector (1+ n))) (v (batten::make-real-matrix (1+ n) (1+ n))))
+             (batten::real-matrix-single-value-decompose aa w v m n)
+             (list aa w v))
+           (with-foreign ((ap a :real-matrix))
+             (with-foreign-out ((w :real-vector (1+ n)) (v :real-matrix (1+ n) (1+ n)))
+               (let ((err (c-flag-error-p (c-real-matrix-single-value-decompose ap w v m n))))
+                 (values err (list (from-foreign ap :real-matrix (1+ m) (1+ n))
+                                   (from-foreign w :real-vector (1+ n))
+                                   (from-foreign v :real-matrix (1+ n) (1+ n))))))))))
+
+;;; N_FuncFindMinima takes a C function pointer, so it has no generated
+;;; binding: call it directly with a callback into the same Lisp function the
+;;; port calls.
+(defvar *%minima-function* nil)
+
+(cffi:defcallback %minima-callback :double ((u :double))
+  (funcall *%minima-function* u))
+
+(define-oracle-test func-find-minima (:file "math" :trials 2000)
+  (let* ((c (rnd-range -5d0 5d0)) (k (rnd-range 0.1d0 10d0)) (d (rnd-range -2d0 2d0))
+         (kind (rnd 4))
+         (fn (ecase kind
+               (0 (lambda (x) (declare (double-float x)) (+ (* k (- x c) (- x c)) d)))
+               (1 (lambda (x) (declare (double-float x)) (let ((y (- x c))) (+ (* k y y y y) d))))
+               (2 (lambda (x) (declare (double-float x)) (+ (- (cos (- x c))) (* 0.01d0 x))))
+               (3 (lambda (x) (declare (double-float x)) (+ (abs (- x c)) d)))))
+         (xa (- c (rnd-range 0.1d0 3d0))) (xc (+ c (rnd-range 0.1d0 3d0)))
+         (xb (+ xa (* (- xc xa) (rnd-range 0.2d0 0.8d0))))
+         (xa (if (zerop (rnd 2)) xa (shiftf xc xa)))
+         (fb (funcall fn xb))
+         (xtol (if (zerop (rnd 2)) 3d-8 (expt 10d0 (- (rnd 8)))))
+         (ftol (if (zerop (rnd 3)) (+ d (rnd 0.5d0)) -1d30)))
+    (agree (list :kind kind :c c :k k :d d :xa xa :xb xb :xc xc :xtol xtol :ftol ftol)
+           (multiple-value-list (batten::func-find-minima xa xb xc fb fn xtol ftol))
+           (let ((*%minima-function* fn))
+             (with-scalars ((xmin :double) (fmin :double))
+               (cffi:foreign-funcall "N_FuncFindMinima" :double xa :double xb :double xc :double fb
+                                     :pointer (cffi:callback %minima-callback)
+                                     :double xtol :double ftol :pointer xmin :pointer fmin :void)
+               (values nil (list (cffi:mem-ref xmin :double) (cffi:mem-ref fmin :double))))))))
