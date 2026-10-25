@@ -740,6 +740,539 @@ NLib: N_SrfRemoveOneKnot."
       (t (nurbs-error :cal-err 'srf-remove-one-knot)))
     mr))
 
+(defconstant +srf-tool--sto+ 1.0d-05
+  "sto in NL_SrfTool.cpp: span-maxima tolerance, relative to the domain length.")
+
+(defconstant +srf-tool--norem+ 1.0d+25
+  "NOREM in NL_SrfTool.cpp: a knot found not removable.")
+
+(defun srf-remove-all-knots (sur-p tol dir)
+  "A fresh copy of surface SUR-P with every knot removed -- u-knots for DIR
++udir+, v-knots for +vdir+, both for +uvdir+ -- whose removal keeps the
+accumulated error bound within TOL (scaled by wmin / (1 + pmax) for a
+rational surface), cheapest knot first; a removal that would push a weight
+outside [*wmin*, *wmax*] is refused.  The C writes into a caller's surface, or
+into SUR-P itself (the same surface either way); Batten returns the new one.
+As in the C, a failure of N_BasisFindAllSpanMaxima is absorbed (the bounds
+fall back to 0 and 1), but when the last such call failed and nothing reset
+the C's error flag afterwards the C reports failure: the Lisp then signals
+that call's condition.  A DIR other than the three, on which the C loops for
+ever, signals :cal-err.
+NLib: N_SrfRemoveAllKnots."
+  (declare (type surface sur-p) (type double-float tol) (type fixnum dir))
+  (unless (or (= dir +udir+) (= dir +vdir+) (= dir +uvdir+))
+    (nurbs-error :cal-err 'srf-remove-all-knots))
+  (let* ((n (surface-n sur-p))
+         (m (surface-m sur-p))
+         (p (surface-degree-u sur-p))
+         (q (surface-degree-v sur-p))
+         (up (surface-knots-u sur-p))
+         (vp (surface-knots-v sur-p))
+         (r (1- (length up)))
+         (s (1- (length vp)))
+         (ns n) (ms m)
+         (rat nil))
+    (declare (type fixnum n m p q r s ns ms) (type real-vector up vp))
+    ;; adjust the removal tolerance for a rational surface
+    (when (is-srf-rat sur-p)
+      (multiple-value-bind (wmin wmax pmin pmax) (srf-min-max-weight-pos-vectors sur-p)
+        (declare (type double-float wmin pmax) (ignore wmax pmin))
+        (setf tol (/ (* tol wmin) (+ 1d0 pmax))
+              rat t)))
+    (let* ((stu (* +srf-tool--sto+ (abs (- (aref up r) (aref up 0)))))
+           (stv (* +srf-tool--sto+ (abs (- (aref vp s) (aref vp 0)))))
+           (sur-q (srf-copy sur-p))
+           (qw (surface-cpoints sur-q))
+           (uq (surface-knots-u sur-q))
+           (vq (surface-knots-v sur-q))
+           ;; the knot vectors N_BasisFindAllSpanMaxima sees, of highest
+           ;; index r and s as N_SrfSetSizeIndices leaves them
+           (knu uq)
+           (knv vq)
+           (imax (nl-max p q))
+           (jmax (nl-max n m))
+           (size (1+ (* 2 imax)))
+           (alf (make-real-vector size))
+           (oma (make-real-vector size))
+           (bet (make-real-vector size))
+           (omb (make-real-vector size))
+           (rw (make-cpoint-net (1+ jmax) size))
+           (er (make-real-matrix (1+ r) (1+ s)))
+           (te (make-real-matrix (1+ r) (1+ s)))
+           (minl (make-real-vector (1+ imax)))
+           (maxl (make-real-vector (1+ imax)))
+           (minr (make-real-vector (1+ imax)))
+           (maxr (make-real-vector (1+ imax)))
+           (mx (make-real-vector (+ imax 2)))
+           (in-u (or (= dir +udir+) (= dir +uvdir+)))
+           (in-v (or (= dir +vdir+) (= dir +uvdir+)))
+           (bru (make-real-vector (if in-u (1+ r) 0)))
+           (sru (make-index-vector (if in-u (1+ r) 0)))
+           (brv (make-real-vector (if in-v (1+ s) 0)))
+           (srv (make-index-vector (if in-v (1+ s) 0)))
+           (lam 0d0) (oml 0d0)
+           (bu 0d0) (bv 0d0)
+           (ru 0) (su 0) (rv 0) (sv 0)
+           ;; the C's error flag: NIL, or the condition of the failed
+           ;; N_BasisFindAllSpanMaxima call that last set it
+           (err nil))
+      (declare (type double-float stu stv lam oml bu bv)
+               (type cpoint-net qw rw) (type real-vector uq vq knu knv alf oma bet omb
+                                                         minl maxl minr maxr mx bru brv)
+               (type real-matrix er te) (type index-vector sru srv)
+               (type fixnum imax jmax size ru su rv sv))
+      (flet ((span-maxima (kn i deg stol mins maxs)
+               ;; error = N_BasisFindAllSpanMaxima( ... ): the condition, or NIL
+               (declare (type real-vector kn mins maxs) (type fixnum i deg) (type double-float stol))
+               (handler-case (progn (basis-find-all-span-maxima kn i deg stol mins maxs) nil)
+                 (nurbs-error (c) c)))
+             (removed (b)
+               (declare (type double-float b))
+               (or (= b +bigd+) (= b +srf-tool--norem+))))
+        ;; initialize
+        (when in-u
+          (dotimes (i (1+ r))
+            (setf (aref bru i) +bigd+
+                  (aref sru i) 0)))
+        (when in-v
+          (dotimes (j (1+ s))
+            (setf (aref brv j) +bigd+
+                  (aref srv j) 0)))
+        ;; the maximum of the knot removal errors for each distinct knot
+        (when in-u
+          (setf ru (1+ p))
+          (do () ((not (<= ru n)))
+            (let ((i ru))
+              (declare (type fixnum i))
+              (do () ((not (and (<= ru n) (= (aref uq ru) (aref uq (1+ ru))))))
+                (incf ru))
+              (setf (aref sru ru) (1+ (- ru i)))
+              (setf (aref bru ru) (srf-remove-one-knot sur-p ru (aref sru ru) 0 m +udir+ (aref bru ru)))
+              (incf ru))))
+        (when in-v
+          (setf rv (1+ q))
+          (do () ((not (<= rv m)))
+            (let ((j rv))
+              (declare (type fixnum j))
+              (do () ((not (and (<= rv m) (= (aref vq rv) (aref vq (1+ rv))))))
+                (incf rv))
+              (setf (aref srv rv) (1+ (- rv j)))
+              (setf (aref brv rv) (srf-remove-one-knot sur-p rv (aref srv rv) 0 n +vdir+ (aref brv rv)))
+              (incf rv))))
+        ;; try to remove each knot
+        (do () (nil)
+          ;; the knot with the smallest error
+          (when in-u
+            (setf bu (aref bru (1+ p))
+                  su (aref sru (1+ p))
+                  ru (1+ p))
+            (do ((i (+ p 2) (1+ i))) ((> i (- r p 1)))
+              (declare (type fixnum i))
+              (when (< (aref bru i) bu)
+                (setf bu (aref bru i)
+                      su (aref sru i)
+                      ru i))))
+          (when in-v
+            (setf bv (aref brv (1+ q))
+                  sv (aref srv (1+ q))
+                  rv (1+ q))
+            (do ((j (+ q 2) (1+ j))) ((> j (- s q 1)))
+              (declare (type fixnum j))
+              (when (< (aref brv j) bv)
+                (setf bv (aref brv j)
+                      sv (aref srv j)
+                      rv j))))
+          ;; no more removable knot: finished
+          (when (cond ((= dir +udir+) (removed bu))
+                      ((= dir +vdir+) (removed bv))
+                      (t (and (removed bu) (removed bv))))
+            (return))
+          ;; the C's switch; its breaks (and its continues) leave it
+          (block switch
+            (if (= (if (= dir +uvdir+) (if (< bu bv) +udir+ +vdir+) dir) +udir+)
+                ;; remove in the u-direction
+                (let ((rmf t) (wfl t) (k 0) (l 0) (odd (oddp (+ p su))))
+                  (declare (type fixnum k l))
+                  (if odd
+                      ;; the maximums of the basis functions over each span
+                      (progn
+                        (setf k (truncate (+ p su 1) 2)
+                              l (+ (- ru k) p 1))
+                        (let* ((al (/ (- (aref uq ru) (aref uq (- ru k)))
+                                      (- (aref uq (+ (- ru k) p 1)) (aref uq (- ru k)))))
+                               (be (/ (- (aref uq ru) (aref uq (+ (- ru k) 1)))
+                                      (- (aref uq (+ (- ru k) p 2)) (aref uq (+ (- ru k) 1)))))
+                               (ob (- 1d0 be)))
+                          (declare (type double-float al be ob))
+                          (setf lam (/ al (+ al be))
+                                oml (- 1d0 lam))
+                          (setf err (span-maxima knu (- ru k) p stu minl maxl))
+                          (when err
+                            (dotimes (i (1+ p))
+                              (setf (aref minl i) 0d0
+                                    (aref maxl i) 1d0)))
+                          (setf err (span-maxima knu (1+ (- ru k)) p stu minr maxr))
+                          (when err
+                            (dotimes (i (1+ p))
+                              (setf (aref minr i) 0d0
+                                    (aref maxr i) 1d0)))
+                          (setf (aref mx 0) (* (* lam al) (aref maxl 0)))
+                          (do ((i 1 (1+ i))) ((> i p))
+                            (declare (type fixnum i))
+                            (setf (aref minl i) (* (aref minl i) (* lam al))
+                                  (aref minr (1- i)) (* (aref minr (1- i)) (* oml ob))
+                                  (aref maxl i) (* (aref maxl i) (* lam al))
+                                  (aref maxr (1- i)) (* (aref maxr (1- i)) (* oml ob)))
+                            (setf (aref mx i) (nl-max (abs (- (aref maxl i) (aref minr (1- i))))
+                                                      (abs (- (aref maxr (1- i)) (aref minl i))))))
+                          (setf (aref mx (1+ p)) (* (* oml ob) (aref maxr p)))))
+                      ;; the maximum of the basis function
+                      (progn
+                        (setf k (truncate (+ p su) 2)
+                              l (+ (- ru k) p))
+                        (setf err (span-maxima knu (- ru k) p stu minl mx))
+                        (when err
+                          (dotimes (i (1+ p))
+                            (setf (aref mx i) 1d0)))))
+                  ;; check the error
+                  (do ((i (- ru k) (1+ i))) ((> i l))
+                    (declare (type fixnum i))
+                    (when (/= (aref uq i) (aref uq (1+ i)))
+                      (let ((tmp (* (aref mx (+ (- i ru) k)) bu)))
+                        (declare (type double-float tmp))
+                        (do ((j q (1+ j))) ((> j (- s q 1)))
+                          (declare (type fixnum j))
+                          (when (/= (aref vq j) (aref vq (1+ j)))
+                            (setf (aref te i j) (+ (aref er i j) tmp))
+                            (when (> (aref te i j) tol)
+                              (setf rmf nil)
+                              (return))))))
+                    (unless rmf (return)))
+                  (unless rmf
+                    ;; the knot is not removable
+                    (setf (aref bru ru) +srf-tool--norem+)
+                    (return-from switch))
+                  ;; the error test passed: update the error matrix and remove
+                  ;; the knot
+                  (do ((i (- ru k) (1+ i))) ((> i l))
+                    (declare (type fixnum i))
+                    (do ((j q (1+ j))) ((> j (- s q 1)))
+                      (declare (type fixnum j))
+                      (when (and (/= (aref uq i) (aref uq (1+ i))) (/= (aref vq j) (aref vq (1+ j))))
+                        (setf (aref er i j) (aref te i j)))))
+                  (let* ((fout (truncate (- (* 2 ru) su p) 2))
+                         (first (- ru p))
+                         (last (- ru su))
+                         (off (1- first)))
+                    (declare (type fixnum fout first last off))
+                    ;; save some parameters
+                    (let ((i first) (j last))
+                      (declare (type fixnum i j))
+                      (do () ((not (> (- j i) 0)))
+                        (setf (aref alf (- i first)) (/ (- (aref uq (+ i p 1)) (aref uq i))
+                                                        (- (aref uq ru) (aref uq i)))
+                              (aref oma (- i first)) (- 1d0 (aref alf (- i first)))
+                              (aref bet (- j first)) (/ (- (aref uq (+ j p 1)) (aref uq j))
+                                                        (- (aref uq (+ j p 1)) (aref uq ru)))
+                              (aref omb (- j first)) (- 1d0 (aref bet (- j first))))
+                        (incf i)
+                        (decf j)))
+                    ;; remove the knot for each row
+                    (block rows
+                      (dotimes (col (1+ m))
+                        (let ((i first) (j last) (ii 1) (jj (- last off)))
+                          (declare (type fixnum i j ii jj))
+                          (%net-copy qw off col rw col 0)
+                          (%net-copy qw (1+ last) col rw col (- (1+ last) off))
+                          ;; new control points for one removal step
+                          (fast
+                            (do () ((not (> (- j i) 0)))
+                              (%net-combine (aref alf (- i first)) qw i col (aref oma (- i first))
+                                            rw col (1- ii) rw col ii)
+                              (%net-combine (aref bet (- j first)) qw j col (aref omb (- j first))
+                                            rw col (1+ jj) rw col jj)
+                              (incf i) (decf j) (incf ii) (decf jj)))
+                          ;; disallowed weights
+                          (when rat
+                            (let ((wmin +bigd+) (wmax +smad+))
+                              (declare (type double-float wmin wmax))
+                              (setf i first
+                                    j last)
+                              (do () ((not (> (- j i) 0)))
+                                (let ((wi (aref rw col (- i off) 3))
+                                      (wj (aref rw col (- j off) 3)))
+                                  (declare (type double-float wi wj))
+                                  (when (< wi wmin) (setf wmin wi))
+                                  (when (< wj wmin) (setf wmin wj))
+                                  (when (> wi wmax) (setf wmax wi))
+                                  (when (> wj wmax) (setf wmax wj))
+                                  (incf i) (decf j)))
+                              (when (or (< wmin (the double-float *wmin*))
+                                        (> wmax (the double-float *wmax*)))
+                                (setf wfl nil)
+                                (return-from rows))))
+                          (when odd
+                            (%net-combine lam rw col (1+ jj) oml rw col (1- ii) rw col (1+ jj))))))
+                    ;; weights out of the allowable range: the knot stays
+                    (unless wfl
+                      (setf (aref bru ru) +srf-tool--norem+)
+                      (return-from switch))
+                    ;; save the control points
+                    (dotimes (col (1+ m))
+                      (let ((i first) (j last))
+                        (declare (type fixnum i j))
+                        (fast
+                          (do () ((not (> (- j i) 0)))
+                            (%net-copy rw col (- i off) qw i col)
+                            (%net-copy rw col (- j off) qw j col)
+                            (incf i) (decf j)))))
+                    ;; successful removal: shift down some entities
+                    (when (= su 1)
+                      (do ((j q (1+ j))) ((> j (- s q 1)))
+                        (declare (type fixnum j))
+                        (when (/= (aref vq j) (aref vq (1+ j)))
+                          (setf (aref er (1- ru) j) (nl-max (aref er (1- ru) j) (aref er ru j))))))
+                    (when (> su 1)
+                      (setf (aref sru (1- ru)) (1- (aref sru ru))))
+                    (do ((i (1+ ru) (1+ i))) ((> i r))
+                      (declare (type fixnum i))
+                      (setf (aref bru (1- i)) (aref bru i)
+                            (aref sru (1- i)) (aref sru i)
+                            (aref uq (1- i)) (aref uq i))
+                      (do ((j q (1+ j))) ((> j m))
+                        (declare (type fixnum j))
+                        (setf (aref er (1- i) j) (aref er i j))))
+                    (dotimes (col (1+ m))
+                      (fast
+                        (do ((i (1+ fout) (1+ i))) ((> i n))
+                          (declare (type fixnum i))
+                          (%net-copy qw i col qw (1- i) col))))
+                    (decf n)
+                    (decf r)
+                    ;; N_SrfSetSizeIndices
+                    (setf knu (subseq uq 0 (1+ r)))
+                    ;; no more internal knots: finished
+                    (when (if (= dir +udir+) (= n p) (and (= dir +uvdir+) (= n p) (= m q)))
+                      (return-from switch))
+                    ;; update the error bounds
+                    (let ((k (nl-max (- ru p) (1+ p)))
+                          (l (nl-min n (- (+ ru p) su))))
+                      (declare (type fixnum k l))
+                      (do ((i k (1+ i))) ((> i l))
+                        (declare (type fixnum i))
+                        (when (and (/= (aref uq i) (aref uq (1+ i)))
+                                   (/= (aref bru i) +srf-tool--norem+))
+                          (setf (aref bru i)
+                                (srf-remove-one-knot sur-q i (aref sru i) 0 m +udir+ (aref bru i))
+                                err nil))))
+                    (when (= dir +uvdir+)
+                      (do ((j (1+ q) (1+ j))) ((> j (- s q 1)))
+                        (declare (type fixnum j))
+                        (when (and (/= (aref vq j) (aref vq (1+ j)))
+                                   (/= (aref brv j) +srf-tool--norem+))
+                          (setf (aref brv j)
+                                (srf-remove-one-knot sur-q j (aref srv j) first last +vdir+ (aref brv j))
+                                err nil))))))
+                ;; remove in the v-direction
+                (let ((rmf t) (wfl t) (k 0) (l 0) (odd (oddp (+ q sv))))
+                  (declare (type fixnum k l))
+                  (if odd
+                      ;; the maximums of the basis functions over each span
+                      (progn
+                        (setf k (truncate (+ q sv 1) 2)
+                              l (+ (- rv k) q 1))
+                        (let* ((al (/ (- (aref vq rv) (aref vq (- rv k)))
+                                      (- (aref vq (+ (- rv k) q 1)) (aref vq (- rv k)))))
+                               (be (/ (- (aref vq rv) (aref vq (+ (- rv k) 1)))
+                                      (- (aref vq (+ (- rv k) q 2)) (aref vq (+ (- rv k) 1)))))
+                               (ob (- 1d0 be)))
+                          (declare (type double-float al be ob))
+                          (setf lam (/ al (+ al be))
+                                oml (- 1d0 lam))
+                          (setf err (span-maxima knv (- rv k) q stv minl maxl))
+                          (when err
+                            (dotimes (j (1+ q))
+                              (setf (aref minl j) 0d0
+                                    (aref maxl j) 1d0)))
+                          (setf err (span-maxima knv (1+ (- rv k)) q stv minr maxr))
+                          (when err
+                            (dotimes (j (1+ q))
+                              (setf (aref minr j) 0d0
+                                    (aref maxr j) 1d0)))
+                          (setf (aref mx 0) (* (* lam al) (aref maxl 0)))
+                          (do ((j 1 (1+ j))) ((> j q))
+                            (declare (type fixnum j))
+                            (setf (aref minl j) (* (aref minl j) (* lam al))
+                                  (aref minr (1- j)) (* (aref minr (1- j)) (* oml ob))
+                                  (aref maxl j) (* (aref maxl j) (* lam al))
+                                  (aref maxr (1- j)) (* (aref maxr (1- j)) (* oml ob)))
+                            (setf (aref mx j) (nl-max (abs (- (aref maxl j) (aref minr (1- j))))
+                                                      (abs (- (aref maxr (1- j)) (aref minl j))))))
+                          (setf (aref mx (1+ q)) (* (* oml ob) (aref maxr q)))))
+                      ;; the maximum of the basis function
+                      (progn
+                        (setf k (truncate (+ q sv) 2)
+                              l (+ (- rv k) q))
+                        (setf err (span-maxima knv (- rv k) q stv minl mx))
+                        (when err
+                          (dotimes (j (1+ q))
+                            (setf (aref mx j) 1d0)))))
+                  ;; check the error
+                  (do ((j (- rv k) (1+ j))) ((> j l))
+                    (declare (type fixnum j))
+                    (when (/= (aref vq j) (aref vq (1+ j)))
+                      (let ((tmp (* (aref mx (+ (- j rv) k)) bv)))
+                        (declare (type double-float tmp))
+                        (do ((i p (1+ i))) ((> i (- r p 1)))
+                          (declare (type fixnum i))
+                          (when (/= (aref uq i) (aref uq (1+ i)))
+                            (setf (aref te i j) (+ (aref er i j) tmp))
+                            (when (> (aref te i j) tol)
+                              (setf rmf nil)
+                              (return))))))
+                    (unless rmf (return)))
+                  (unless rmf
+                    ;; the knot is not removable
+                    (setf (aref brv rv) +srf-tool--norem+)
+                    (return-from switch))
+                  ;; the error test passed: update the error matrix and remove
+                  ;; the knot
+                  (do ((j (- rv k) (1+ j))) ((> j l))
+                    (declare (type fixnum j))
+                    (do ((i p (1+ i))) ((> i (- r p 1)))
+                      (declare (type fixnum i))
+                      (when (and (/= (aref vq j) (aref vq (1+ j))) (/= (aref uq i) (aref uq (1+ i))))
+                        (setf (aref er i j) (aref te i j)))))
+                  (let* ((fout (truncate (- (* 2 rv) sv q) 2))
+                         (first (- rv q))
+                         (last (- rv sv))
+                         (off (1- first)))
+                    (declare (type fixnum fout first last off))
+                    ;; save some parameters
+                    (let ((i first) (j last))
+                      (declare (type fixnum i j))
+                      (do () ((not (> (- j i) 0)))
+                        (setf (aref alf (- i first)) (/ (- (aref vq (+ i q 1)) (aref vq i))
+                                                        (- (aref vq rv) (aref vq i)))
+                              (aref oma (- i first)) (- 1d0 (aref alf (- i first)))
+                              (aref bet (- j first)) (/ (- (aref vq (+ j q 1)) (aref vq j))
+                                                        (- (aref vq (+ j q 1)) (aref vq rv)))
+                              (aref omb (- j first)) (- 1d0 (aref bet (- j first))))
+                        (incf i)
+                        (decf j)))
+                    ;; remove the knot for each column
+                    (block cols
+                      (dotimes (row (1+ n))
+                        (let ((i first) (j last) (ii 1) (jj (- last off)))
+                          (declare (type fixnum i j ii jj))
+                          (%net-copy qw row off rw row 0)
+                          (%net-copy qw row (1+ last) rw row (- (1+ last) off))
+                          ;; new control points for one removal step
+                          (fast
+                            (do () ((not (> (- j i) 0)))
+                              (%net-combine (aref alf (- i first)) qw row i (aref oma (- i first))
+                                            rw row (1- ii) rw row ii)
+                              (%net-combine (aref bet (- j first)) qw row j (aref omb (- j first))
+                                            rw row (1+ jj) rw row jj)
+                              (incf i) (decf j) (incf ii) (decf jj)))
+                          ;; disallowed weights
+                          (when rat
+                            (let ((wmin +bigd+) (wmax +smad+))
+                              (declare (type double-float wmin wmax))
+                              (setf i first
+                                    j last)
+                              (do () ((not (> (- j i) 0)))
+                                (let ((wi (aref rw row (- i off) 3))
+                                      (wj (aref rw row (- j off) 3)))
+                                  (declare (type double-float wi wj))
+                                  (when (< wi wmin) (setf wmin wi))
+                                  (when (< wj wmin) (setf wmin wj))
+                                  (when (> wi wmax) (setf wmax wi))
+                                  (when (> wj wmax) (setf wmax wj))
+                                  (incf i) (decf j)))
+                              (when (or (< wmin (the double-float *wmin*))
+                                        (> wmax (the double-float *wmax*)))
+                                (setf wfl nil)
+                                (return-from cols))))
+                          (when odd
+                            (%net-combine lam rw row (1+ jj) oml rw row (1- ii) rw row (1+ jj))))))
+                    ;; weights out of the allowable range: the knot stays
+                    (unless wfl
+                      (setf (aref brv rv) +srf-tool--norem+)
+                      (return-from switch))
+                    ;; save the control points
+                    (dotimes (row (1+ n))
+                      (let ((i first) (j last))
+                        (declare (type fixnum i j))
+                        (fast
+                          (do () ((not (> (- j i) 0)))
+                            (%net-copy rw row (- i off) qw row i)
+                            (%net-copy rw row (- j off) qw row j)
+                            (incf i) (decf j)))))
+                    ;; successful removal: shift down some entities
+                    (when (= sv 1)
+                      (do ((i p (1+ i))) ((> i (- r p 1)))
+                        (declare (type fixnum i))
+                        (when (/= (aref uq i) (aref uq (1+ i)))
+                          (setf (aref er i (1- rv)) (nl-max (aref er i (1- rv)) (aref er i rv))))))
+                    (when (> sv 1)
+                      (setf (aref srv (1- rv)) (1- (aref srv rv))))
+                    (do ((j (1+ rv) (1+ j))) ((> j s))
+                      (declare (type fixnum j))
+                      (setf (aref brv (1- j)) (aref brv j)
+                            (aref srv (1- j)) (aref srv j)
+                            (aref vq (1- j)) (aref vq j))
+                      (do ((i p (1+ i))) ((> i n))
+                        (declare (type fixnum i))
+                        (setf (aref er i (1- j)) (aref er i j))))
+                    (dotimes (row (1+ n))
+                      (fast
+                        (do ((j (1+ fout) (1+ j))) ((> j m))
+                          (declare (type fixnum j))
+                          (%net-copy qw row j qw row (1- j)))))
+                    (decf m)
+                    (decf s)
+                    ;; N_SrfSetSizeIndices
+                    (setf knv (subseq vq 0 (1+ s)))
+                    ;; no more internal knots: finished
+                    (when (if (= dir +vdir+) (= m q) (and (= dir +uvdir+) (= n p) (= m q)))
+                      (return-from switch))
+                    ;; update the error bounds
+                    (let ((k (nl-max (- rv q) (1+ q)))
+                          (l (nl-min m (- (+ rv q) sv))))
+                      (declare (type fixnum k l))
+                      (do ((j k (1+ j))) ((> j l))
+                        (declare (type fixnum j))
+                        (when (and (/= (aref vq j) (aref vq (1+ j)))
+                                   (/= (aref brv j) +srf-tool--norem+))
+                          (setf (aref brv j)
+                                (srf-remove-one-knot sur-q j (aref srv j) 0 n +vdir+ (aref brv j))
+                                err nil))))
+                    (when (= dir +uvdir+)
+                      (do ((i (1+ p) (1+ i))) ((> i (- r p 1)))
+                        (declare (type fixnum i))
+                        (when (and (/= (aref uq i) (aref uq (1+ i)))
+                                   (/= (aref bru i) +srf-tool--norem+))
+                          (setf (aref bru i)
+                                (srf-remove-one-knot sur-q i (aref sru i) first last +udir+ (aref bru i))
+                                err nil)))))))))
+        ;; compact the surface: it keeps the knots and control points left, as
+        ;; N_SrfSetSizeIndices records them in C
+        (when (or (< n ns) (< m ms))
+          (let ((net (make-cpoint-net (1+ n) (1+ m))))
+            (dotimes (i (1+ n))
+              (dotimes (j (1+ m))
+                (%net-copy qw i j net i j)))
+            (setf (surface-cpoints sur-q) net
+                  (surface-knots-u sur-q) (subseq uq 0 (1+ r))
+                  (surface-knots-v sur-q) (subseq vq 0 (1+ s))))
+          (srf-compress sur-q)
+          (setf err nil))
+        ;; the C returns its error flag as the last call left it
+        (when err
+          (error err))
+        sur-q))))
+
 ;;; ---------------------------------------------------------- patch extraction
 
 (defun srf-extract-patch (sur-p ul ur vl vr)
