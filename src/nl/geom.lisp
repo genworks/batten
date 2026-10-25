@@ -669,3 +669,201 @@ NLib: N_PtsAreColinear."
             ((and (> dbc dca) (> dbc dab)) (perp-below-tol a b c))
             ((and (> dca dab) (> dca dbc)) (perp-below-tol b c a))
             (t nil)))))
+
+;;; ------------------------------------------------------------ level 2, group 6
+
+(defun isect-plane-plane (pl1 pl2 p v)
+  "Intersect planes PL1 and PL2.  Returns +true+ and writes a point of the
+intersection line into P and its direction (the cross product of the unit
+normals, not normalized) into V; returns +false+, writing neither, when the
+planes are parallel.  Signals :geo-err for a zero normal.
+NLib: N_IsectPlanePlane."
+  (declare (type plane pl1 pl2) (type point p v))
+  (let ((p1 (make-point)) (p2 (make-point)) (n1 (make-point)) (n2 (make-point)))
+    (declare (dynamic-extent p1 p2 n1 n2))
+    (plane-get-data pl1 p1 n1)
+    (plane-get-data pl2 p2 n2)
+    (multiple-value-bind (a1 b1 c1 d1) (plane-pt-normal-to-implicit p1 n1)
+      (declare (type double-float a1 b1 c1 d1))
+      (multiple-value-bind (a2 b2 c2 d2) (plane-pt-normal-to-implicit p2 n2)
+        (declare (type double-float a2 b2 c2 d2))
+        (let* ((f (- (* b1 c2) (* b2 c1)))
+               (g (- (* c1 a2) (* c2 a1)))
+               (h (- (* a1 b2) (* a2 b1)))
+               (det (+ (+ (* f f) (* g g)) (* h h))))
+          (declare (type double-float f g h det))
+          (when (< (abs det) (the double-float *zctl*))
+            (return-from isect-plane-plane +false+))
+          (let* ((fac (/ 1d0 det))
+                 (dc (- (* d1 c2) (* c1 d2)))
+                 (db (- (* d1 b2) (* b1 d2)))
+                 (ad (- (* a1 d2) (* a2 d1)))
+                 (x0 (* fac (- (* g dc) (* h db))))
+                 (y0 (* (- fac) (+ (* f dc) (* h ad))))
+                 (z0 (* fac (+ (* f db) (* g ad)))))
+            (declare (type double-float fac dc db ad x0 y0 z0))
+            (pt-from-xyz x0 y0 z0 p)
+            (pt-from-xyz f g h v)
+            +true+))))))
+
+(defun project-pt-line (lsg p q)
+  "Project point P onto line LSG, through the plane through P normal to the
+line.  Writes the projection into Q and returns (values flg t), as
+isect-line-plane does: FLG +false+ when the projection falls outside a bounded
+line (Q then unwritten).  Signals what isect-line-plane signals.
+NLib: N_ProjectPtLine."
+  (declare (type lineseg lsg) (type point p q))
+  (let ((nor (%make-plane (make-point) (make-point))))
+    (declare (dynamic-extent nor))
+    (create-plane-pt-normal nor p (lineseg-v lsg))
+    (isect-line-plane lsg nor q)))
+
+(defun project-pt-plane (pln p q)
+  "Project point P onto plane PLN along its normal, writing the projection into
+Q, which is left unwritten in the (numerically degenerate) case that the line
+comes out parallel to the plane.  Returns Q.  Signals what isect-line-plane
+signals (:geo-err for a zero normal).
+NLib: N_ProjectPtPlane."
+  (declare (type plane pln) (type point p q))
+  (let ((n (make-point))
+        (lsg (%make-lineseg (make-point) (make-point) +unbounded+)))
+    (declare (dynamic-extent n lsg))
+    (plane-get-normal pln n)
+    (create-line-start-dir-vector lsg p n +unbounded+)
+    (isect-line-plane lsg pln q)
+    q))
+
+(defun pts-1d-get-max-extent (p n)
+  "The maximum extent of points P[0..N]: the diagonal of their min-max box.
+NLib: N_Pts1dGetMaxExtent."
+  (declare (type point-array p) (type fixnum n))
+  (let ((box (make-real-vector 6)))
+    (declare (dynamic-extent box))
+    (polygon-get-b-box (e-polygon-from-pts n p) box)
+    (b-box-get-diagonal box)))
+
+(defun pts-2d-get-max-extent (p n m)
+  "The maximum extent of points P[0..N][0..M]: the diagonal of their min-max
+box.
+NLib: N_Pts2dGetMaxExtent."
+  (declare (type point-net p) (type fixnum n m))
+  (let ((box (make-real-vector 6)))
+    (declare (dynamic-extent box))
+    (e-net-get-b-box (e-net-from-pts n m p) box)
+    (b-box-get-diagonal box)))
+
+(defun create-transform-matrix-from-axes (o1 x1 y1 z1 o2 x2 y2 z2 rma)
+  "Write into RMA the 4x4 matrix (highest indexes 3, 3) mapping the orthonormal
+frame O1, <X1 Y1 Z1> onto the frame O2, <X2 Y2 Z2>, applied from the left:
+T(O2) * R2 * R1^T * T(-O1), multiplied in that order.  A NULL RMA
+(make-rmatrix) gets storage; an existing one must be at least 3 x 3
+(:sto-err).  Returns RMA.
+NLib: N_CreateTransformMatrixFromAxes."
+  (declare (type point o1 x1 y1 z1 o2 x2 y2 z2) (type rmatrix rma))
+  (%check-mem-real-matrix rma 3 3 +mt-full+ 3 'create-transform-matrix-from-axes)
+  (let ((rm1 (set-real-matrix (make-rmatrix) 3 3 +mt-full+ 3))
+        (rmi (set-real-matrix (make-rmatrix) 3 3 +mt-full+ 3))
+        (rt1 (set-real-matrix (make-rmatrix) 3 3 +mt-full+ 3))
+        (rt2 (set-real-matrix (make-rmatrix) 3 3 +mt-full+ 3))
+        (rmw (set-real-matrix (make-rmatrix) 3 3 +mt-full+ 3)))
+    (let ((r1 (rmatrix-rm rm1)) (ri (rmatrix-rm rmi))
+          (t1 (rmatrix-rm rt1)) (t2 (rmatrix-rm rt2)))
+      (declare (type real-matrix r1 ri t1 t2))
+      ;; X1, Y1, Z1 as the rows of R1 (the inverse rotation)
+      (multiple-value-bind (x y z) (pt-to-xyz x1)
+        (setf (aref r1 0 0) x (aref r1 0 1) y (aref r1 0 2) z))
+      (setf (aref r1 0 3) 0d0)
+      (multiple-value-bind (x y z) (pt-to-xyz y1)
+        (setf (aref r1 1 0) x (aref r1 1 1) y (aref r1 1 2) z))
+      (setf (aref r1 1 3) 0d0)
+      (multiple-value-bind (x y z) (pt-to-xyz z1)
+        (setf (aref r1 2 0) x (aref r1 2 1) y (aref r1 2 2) z))
+      (setf (aref r1 2 3) 0d0
+            (aref r1 3 0) 0d0 (aref r1 3 1) 0d0 (aref r1 3 2) 0d0 (aref r1 3 3) 1d0)
+      ;; X2, Y2, Z2 as the columns of RI (the forward rotation)
+      (multiple-value-bind (x y z) (pt-to-xyz x2)
+        (setf (aref ri 0 0) x (aref ri 1 0) y (aref ri 2 0) z))
+      (setf (aref ri 0 3) 0d0)
+      (multiple-value-bind (x y z) (pt-to-xyz y2)
+        (setf (aref ri 0 1) x (aref ri 1 1) y (aref ri 2 1) z))
+      (setf (aref ri 1 3) 0d0)
+      (multiple-value-bind (x y z) (pt-to-xyz z2)
+        (setf (aref ri 0 2) x (aref ri 1 2) y (aref ri 2 2) z))
+      (setf (aref ri 2 3) 0d0
+            (aref ri 3 0) 0d0 (aref ri 3 1) 0d0 (aref ri 3 2) 0d0 (aref ri 3 3) 1d0)
+      ;; -O1 into T1 (the inverse translation)
+      (multiple-value-bind (x y z) (pt-to-xyz o1)
+        (declare (type double-float x y z))
+        (setf (aref t1 0 0) 1d0 (aref t1 0 1) 0d0 (aref t1 0 2) 0d0 (aref t1 0 3) (- x)
+              (aref t1 1 0) 0d0 (aref t1 1 1) 1d0 (aref t1 1 2) 0d0 (aref t1 1 3) (- y)
+              (aref t1 2 0) 0d0 (aref t1 2 1) 0d0 (aref t1 2 2) 1d0 (aref t1 2 3) (- z)
+              (aref t1 3 0) 0d0 (aref t1 3 1) 0d0 (aref t1 3 2) 0d0 (aref t1 3 3) 1d0))
+      ;; +O2 into T2 (the forward translation)
+      (multiple-value-bind (x y z) (pt-to-xyz o2)
+        (declare (type double-float x y z))
+        (setf (aref t2 0 0) 1d0 (aref t2 0 1) 0d0 (aref t2 0 2) 0d0 (aref t2 0 3) x
+              (aref t2 1 0) 0d0 (aref t2 1 1) 1d0 (aref t2 1 2) 0d0 (aref t2 1 3) y
+              (aref t2 2 0) 0d0 (aref t2 2 1) 0d0 (aref t2 2 2) 1d0 (aref t2 2 3) z
+              (aref t2 3 0) 0d0 (aref t2 3 1) 0d0 (aref t2 3 2) 0d0 (aref t2 3 3) 1d0)))
+    ;; rmw = rt2 * rmi; rt2 = rmw * rm1; rma = rt2 * rt1
+    (real-matrix-multiply rt2 rmi rmw)
+    (real-matrix-multiply rmw rm1 rt2)
+    (real-matrix-multiply rt2 rt1 rma)
+    rma))
+
+(defun line-fit-2d-pts (p n)
+  "The least-squares line through the 2D points P[0..N] (z ignored), as the
+coefficients (values a b c) of its normalized equation a*x + b*y + c = 0, (a
+b) the unit normal: the line passes through the centroid along the singular
+vector of the scatter matrix with the smallest singular value.  As in the C,
+a failure of the decomposition is ignored.  Signals :num-err for N below 0.
+NLib: N_LineFit2dPts."
+  (declare (type point-array p) (type fixnum n))
+  (let* ((ld 1)
+         (y (make-point-array (1+ n)))
+         (mw (make-real-vector (1+ ld)))
+         (mu (make-real-matrix (1+ ld) (1+ ld)))
+         (mv (make-real-matrix (1+ ld) (1+ ld)))
+         (qx 0d0) (qy 0d0)
+         (cnt (+ (float n 1d0) 1d0)))
+    (declare (type fixnum ld) (type point-array y) (type real-vector mw)
+             (type real-matrix mu mv) (type double-float qx qy cnt))
+    (when (float-op-is-bad 1d0 cnt +division+)
+      (nurbs-error :num-err 'line-fit-2d-pts))
+    ;; Q, the centroid
+    (fast
+      (dotimes (i (1+ n))
+        (setf qx (+ qx (aref p i 0))
+              qy (+ qy (aref p i 1)))))
+    (setf qx (/ qx cnt)
+          qy (/ qy cnt))
+    ;; Y[i] = P[i] - Q
+    (fast
+      (dotimes (i (1+ n))
+        (setf (aref y i 0) (- (aref p i 0) qx)
+              (aref y i 1) (- (aref p i 1) qy))))
+    ;; M = Sum_i (Yi.Yi I - Yi Yi^T)
+    (fast
+      (dotimes (i (1+ n))
+        (let* ((yx (aref y i 0)) (yy (aref y i 1))
+               (ydoty (+ (* yx yx) (* yy yy))))
+          (declare (type double-float yx yy ydoty))
+          (setf (aref mu 0 0) (+ (aref mu 0 0) (- ydoty (* yx yx)))
+                (aref mu 0 1) (+ (aref mu 0 1) (- (* yx yy)))
+                (aref mu 1 0) (+ (aref mu 1 0) (- (* yy yx)))
+                (aref mu 1 1) (+ (aref mu 1 1) (- ydoty (* yy yy)))))))
+    ;; the C ignores the decomposition's error
+    (handler-case (real-matrix-single-value-decompose mu mw mv ld ld)
+      (nurbs-error () nil))
+    ;; the singular vector of the smallest singular value
+    (let ((imin 0) (sval (aref mw 0)))
+      (declare (type fixnum imin) (type double-float sval))
+      (do ((i 1 (1+ i))) ((> i ld))
+        (declare (type fixnum i))
+        (when (> sval (aref mw i))
+          (setf imin i sval (aref mw i))))
+      (let* ((a (- (aref mu 1 imin)))
+             (b (aref mu 0 imin))
+             (c (- (+ (* a qx) (* b qy)))))
+        (declare (type double-float a b c))
+        (values a b c)))))
