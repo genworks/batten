@@ -156,3 +156,118 @@ Return CD.  DER is at most +maxder+.  NLib: N_CrvDerivs."
                   (incf cz (* d (aref pz i)))))
               (setf (aref cd k 0) cx (aref cd k 1) cy (aref cd k 2) cz)))
           cd)))))
+
+(declaim (inline %point-array-row))
+(defun %point-array-row (pa i pt)
+  "Copy row I of point-array PA into point PT and return PT."
+  (declare (type point-array pa) (type index i) (type point pt))
+  (set-point pt (aref pa i 0) (aref pa i 1) (aref pa i 2)))
+
+(defun crv-eval-tangent (cur u flg p tv)
+  "Write the point of curve CUR at parameter U into point P and the unit
+tangent there into vector TV; return P.  FLG (+left+ or +right+) picks the
+span at a knot.  Signals as crv-derivs does, and :geo-err for a zero
+first derivative.
+NLib: N_CrvEvalTangent."
+  (declare (type curve cur) (type double-float u) (type fixnum flg) (type point p tv))
+  (let ((cd (make-point-array 2))
+        (d1 (make-point)))
+    (declare (dynamic-extent cd d1))
+    (crv-derivs cur u flg 1 cd)
+    (%point-array-row cd 0 p)
+    (vector-normalize (%point-array-row cd 1 d1) tv)
+    p))
+
+(defun crv-get-min-max-weights-and-pts (cur)
+  "The minimum and maximum weights of curve CUR (+no-w+ for both when it is
+not rational) and the minimum and maximum distances of its control points
+from their Euclidean centroid, as (values wmin wmax pmin pmax).  PMAX is
+always 0, as NLib sets it (see the C header).
+NLib: N_CrvGetMinMaxWeightsAndPts."
+  (declare (type curve cur))
+  (let* ((pw (curve-cpoints cur))
+         (n (curve-n cur))
+         (wmin 0d0) (wmax 0d0) (pmin 0d0) (pmax 0d0)
+         (p (make-point))
+         (c (make-point)))
+    (declare (type cpoint-array pw) (type fixnum n)
+             (type double-float wmin wmax pmin pmax) (dynamic-extent p c))
+    (cond ((is-crv-rat cur)
+           (setf wmin (aref pw 0 3)
+                 wmax (aref pw 0 3))
+           (do ((i 1 (1+ i))) ((> i n))
+             (declare (type fixnum i))
+             (let ((w (aref pw i 3)))
+               (declare (type double-float w))
+               (when (< w wmin) (setf wmin w))
+               (when (> w wmax) (setf wmax w)))))
+          (t (setf wmin +no-w+
+                   wmax +no-w+)))
+    (fast
+      (dotimes (i (1+ n))
+        (multiple-value-bind (x y z) (%cpoint-row-to-euclid pw i)
+          (set-point p x y z))
+        (sum-2-pts p c c))
+      (scale-pt (/ 1d0 (+ (float n 1d0) 1d0)) c c)
+      (dotimes (i (1+ n))
+        (multiple-value-bind (x y z) (%cpoint-row-to-euclid pw i)
+          (set-point p x y z))
+        (diff-2-pts p c p)
+        (let ((mag (vector-magnitude p)))
+          (declare (type double-float mag))
+          (when (or (= i 0) (< mag pmin)) (setf pmin mag))
+          (when (or (= i 0) (> mag pmax)) (setf pmax mag)))))
+    (setf pmax 0d0)
+    (values wmin wmax pmin pmax)))
+
+(defun crv-line-from-pt-and-vector (p v)
+  "A fresh degree-1 NURBS line from point P to P+V, with knots (0 0 1 1).
+NLib: N_CrvLineFromPtAndVector."
+  (declare (type point p v))
+  (let ((pw (make-cpoint-array 2))
+        (u (make-real-vector 4))
+        (tt (make-point)))
+    (declare (type cpoint-array pw) (type real-vector u) (dynamic-extent tt))
+    (vector-sum p v tt)
+    (setf (aref pw 0 0) (aref p 0) (aref pw 0 1) (aref p 1) (aref pw 0 2) (aref p 2)
+          (aref pw 0 3) +no-w+
+          (aref pw 1 0) (aref tt 0) (aref pw 1 1) (aref tt 1) (aref pw 1 2) (aref tt 2)
+          (aref pw 1 3) +no-w+)
+    (setf (aref u 0) 0d0 (aref u 1) 0d0 (aref u 2) 1d0 (aref u 3) 1d0)
+    (%make-curve 1 u pw)))
+
+(defun crv-get-curvature-deriv (cur u ufl)
+  "The derivative of the curvature of curve CUR at parameter U, UFL (+left+
+or +right+) picking the span at a knot.  Zero where |C' x C''| < *mtol*.
+Signals as crv-derivs does, and :num-err when the final division would
+overflow.
+NLib: N_CrvGetCurvatureDeriv."
+  (declare (type curve cur) (type double-float u) (type fixnum ufl))
+  (let ((d (make-point-array 4))
+        (d1 (make-point)) (d2 (make-point)) (d3 (make-point))
+        (a (make-point)) (z (make-point)))
+    (declare (dynamic-extent d d1 d2 d3 a z))
+    (crv-derivs cur u ufl 3 d)
+    (%point-array-row d 1 d1)
+    (%point-array-row d 2 d2)
+    (%point-array-row d 3 d3)
+    (vector-cross d1 d2 z)
+    (let ((f1 (vector-magnitude z))
+          (f2 0d0) (num 0d0) (den 0d0))
+      (declare (type double-float f1 f2 num den))
+      (when (< f1 (the double-float *mtol*))
+        (return-from crv-get-curvature-deriv 0d0))
+      (vector-normalize-ref z)
+      (setf den (vector-magnitude d1))
+      (vector-cross d1 d3 a)
+      (setf f2 (vector-dot a z))
+      (setf f1 (* den den))
+      (setf num (* f1 f2))
+      (setf f1 (vector-dot d1 d2))
+      (vector-cross d1 d2 a)
+      (setf f2 (vector-dot a z))
+      (setf num (- num (* (* 3d0 f1) f2)))
+      (setf den (* (* (* (* den den) den) den) den))
+      (when (float-op-is-bad num den +division+)
+        (nurbs-error :num-err 'crv-get-curvature-deriv))
+      (/ num den))))
