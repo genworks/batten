@@ -984,6 +984,192 @@ Returns B.  NLib: N_RealMatrixForBackPivot."
             (setf (aref b i) (/ sum (aref a i i))))))))
   b)
 
+(defun set-real-matrix (rma n m mtp bw)
+  "Give real matrix RMA fresh storage and define it N x M (highest indexes) of
+type MTP and bandwidth BW: N+1 rows of M+1 elements, or of BW elements (2 when
+BW is 1) for a banded matrix.  Returns RMA.  NLib: N_SetRealMatrix."
+  (declare (type rmatrix rma) (type fixnum n m mtp bw))
+  (let ((rm (if (= mtp +mt-banded+)
+                (if (= bw 1)
+                    (make-real-matrix (1+ n) (1+ bw))
+                    (make-real-matrix (1+ n) bw))
+                (make-real-matrix (1+ n) (1+ m)))))
+    (create-real-matrix rma n m rm mtp bw)))
+
+(defun real-matrix-transpose (rma rmb)
+  "RMB = the transpose of RMA.  Lower-left becomes upper-right and the other
+way about, banded stays banded (stored by its band), anything else is full.
+When RMB is RMA the transposition is in place: a triangular matrix keeps its
+storage, any other gets fresh (m+1) x (n+1) storage.  Otherwise a NULL RMB
+gets storage and an existing one must be defined large enough (:sto-err).
+Returns RMB.  NLib: N_RealMatrixTranspose."
+  (declare (type rmatrix rma rmb))
+  (%with-matrix-band (n m a mta bw sbw) rma
+    (let ((mtb (cond ((= mta +mt-lowerleft+) +mt-upperright+)
+                     ((= mta +mt-upperright+) +mt-lowerleft+)
+                     ((= mta +mt-banded+) +mt-banded+)
+                     (t +mt-full+)))
+          (b nil))
+      (declare (type fixnum mtb))
+      (if (eq rma rmb)
+          (progn
+            (setf b (if (or (= mta +mt-lowerleft+) (= mta +mt-upperright+))
+                        a
+                        (make-real-matrix (1+ m) (1+ n))))
+            (create-real-matrix rma m n b mtb bw))
+          (progn
+            (%check-mem-real-matrix rmb m n mtb bw 'real-matrix-transpose)
+            (setf b (rmatrix-rm rmb))))
+      (let ((a a) (b b))
+        (declare (type real-matrix a b))
+        (fast
+          (cond
+            ((= mta +mt-lowerleft+)
+             (do ((i 0 (1+ i))) ((> i n))
+               (declare (type fixnum i))
+               (do ((j i (1+ j))) ((> j m))
+                 (declare (type fixnum j))
+                 (setf (aref b i j) (aref a j i)))))
+            ((= mta +mt-upperright+)
+             (do ((j 0 (1+ j))) ((> j m))
+               (declare (type fixnum j))
+               (do ((i j (1+ i))) ((> i n))
+                 (declare (type fixnum i))
+                 (setf (aref b i j) (aref a j i)))))
+            ((= mta +mt-banded+)
+             (do ((i 0 (1+ i))) ((> i n))
+               (declare (type fixnum i))
+               (let ((jl (nl-max 0 (- i sbw)))
+                     (jh (nl-min n (+ i sbw))))
+                 (declare (type fixnum jl jh))
+                 (do ((j jl (1+ j))) ((> j jh))
+                   (declare (type fixnum j))
+                   (setf (aref b j (+ (- i j) sbw)) (aref a i (+ (- j i) sbw)))))))
+            ((= mta +mt-full+)
+             (do ((i 0 (1+ i))) ((> i n))
+               (declare (type fixnum i))
+               (do ((j 0 (1+ j))) ((> j m))
+                 (declare (type fixnum j))
+                 (setf (aref b j i) (aref a i j))))))))))
+  rmb)
+
+(defun real-matrix-lu-decompose-pivot (rma ind)
+  "Decompose the square full matrix RMA into LU in place by Crout's method
+with partial pivoting (the LU of a row permutation of RMA); IND, an
+index-vector of n+1 allocated by the caller, receives the row interchanges.
+Signals :ind-err for a non-square matrix, :inp-err for another type and
+:num-err for a row or pivot below *ludt*.  Returns RMA.
+NLib: N_RealMatrixLuDecomposePivot."
+  (declare (type rmatrix rma) (type index-vector ind))
+  (%with-matrix-band (n m a mtp bw sbw) rma
+    (when (/= m n)
+      (nurbs-error :ind-err 'real-matrix-lu-decompose-pivot))
+    (when (/= mtp +mt-full+)
+      (nurbs-error :inp-err 'real-matrix-lu-decompose-pivot))
+    (let ((v (make-real-vector (1+ n)))
+          (ludt *ludt*))
+      (declare (type real-vector v) (type double-float ludt) (type real-matrix a))
+      (fast
+        ;; scaling info
+        (do ((i 0 (1+ i))) ((> i n))
+          (declare (type fixnum i))
+          (let ((big 0d0))
+            (declare (type double-float big))
+            (do ((j 0 (1+ j))) ((> j n))
+              (declare (type fixnum j))
+              (let ((temp (abs (aref a i j))))
+                (declare (type double-float temp))
+                (when (> temp big)
+                  (setf big temp))))
+            (when (< big ludt)
+              (nurbs-error :num-err 'real-matrix-lu-decompose-pivot))
+            (setf (aref v i) (/ 1d0 big))))
+        ;; for each column
+        (do ((j 0 (1+ j))) ((> j n))
+          (declare (type fixnum j))
+          (let ((imax j) (big 0d0))
+            (declare (type fixnum imax) (type double-float big))
+            (do ((i 0 (1+ i))) ((>= i j))
+              (declare (type fixnum i))
+              (let ((sum (aref a i j)))
+                (declare (type double-float sum))
+                (do ((k 0 (1+ k))) ((>= k i))
+                  (declare (type fixnum k))
+                  (setf sum (- sum (* (aref a i k) (aref a k j)))))
+                (setf (aref a i j) sum)))
+            (do ((i j (1+ i))) ((> i n))
+              (declare (type fixnum i))
+              (let ((sum (aref a i j)))
+                (declare (type double-float sum))
+                (do ((k 0 (1+ k))) ((>= k j))
+                  (declare (type fixnum k))
+                  (setf sum (- sum (* (aref a i k) (aref a k j)))))
+                (setf (aref a i j) sum)
+                (let ((dum (* (aref v i) (abs sum))))
+                  (declare (type double-float dum))
+                  (when (>= dum big)
+                    (setf big dum
+                          imax i)))))
+            ;; exchange rows if necessary
+            (when (/= j imax)
+              (do ((k 0 (1+ k))) ((> k n))
+                (declare (type fixnum k))
+                (multiple-value-bind (x y) (swap-reals (aref a imax k) (aref a j k))
+                  (declare (type double-float x y))
+                  (setf (aref a imax k) x
+                        (aref a j k) y)))
+              (setf (aref v imax) (aref v j)))
+            (setf (aref ind j) imax)
+            ;; divide by the pivot
+            (when (< (abs (aref a j j)) ludt)
+              (nurbs-error :num-err 'real-matrix-lu-decompose-pivot))
+            (when (< j n)
+              (let ((dum (/ 1d0 (aref a j j))))
+                (declare (type double-float dum))
+                (do ((i (1+ j) (1+ i))) ((> i n))
+                  (declare (type fixnum i))
+                  (setf (aref a i j) (* (aref a i j) dum))))))))))
+  rma)
+
+(defun real-matrix-inverse (rma lud rmb)
+  "RMB = the inverse of the square full or banded matrix RMA, without
+pivoting, column by column through RMA's LU decomposition.  LUD +yes+ says
+RMA is already LU-decomposed; +no+ decomposes it, in place.  A NULL RMB gets
+full storage, an existing one must be defined large enough (:sto-err).
+Signals :ind-err for a non-square RMA, :inp-err for another type, and the
+errors of the decomposition and the solver.  Returns RMB.
+NLib: N_RealMatrixInverse."
+  (declare (type rmatrix rma rmb) (type fixnum lud))
+  (let ((n (rmatrix-n rma)) (m (rmatrix-m rma)) (mta (rmatrix-mtp rma)))
+    (declare (type fixnum n m mta))
+    (when (/= n m)
+      (nurbs-error :ind-err 'real-matrix-inverse))
+    (when (and (/= mta +mt-full+) (/= mta +mt-banded+))
+      (nurbs-error :inp-err 'real-matrix-inverse))
+    (%check-mem-real-matrix rmb n m +mt-full+ n 'real-matrix-inverse)
+    (let ((b (rmatrix-rm rmb)))
+      (declare (type real-matrix b))
+      (when (= lud +no+)
+        (real-matrix-lu-decompose rma))
+      (let ((x (make-real-vector (1+ n)))
+            (y (make-real-vector (1+ n))))
+        (declare (type real-vector x y))
+        (setf (aref y 0) 1d0)
+        (do ((i 1 (1+ i))) ((> i n))
+          (declare (type fixnum i))
+          (setf (aref y i) 0d0))
+        (real-matrix-right-for-back rma y x)
+        (dotimes (i (1+ n))
+          (setf (aref b i 0) (aref x i)))
+        (do ((i 1 (1+ i))) ((> i n))
+          (declare (type fixnum i))
+          (setf (aref y (1- i)) 0d0
+                (aref y i) 1d0)
+          (real-matrix-right-for-back rma y x)
+          (dotimes (j (1+ n))
+            (setf (aref b j i) (aref x j)))))))
+  rmb)
+
 (defconstant +real-matrix-single-value-decompose--mxits+ 30
   "MXITS in N_RealMatrixSingleValueDecompose.")
 

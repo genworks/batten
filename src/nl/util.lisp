@@ -24,6 +24,17 @@ NLib: N_XYZTo2dCPtArray."
                 (aref pw i j 3) (aref w i j)))))
     pw))
 
+(defun check-real-mat-storage (rma nr mc rname)
+  "Signal :sto-err in routine RNAME unless real matrix RMA is defined with
+highest indexes at least NR (rows) and MC (columns).  Returns NIL otherwise.
+NLib: N_CheckRealMatStorage."
+  (declare (type rmatrix rma) (type fixnum nr mc))
+  (multiple-value-bind (n m) (get-max-index-real-matrix rma)
+    (declare (type fixnum n m))
+    (when (or (< n nr) (< m mc))
+      (nurbs-error :sto-err rname))
+    nil))
+
 (defun file-close (fptr)
   "Close the stream FPTR, as NLib wraps fclose for streams it opened.
 NLib: N_FileClose."
