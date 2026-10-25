@@ -118,3 +118,19 @@
                  (with-foreign ((sp s :surface))
                    (c-srf-reparam sp us ue vs ve)
                    (values nil (list (from-foreign sp :surface))))))))))
+
+;;; ------------------------------------------------------------ level 3, group 4
+
+(define-oracle-test srf-max-diag-dist-b-box (:file "srf-nurb" :trials 3000)
+  (let ((s (random-surface :two-d (zerop (rnd 4)))))
+    (when (zerop (rnd 8))                 ; all control points the same
+      (let ((net (surface-cpoints s)))
+        (dotimes (i (array-dimension net 0))
+          (dotimes (j (array-dimension net 1))
+            (dotimes (k 4) (setf (aref net i j k) (aref net 0 0 k)))))))
+    (agree s
+           (list (batten::srf-max-diag-dist-b-box s))
+           (with-foreign ((sp s :surface))
+             (with-scalars ((d :double))
+               (values (c-flag-error-p (c-srf-max-diag-dist-b-box sp d))
+                       (list (cffi:mem-ref d :double))))))))

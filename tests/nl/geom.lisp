@@ -741,3 +741,100 @@ onto an end or beyond it, P on the segment, and P anywhere."
                (values (c-flag-error-p (c-line-fit-2d-pts pp n a b c))
                        (list (cffi:mem-ref a :double) (cffi:mem-ref b :double)
                              (cffi:mem-ref c :double))))))))
+
+;;; ------------------------------------------------------------ level 3, group 4
+
+(define-oracle-test dist-pt-inf-line (:file "geom" :trials 4000)
+  (let* ((q (random-point)) (v (some-vector)) (bnd (rnd 2))
+         (lsg (batten::%make-lineseg q v bnd))
+         (p (case (rnd 6)
+              (0 (copy-seq q))
+              (1 (%pt+ q (rnd-range -3d0 3d0) v))
+              (2 (%pt+ (%pt+ q (rnd-range -2d0 3d0) v) 1d0 (%perp-to v)))
+              (t (random-point)))))
+    (agree (list lsg p)
+           (list (batten::dist-pt-inf-line lsg p) (batten::lineseg-bounded lsg))
+           (with-foreign ((pp p :point))
+             (with-foreign-out ((lp :lineseg))
+               (%fill-foreign-lineseg lp lsg)
+               (with-scalars ((d :double))
+                 (values (c-flag-error-p (c-dist-pt-inf-line lp pp d))
+                         (list (cffi:mem-ref d :double) bnd))))))))
+
+(define-oracle-test cpt-reflect (:file "geom" :trials 4000)
+  (let* ((pw (random-cpoint :two-d (zerop (rnd 3))))
+         (r (random-point))
+         (n (case (rnd 8)
+              (0 (make-point (rnd-range -2d0 2d0) (rnd-range -2d0 2d0) 0d0)) ; no z
+              (1 (make-point (rnd-range -2d0 2d0) (rnd-range -2d0 2d0)   ; nearly no z
+                             (rnd-range -1d-6 1d-6)))
+              (2 (make-point 0d0 0d0 (rnd-range -2d0 2d0)))
+              (t (some-vector))))
+         (pln (batten::%make-plane r n)))
+    (when (zerop (rnd 6))                 ; the point on the plane
+      (let ((w (if (= (aref pw 3) +no-w+) 1d0 (aref pw 3))))
+        (setf (aref pw 0) (* w (aref r 0)) (aref pw 1) (* w (aref r 1)))
+        (unless (= (aref pw 2) +no-z+) (setf (aref pw 2) (* w (aref r 2))))))
+    (agree (list pw pln)
+           (list (batten::cpt-reflect pw pln (make-cpoint)))
+           (with-foreign ((pp pw :cpoint))
+             (with-foreign-out ((pl :plane) (qw :cpoint))
+               (%fill-foreign-plane pl pln)
+               (values (c-flag-error-p (c-cpt-reflect pp pl qw))
+                       (list (from-foreign qw :cpoint))))))))
+
+(define-oracle-test line-fit-3d-pts (:file "geom" :trials 3000)
+  (let* ((count (1+ (rnd 20)))
+         (pts (random-points count (case (rnd 3) (0 1d0) (1 100d0) (t 1d4))))
+         (n (case (rnd 20) (0 -1) (t (1- count)))))
+    (case (rnd 7)
+      (0                                  ; collinear points
+       (let ((a (random-point)) (d (random-point 1d0)))
+         (dotimes (i count)
+           (let ((s (rnd-range -10d0 10d0)))
+             (dotimes (k 3) (setf (aref pts i k) (+ (aref a k) (* s (aref d k)))))))))
+      (1                                  ; in an axis-parallel plane
+       (let ((x (rnd-range -10d0 10d0)) (k (rnd 3)))
+         (dotimes (i count) (setf (aref pts i k) x))))
+      (2                                  ; on an axis-parallel line
+       (let ((k (rnd 3)))
+         (dotimes (i count)
+           (dotimes (l 3) (unless (= l k) (setf (aref pts i l) (aref pts 0 l)))))))
+      (3                                  ; all the same point
+       (dotimes (i count) (dotimes (k 3) (setf (aref pts i k) (aref pts 0 k))))))
+    (agree (list pts n)
+           (let ((q (make-point)) (v (make-point)))
+             (batten::line-fit-3d-pts pts n q v)
+             (list q v))
+           (with-foreign ((pp pts :point-array))
+             (with-foreign-out ((q :point) (v :point))
+               (values (c-flag-error-p (c-line-fit-3d-pts pp n q v))
+                       (list (from-foreign q :point) (from-foreign v :point))))))))
+
+(define-oracle-test calc-circ-center-and-radius (:file "geom" :trials 4000)
+  (let* ((flat (zerop (rnd 3)))
+         (a (random-point)) (b (random-point)) (c (random-point)))
+    (when flat                            ; in the <x,y> plane, or nearly
+      (let ((z (if (zerop (rnd 3)) 1d-12 0d0)))
+        (setf (aref a 2) 0d0 (aref b 2) z (aref c 2) 0d0)))
+    (case (rnd 10)
+      (0 (setf c (%pt+ a (rnd-range -1d0 2d0) (batten::vector-diff b a (make-point))))) ; collinear
+      (1 (setf c (copy-seq a)))                                                        ; coincident
+      (2 (setf b (%pt+ a 1d-9 (random-point 1d0))))                                    ; nearly
+      (3 (setf c (%pt+ (%pt+ a (rnd-range 0d0 1d0) (batten::vector-diff b a (make-point)))
+                       1d-4 (%perp-to (batten::vector-diff b a (make-point))))))       ; nearly collinear
+      (4 (let ((z (rnd-range -50d0 50d0)))                                             ; a z = const plane
+           (setf (aref a 2) z (aref b 2) z (aref c 2) z))))
+    (agree (list a b c)
+           (let ((d (make-point)))
+             (multiple-value-bind (r cfl) (batten::calc-circ-center-and-radius a b c d)
+               (if (= cfl +true+) (list d r cfl) (list cfl))))
+           (with-foreign ((ap a :point) (bp b :point) (cp c :point))
+             (with-foreign-out ((d :point))
+               (with-scalars ((r :double) (cfl :short))
+                 (let ((err (c-flag-error-p (c-calc-circ-center-and-radius ap bp cp d r cfl))))
+                   (values err
+                           (if (= (cffi:mem-ref cfl :short) +true+)
+                               (list (from-foreign d :point) (cffi:mem-ref r :double)
+                                     (cffi:mem-ref cfl :short))
+                               (list (cffi:mem-ref cfl :short)))))))))))

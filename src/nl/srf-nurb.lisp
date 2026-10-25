@@ -453,3 +453,15 @@ NLib: N_SrfReparam."
                           (if (or (/= vs v1) (/= ve v2)) +vdir+ 0))))
         (declare (type fixnum scaledirs))
         (srf-reparam-to-interval sur r scaledirs)))))
+
+;;; ------------------------------------------------------------ level 3, group 4
+
+(defun srf-max-diag-dist-b-box (sur)
+  "The largest extent of surface SUR: the length of the diagonal of the
+min-max box of its Euclidean control net.
+NLib: N_SrfMaxDiagDistBBox."
+  (declare (type surface sur))
+  (let ((box (make-real-vector 6)))
+    (declare (type real-vector box))
+    (srf-get-b-box sur box)
+    (b-box-get-diagonal box)))

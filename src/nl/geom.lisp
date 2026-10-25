@@ -867,3 +867,212 @@ NLib: N_LineFit2dPts."
              (c (- (+ (* a qx) (* b qy)))))
         (declare (type double-float a b c))
         (values a b c)))))
+
+;;; ------------------------------------------------------------ level 3, group 4
+
+(defun dist-pt-inf-line (lsg p)
+  "The distance of point P from the infinite line through LSG (its bounding
+flag is ignored): the distance to the projection of P on the line, or to the
+origin when the line comes out parallel to its normal plane.  Signals what
+project-pt-line signals.
+NLib: N_DistPtInfLine."
+  (declare (type lineseg lsg) (type point p))
+  (let ((q (make-point))
+        (lin (copy-structure lsg)))
+    (declare (dynamic-extent q))
+    (line-set-bounding-flag lin +unbounded+)
+    (project-pt-line lin p q)
+    (dist-pt-pt p q)))
+
+(defconstant +geom--cpt-reflect-noz-tol+ 1.0d-6
+  "NOZ_TOL in N_CptReflect.")
+
+(defun cpt-reflect (pw pln qw)
+  "Write into QW the reflection of control point PW through plane PLN: the
+Euclidean point is reflected and weighted with PW's weight.  A 2D PW stays 2D
+when the plane's unit normal has (nearly) no z component.  Signals :geo-err
+for a zero normal.  Returns QW.
+NLib: N_CptReflect."
+  (declare (type cpoint pw qw) (type plane pln))
+  (let ((p (make-point)) (q (make-point)) (r (make-point)))
+    (declare (dynamic-extent p q r))
+    (c-pt-to-pt-euclid pw p)
+    (project-pt-plane pln p q)
+    (vector-dir p q r)
+    (sum-2-pts q r q)
+    (multiple-value-bind (x y z) (pt-to-xyz q)
+      (declare (type double-float x y z))
+      (multiple-value-bind (dd1 dd2 wz w) (c-pt-to-wx-wy-wz pw)
+        (declare (type double-float wz w) (ignore dd1 dd2))
+        (when (/= w +no-w+)
+          (setf x (* x w)
+                y (* y w)
+                z (* z w)))
+        (plane-get-normal pln r)
+        (vector-normalize r r)
+        (let ((vz (aref r 2)))
+          (declare (type double-float vz))
+          (when (and (= wz +no-z+) (<= (abs vz) +geom--cpt-reflect-noz-tol+))
+            (setf z +no-z+)))
+        (c-pt-from-wx-wy-wz x y z w qw)))))
+
+(defun line-fit-3d-pts (p n q v)
+  "The least-squares line through the points P[0..N]: writes the centroid into
+Q and into V the unit direction minimizing the sum of the squared distances,
+the singular vector of the smallest singular value of the matrix
+Sum_i (Yi.Yi I - Yi Yi^T), Yi = P[i] - Q.  As in the C, a failure of the
+decomposition is ignored.  Signals :num-err for N below 0 (Q zeroed first).
+Returns Q.
+NLib: N_LineFit3dPts."
+  (declare (type point-array p) (type fixnum n) (type point q v))
+  (let* ((ld 2)
+         (y (make-point-array (1+ (max n 0))))
+         (mw (make-real-vector (1+ ld)))
+         (mu (make-real-matrix (1+ ld) (1+ ld)))
+         (mv (make-real-matrix (1+ ld) (1+ ld)))
+         (qx 0d0) (qy 0d0) (qz 0d0)
+         (cnt (+ (float n 1d0) 1d0)))
+    (declare (type fixnum ld) (type point-array y) (type real-vector mw)
+             (type real-matrix mu mv) (type double-float qx qy qz cnt))
+    ;; Q, the centroid
+    (set-point q 0d0 0d0 0d0)
+    (when (float-op-is-bad 1d0 cnt +division+)
+      (nurbs-error :num-err 'line-fit-3d-pts))
+    (fast
+      (dotimes (i (1+ n))
+        (setf qx (+ (aref p i 0) qx)
+              qy (+ (aref p i 1) qy)
+              qz (+ (aref p i 2) qz))))
+    (let ((fac (/ 1d0 cnt)))
+      (declare (type double-float fac))
+      (setf qx (* fac qx)
+            qy (* fac qy)
+            qz (* fac qz)))
+    (set-point q qx qy qz)
+    ;; Y[i] = P[i] - Q
+    (fast
+      (dotimes (i (1+ n))
+        (setf (aref y i 0) (- (aref p i 0) qx)
+              (aref y i 1) (- (aref p i 1) qy)
+              (aref y i 2) (- (aref p i 2) qz))))
+    ;; M = Sum_i (Yi.Yi I - Yi Yi^T)
+    (fast
+      (dotimes (i (1+ n))
+        (let* ((yx (aref y i 0)) (yy (aref y i 1)) (yz (aref y i 2))
+               (ydoty (+ (+ (* yx yx) (* yy yy)) (* yz yz))))
+          (declare (type double-float yx yy yz ydoty))
+          (setf (aref mu 0 0) (+ (aref mu 0 0) (- ydoty (* yx yx)))
+                (aref mu 0 1) (+ (aref mu 0 1) (- (* yx yy)))
+                (aref mu 0 2) (+ (aref mu 0 2) (- (* yx yz)))
+                (aref mu 1 0) (+ (aref mu 1 0) (- (* yy yx)))
+                (aref mu 1 1) (+ (aref mu 1 1) (- ydoty (* yy yy)))
+                (aref mu 1 2) (+ (aref mu 1 2) (- (* yy yz)))
+                (aref mu 2 0) (+ (aref mu 2 0) (- (* yz yx)))
+                (aref mu 2 1) (+ (aref mu 2 1) (- (* yz yy)))
+                (aref mu 2 2) (+ (aref mu 2 2) (- ydoty (* yz yz)))))))
+    ;; the C ignores the decomposition's error
+    (handler-case (real-matrix-single-value-decompose mu mw mv ld ld)
+      (nurbs-error () nil))
+    ;; the singular vector of the smallest singular value
+    (let ((imin 0) (sval (aref mw 0)))
+      (declare (type fixnum imin) (type double-float sval))
+      (do ((i 1 (1+ i))) ((> i ld))
+        (declare (type fixnum i))
+        (when (> sval (aref mw i))
+          (setf imin i sval (aref mw i))))
+      (set-point v (aref mu 0 imin) (aref mu 1 imin) (aref mu 2 imin)))
+    q))
+
+(defun calc-circ-center-and-radius (a b c d)
+  "The circle through the points A, B and C, in 2D or 3D: writes its center
+into D and returns (values r cfl), R the radius and CFL +true+; CFL is +false+
+(D unwritten, R 0) when the points are collinear or two coincide, or when a
+pair of perpendicular bisectors does not meet.  The center is the average of
+the pairwise intersections of the bisectors, the radius the average distance.
+Signals what isect-plane-plane and isect-line-line signal.
+NLib: N_CalcCircCenterAndRadius."
+  (declare (type point a b c d))
+  (when (pts-are-colinear a b c *mtol*)
+    (return-from calc-circ-center-and-radius (values 0d0 +false+)))
+  (let ((za (dist-pt-pt a b))
+        (zb (dist-pt-pt b c))
+        (zc (dist-pt-pt c a)))
+    (declare (type double-float za zb zc))
+    (when (or (< za *mtol*) (< zb *mtol*) (< zc *mtol*))
+      (return-from calc-circ-center-and-radius (values 0d0 +false+)))
+    (let ((fac (/ 1d0 3d0))
+          (mab (make-point)) (mbc (make-point)) (mca (make-point))
+          (vab (make-point)) (vbc (make-point)) (vca (make-point))
+          (lab (%make-lineseg (make-point) (make-point) +unbounded+))
+          (lbc (%make-lineseg (make-point) (make-point) +unbounded+))
+          (lca (%make-lineseg (make-point) (make-point) +unbounded+))
+          (pa (make-point)) (pb (make-point)) (pc (make-point)) (cc (make-point)))
+      (declare (type double-float fac) (dynamic-extent mab mbc mca vab vbc vca pa pb pc cc))
+      ;; some points and vectors
+      (vector-combine 0.5d0 a 0.5d0 b mab)
+      (vector-diff b a vab)
+      (vector-combine 0.5d0 b 0.5d0 c mbc)
+      (vector-diff c b vbc)
+      (vector-combine 0.5d0 c 0.5d0 a mca)
+      (vector-diff a c vca)
+      ;; perpendicular bisectors
+      (setf za (aref a 2) zb (aref b 2) zc (aref c 2))
+      (if (and (< (abs za) *mtol*) (< (abs zb) *mtol*) (< (abs zc) *mtol*))
+          ;; the points are in the <x,y> plane
+          (let ((wab (make-point)) (wbc (make-point)) (wca (make-point)))
+            (declare (dynamic-extent wab wbc wca))
+            (vector-perpendicular vab wab)
+            (vector-perpendicular vbc wbc)
+            (vector-perpendicular vca wca)
+            (create-line-start-dir-vector lab mab wab +unbounded+)
+            (create-line-start-dir-vector lbc mbc wbc +unbounded+)
+            (create-line-start-dir-vector lca mca wca +unbounded+))
+          ;; the points are not in the <x,y> plane
+          (let ((na (make-point)) (nb (make-point)) (nc (make-point))
+                (nv (make-point)) (g (make-point)) (pp (make-point)) (vv (make-point))
+                (pln (%make-plane (make-point) (make-point)))
+                (pab (%make-plane (make-point) (make-point)))
+                (pbc (%make-plane (make-point) (make-point)))
+                (pca (%make-plane (make-point) (make-point))))
+            (declare (dynamic-extent na nb nc nv g pp vv))
+            (vector-cross vab vbc nb)
+            (vector-cross vbc vca nc)
+            (vector-cross vca vab na)
+            (vector-create 0d0 0d0 0d0 nv)
+            (vector-create 0d0 0d0 0d0 g)
+            (vector-sum a b g)
+            (vector-sum c g g)
+            (vector-sum na nb nv)
+            (vector-sum nc nv nv)
+            (vector-scale g fac g)
+            (vector-scale nv fac nv)
+            (create-plane-pt-normal pln g nv)
+            (create-plane-pt-normal pab mab vab)
+            (create-plane-pt-normal pbc mbc vbc)
+            (create-plane-pt-normal pca mca vca)
+            (flet ((bisector (pl lsg)
+                     (when (= (isect-plane-plane pln pl pp vv) +false+)
+                       (return-from calc-circ-center-and-radius (values 0d0 +false+)))
+                     (create-line-start-dir-vector lsg pp vv +unbounded+)))
+              (bisector pab lab)
+              (bisector pbc lbc)
+              (bisector pca lca))))
+      ;; intersect the three bisectors
+      (flet ((meet (l1 l2 pt)
+               (when (= (the fixnum (isect-line-line l1 l2 pt)) +false+)
+                 (return-from calc-circ-center-and-radius (values 0d0 +false+)))))
+        (meet lab lbc pb)
+        (meet lbc lca pc)
+        (meet lca lab pa))
+      ;; the center and the radius
+      (vector-create 0d0 0d0 0d0 cc)
+      (vector-sum pa pb cc)
+      (vector-sum pc cc cc)
+      (vector-scale cc fac cc)
+      (let* ((ra (dist-pt-pt cc a))
+             (rb (dist-pt-pt cc b))
+             (rc (dist-pt-pt cc c))
+             (rr (* fac (+ (+ ra rb) rc))))
+        (declare (type double-float ra rb rc rr))
+        (vector-copy cc d)
+        (values rr +true+)))))
