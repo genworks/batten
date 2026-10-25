@@ -306,3 +306,880 @@ NLib: N_TranslateCPt."
   "|A|.  NLib: N_PtMagnitude."
   (declare (type point a))
   (sqrt (the (double-float 0d0) (dot-2-pts a a))))
+
+;;; ------------------------------------------------- more control point access
+
+(defun c-pt-to-pt-and-w (pw p)
+  "Write the Euclidean point of PW into P and return the weight of PW.
+NLib: N_CPtToPtAndW."
+  (declare (type cpoint pw) (type point p))
+  (let ((w (c-pt-get-w pw)))
+    (declare (type double-float w))
+    (c-pt-to-pt-euclid pw p)
+    w))
+
+(defun scale-c-pt-xyz (alpha aw bw)
+  "BW = ALPHA*AW in the first three coordinates (z only when not +no-z+),
+keeping AW's weight.  NLib: N_ScaleCPtXYZ."
+  (declare (type double-float alpha) (type cpoint aw bw))
+  (with-cpoint (x y z w) aw
+    (set-cpoint bw (* alpha x) (* alpha y)
+                (if (/= z +no-z+) (* alpha z) +no-z+)
+                w)))
+
+(defun scale-c-pt-with-pt-and-vector (pw c f qw)
+  "QW = PW scaled about center C by the vector-valued factor F, keeping PW's
+weight.  NLib: N_ScaleCPtWithPtAndVector."
+  (declare (type cpoint pw qw) (type point c f))
+  (with-cpoint (px py pz pw*) pw
+    (with-point (cx cy cz) c
+      (with-point (fx fy fz) f
+        (let* ((gx (- 1d0 fx)) (gy (- 1d0 fy)) (gz (- 1d0 fz))
+               (w (if (/= pw* +no-w+) pw* 1d0))
+               (cwx (* w cx)) (cwy (* w cy)) (cwz (* w cz)))
+          (declare (type double-float gx gy gz w cwx cwy cwz))
+          (set-cpoint qw
+                      (+ (* fx px) (* gx cwx))
+                      (+ (* fy py) (* gy cwy))
+                      (if (/= pz +no-z+) (+ (* fz pz) (* gz cwz)) +no-z+)
+                      (if (/= pw* +no-w+) pw* +no-w+)))))))
+
+(defun pt-to-xyz (p)
+  "The coordinates of P as three values.  NLib: N_PtToXYZ."
+  (declare (type point p))
+  (values (aref p 0) (aref p 1) (aref p 2)))
+
+(defun pt-from-xyz (x y z p)
+  "Set P to (X Y Z).  NLib: N_PtFromXYZ."
+  (declare (type double-float x y z) (type point p))
+  (set-point p x y z))
+
+(defun c-pt-set-x (wx pw)
+  "Set the x coordinate of PW to WX.  NLib: N_CPtSetX."
+  (declare (type double-float wx) (type cpoint pw))
+  (setf (aref pw 0) wx)
+  pw)
+
+(defun c-pt-set-y (wy pw)
+  "Set the y coordinate of PW to WY.  NLib: N_CPtSetY."
+  (declare (type double-float wy) (type cpoint pw))
+  (setf (aref pw 1) wy)
+  pw)
+
+(defun c-pt-set-z (wz pw)
+  "Set the z coordinate of PW to WZ.  NLib: N_CPtSetZ."
+  (declare (type double-float wz) (type cpoint pw))
+  (setf (aref pw 2) wz)
+  pw)
+
+(defun c-pt-set-w (w pw)
+  "Set the weight of PW to W.  NLib: N_CPtSetW."
+  (declare (type double-float w) (type cpoint pw))
+  (setf (aref pw 3) w)
+  pw)
+
+(defun c-pt-rat-deriv (pw d wd dw)
+  "DW = (wd*x + dx*w, wd*y + dy*w, wd*z + dz*w, wd), the homogeneous
+derivative from control point PW = (wx wy wz w), the Euclidean derivative D and
+the weight derivative WD.  NLib: N_CPtRatDeriv."
+  (declare (type cpoint pw dw) (type point d) (type double-float wd))
+  (let ((p (make-point)) (w (c-pt-get-w pw)) (pz (aref pw 2)))
+    (declare (dynamic-extent p) (type double-float w pz))
+    (c-pt-to-pt-euclid pw p)
+    (with-point (x y z) p
+      (with-point (dx dy dz) d
+        (set-cpoint dw
+                    (+ (* wd x) (* dx w))
+                    (+ (* wd y) (* dy w))
+                    (if (/= pz +no-z+) (+ (* wd z) (* dz w)) +no-z+)
+                    wd)))))
+
+(defun c-pt-to-pt (pw p)
+  "Write PW's first three coordinates into P (z = 0 for +no-z+), dropping the
+weight without dividing by it.  NLib: N_CPtToPt."
+  (declare (type cpoint pw) (type point p))
+  (with-cpoint (x y z w) pw
+    (set-point p x y (if (/= z +no-z+) z 0d0))))
+
+(defun swap-c-pts (pw qw)
+  "Exchange control points PW and QW in place.  NLib: N_SwapCPts."
+  (declare (type cpoint pw qw))
+  (let ((aw (make-cpoint)))
+    (declare (dynamic-extent aw))
+    (copy-c-pt pw aw)
+    (copy-c-pt qw pw)
+    (copy-c-pt aw qw)
+    pw))
+
+;;; ------------------------------------------------------- reals and integers
+
+(declaim (inline swap-reals))
+(defun swap-reals (a b)
+  "The two reals exchanged: (values B A).  NLib swaps through pointers; Lisp
+returns the in-out pair.  NLib: N_SwapReals."
+  (declare (type double-float a b))
+  (values b a))
+
+(defun shell-sort-real (a n)
+  "Sort A[0..N] ascending in place by Shellsort, with NLib's increments.
+NLib: N_ShellSortReal."
+  (declare (type real-vector a) (type fixnum n))
+  (fast
+    (let ((k (1+ n)))
+      (declare (type fixnum k))
+      (do () ((<= k 1))
+        (if (>= k 5)
+            (setf k (truncate (- (* 5 k) 1) 11))
+            (setf k 1))
+        (do ((i (- n k) (1- i))) ((< i 0))
+          (declare (type fixnum i))
+          (let ((b (aref a i)) (j (+ i k)))
+            (declare (type double-float b) (type fixnum j))
+            (do () ((not (and (<= j n) (> b (aref a j)))))
+              (setf (aref a (- j k)) (aref a j))
+              (incf j k))
+            (setf (aref a (- j k)) b)))))
+    a))
+
+(defun pascal-tri-row (tri row)
+  "Fill TRI[0..ROW] with the rows of Pascal's triangle.  TRI, a fixnum matrix
+of at least ROW+1 rows and columns, is allocated by the caller.
+NLib: N_PascalTriRow."
+  (declare (type (simple-array fixnum (* *)) tri) (type fixnum row))
+  (fast
+    (setf (aref tri 0 0) 1)
+    (when (= row 0) (return-from pascal-tri-row tri))
+    (setf (aref tri 1 0) 1 (aref tri 1 1) 1)
+    (when (= row 1) (return-from pascal-tri-row tri))
+    (do ((k 2 (1+ k))) ((> k row))
+      (declare (type fixnum k))
+      (setf (aref tri k 0) 1)
+      (let ((r (truncate k 2)) (tmp2 1))
+        (declare (type fixnum r tmp2))
+        (do ((j 1 (1+ j))) ((> j r))
+          (declare (type fixnum j))
+          (let ((tmp1 (aref tri (1- k) j)))
+            (declare (type fixnum tmp1))
+            (setf (aref tri k j) (+ (aref tri (1- k) j) tmp2))
+            (setf (aref tri k (- k j)) (aref tri k j))
+            (setf tmp2 tmp1))))
+      (setf (aref tri k k) 1)))
+  tri)
+
+;;; -------------------------------------------------------------- real matrices
+
+;;; NL_MATRIXTYPE, an enum in NL_DataStruct.h.
+(defconstant +mt-full+ 0)
+(defconstant +mt-lowerleft+ 1)
+(defconstant +mt-upperright+ 2)
+(defconstant +mt-banded+ 3)
+
+;;; NL_RMATRIX: highest row and column indexes N and M, the element storage RM
+;;; (a real-matrix, or nil for C's NULL), the matrix type MTP and the
+;;; bandwidth BW.  As in C, N and M are recorded apart from RM's dimensions: a
+;;; matrix may be defined smaller than its storage.  A banded matrix stores
+;;; rows of BW elements, the diagonal in column BW/2.  (make-rmatrix) is
+;;; N_InitRealMatrix's NULL matrix.
+(defstruct (rmatrix (:constructor make-rmatrix (&optional (n -1) (m -1) rm (mtp +mt-full+) (bw 0))))
+  (n -1 :type fixnum)
+  (m -1 :type fixnum)
+  (rm nil :type (or null real-matrix))
+  (mtp +mt-full+ :type fixnum)
+  (bw 0 :type fixnum))
+
+(defun create-real-matrix (rma n m rm mtp bw)
+  "Set every member of RMA: highest indexes N and M, storage RM, type MTP and
+bandwidth BW.  NLib: N_CreateRealMatrix."
+  (declare (type rmatrix rma) (type fixnum n m mtp bw) (type (or null real-matrix) rm))
+  (setf (rmatrix-n rma) n
+        (rmatrix-m rma) m
+        (rmatrix-rm rma) rm
+        (rmatrix-mtp rma) mtp
+        (rmatrix-bw rma) bw)
+  rma)
+
+(defun real-matrix-define (rma n m mtp bw)
+  "Set the highest indexes, type and bandwidth of RMA, leaving its storage.
+NLib: N_RealMatrixDefine."
+  (declare (type rmatrix rma) (type fixnum n m mtp bw))
+  (setf (rmatrix-n rma) n
+        (rmatrix-m rma) m
+        (rmatrix-mtp rma) mtp
+        (rmatrix-bw rma) bw)
+  rma)
+
+(defun get-max-index-real-matrix (rma)
+  "The highest row and column indexes of RMA, as two values.
+NLib: N_GetMaxIndexRealMatrix."
+  (declare (type rmatrix rma))
+  (values (rmatrix-n rma) (rmatrix-m rma)))
+
+(defun real-matrix-is-null (rma)
+  "True when RMA is the NULL matrix (needs storage): a negative index, no
+storage or a bandwidth below 1.  NLib: N_RealMatrixIsNULL."
+  (declare (type rmatrix rma))
+  (or (< (rmatrix-n rma) 0) (< (rmatrix-m rma) 0) (null (rmatrix-rm rma)) (<= (rmatrix-bw rma) 0)))
+
+(defun %check-mem-real-matrix (rma n m mtp bw rname)
+  "N_CheckMemRealMatrix (which vanishes): give a NULL RMA storage for an
+N x M matrix of type MTP and bandwidth BW, as N_SetRealMatrix does; otherwise
+check that RMA is defined at least N x M (:sto-err for RNAME, as
+N_CheckRealMatStorage does) and redefine it."
+  (declare (type rmatrix rma) (type fixnum n m mtp bw))
+  (if (real-matrix-is-null rma)
+      (create-real-matrix rma n m
+                          (if (= mtp +mt-banded+)
+                              (make-real-matrix (1+ n) (if (= bw 1) (1+ bw) bw))
+                              (make-real-matrix (1+ n) (1+ m)))
+                          mtp bw)
+      (progn
+        (when (or (< (rmatrix-n rma) n) (< (rmatrix-m rma) m))
+          (nurbs-error :sto-err rname))
+        (real-matrix-define rma n m mtp bw))))
+
+(defun transform-c-pt (pw rma qw)
+  "QW = PW transformed by the 4x4 matrix RMA (rotation and scale upper left,
+translation in the last column, projection in the last row), applied to the
+Euclidean point and re-weighted.  NLib: N_TransformCPt."
+  (declare (type cpoint pw qw) (type rmatrix rma))
+  (let ((rm (rmatrix-rm rma)))
+    (declare (type real-matrix rm))
+    (with-cpoint (x y z w) pw
+      (when (/= w +no-w+)
+        (setf x (/ x w) y (/ y w))
+        (when (/= z +no-z+) (setf z (/ z w))))
+      (let ((rx 0d0) (ry 0d0) (rz 0d0))
+        (declare (type double-float rx ry rz))
+        (if (/= z +no-z+)
+            (let ((f (/ 1d0 (+ (+ (+ (* x (aref rm 3 0)) (* y (aref rm 3 1))) (* z (aref rm 3 2))) (aref rm 3 3)))))
+              (declare (type double-float f))
+              (setf rx (* f (+ (+ (+ (* x (aref rm 0 0)) (* y (aref rm 0 1))) (* z (aref rm 0 2))) (aref rm 0 3)))
+                    ry (* f (+ (+ (+ (* x (aref rm 1 0)) (* y (aref rm 1 1))) (* z (aref rm 1 2))) (aref rm 1 3)))
+                    rz (* f (+ (+ (+ (* x (aref rm 2 0)) (* y (aref rm 2 1))) (* z (aref rm 2 2))) (aref rm 2 3)))))
+            (let ((f (/ 1d0 (+ (+ (* x (aref rm 3 0)) (* y (aref rm 3 1))) (aref rm 3 3)))))
+              (declare (type double-float f))
+              (setf rx (* f (+ (+ (* x (aref rm 0 0)) (* y (aref rm 0 1))) (aref rm 0 3)))
+                    ry (* f (+ (+ (* x (aref rm 1 0)) (* y (aref rm 1 1))) (aref rm 1 3)))
+                    rz +no-z+)))
+        (if (/= w +no-w+)
+            (set-cpoint qw (* rx w) (* ry w) (if (/= z +no-z+) (* rz w) rz) w)
+            (set-cpoint qw rx ry rz +no-w+))))))
+
+(defun real-matrix-multiply (rma rmb rmc)
+  "RMC = RMA * RMB.  RMC is lower-left when both factors are, upper-right when
+both are, full otherwise; a NULL RMC (make-rmatrix) gets storage, an existing
+one must be defined large enough (:sto-err).  Signals :ind-err when the inner
+dimensions differ and :inp-err for a banded factor.  Returns RMC.
+NLib: N_RealMatrixMultiply."
+  (declare (type rmatrix rma rmb rmc))
+  (let ((na (rmatrix-n rma)) (ma (rmatrix-m rma)) (a (rmatrix-rm rma)) (mta (rmatrix-mtp rma))
+        (nb (rmatrix-n rmb)) (mb (rmatrix-m rmb)) (b (rmatrix-rm rmb)) (mtb (rmatrix-mtp rmb)))
+    (declare (type fixnum na ma nb mb mta mtb))
+    (when (/= ma nb)
+      (nurbs-error :ind-err 'real-matrix-multiply))
+    (when (or (= mta +mt-banded+) (= mtb +mt-banded+))
+      (nurbs-error :inp-err 'real-matrix-multiply))
+    (let ((mtc (cond ((and (= mta +mt-lowerleft+) (= mtb +mt-lowerleft+)) +mt-lowerleft+)
+                     ((and (= mta +mt-upperright+) (= mtb +mt-upperright+)) +mt-upperright+)
+                     (t +mt-full+))))
+      (%check-mem-real-matrix rmc na mb mtc na 'real-matrix-multiply))
+    (let ((c (rmatrix-rm rmc)))
+      (declare (type real-matrix a b c))
+      (macrolet ((product (jlo jhi klo khi)
+                   ;; C[i][j] = 0, then C[i][j] += A[i][k]*B[k][j], in memory
+                   `(fast
+                      (do ((i 0 (1+ i))) ((> i na))
+                        (declare (type fixnum i))
+                        (do ((j ,jlo (1+ j))) ((> j ,jhi))
+                          (declare (type fixnum j))
+                          (setf (aref c i j) 0d0)
+                          (do ((k ,klo (1+ k)) (kh ,khi)) ((> k kh))
+                            (declare (type fixnum k kh))
+                            (setf (aref c i j) (+ (aref c i j) (* (aref a i k) (aref b k j))))))))))
+        (cond ((and (= mta +mt-full+) (= mtb +mt-full+)) (product 0 mb 0 ma))
+              ((and (= mta +mt-full+) (= mtb +mt-lowerleft+)) (product 0 mb j ma))
+              ((and (= mta +mt-full+) (= mtb +mt-upperright+)) (product 0 mb 0 j))
+              ((and (= mta +mt-lowerleft+) (= mtb +mt-full+)) (product 0 mb 0 i))
+              ((and (= mta +mt-lowerleft+) (= mtb +mt-lowerleft+)) (product 0 i j i))
+              ((and (= mta +mt-lowerleft+) (= mtb +mt-upperright+)) (product 0 mb 0 (nl-min i j)))
+              ((and (= mta +mt-upperright+) (= mtb +mt-full+)) (product 0 mb i ma))
+              ((and (= mta +mt-upperright+) (= mtb +mt-lowerleft+)) (product 0 mb (nl-max i j) ma))
+              ((and (= mta +mt-upperright+) (= mtb +mt-upperright+)) (product i mb i j)))))
+    rmc))
+
+(defmacro %with-matrix-band ((n m a mtp bw sbw) rma &body body)
+  "Bind the members of real matrix RMA, and SBW = BW/2."
+  (let ((r (gensym)))
+    `(let* ((,r ,rma) (,n (rmatrix-n ,r)) (,m (rmatrix-m ,r)) (,a (rmatrix-rm ,r))
+            (,mtp (rmatrix-mtp ,r)) (,bw (rmatrix-bw ,r)) (,sbw (truncate ,bw 2)))
+       (declare (type fixnum ,n ,m ,mtp ,bw ,sbw) (ignorable ,n ,m ,a ,mtp ,bw ,sbw))
+       ,@body)))
+
+(defun real-matrix-multiply-pt-array (rma p q)
+  "Q = RMA * P for a point array P; Q is allocated by the caller.  A banded
+RMA is indexed by its band.  Returns Q.  NLib: N_RealMatrixMultiplyPtArray."
+  (declare (type rmatrix rma) (type point-array p q))
+  (%with-matrix-band (n m a mtp bw sbw) rma
+    (let ((s (make-point)) (pj (make-point)))
+      (declare (dynamic-extent s pj) (type real-matrix a))
+      (macrolet ((rows (jlo jhi index)
+                   ;; Q[i] = 0, then Q[i] += A[i][index] * P[j]
+                   `(fast
+                      (do ((i 0 (1+ i))) ((> i n))
+                        (declare (type fixnum i))
+                        (set-point s 0d0 0d0 0d0)
+                        (do ((j ,jlo (1+ j)) (jh ,jhi)) ((> j jh))
+                          (declare (type fixnum j jh))
+                          (set-point pj (aref p j 0) (aref p j 1) (aref p j 2))
+                          (vector-blend-pt (aref a i ,index) pj s))
+                        (setf (aref q i 0) (aref s 0) (aref q i 1) (aref s 1) (aref q i 2) (aref s 2))))))
+        (cond ((= mtp +mt-lowerleft+) (rows 0 i j))
+              ((= mtp +mt-upperright+) (rows i m j))
+              ((= mtp +mt-full+) (rows 0 m j))
+              ((= mtp +mt-banded+) (rows (nl-max 0 (- i sbw)) (nl-min n (+ i sbw)) (+ (- j i) sbw)))))))
+  q)
+
+(defun real-matrix-multiply-c-pt-array (rma pw qw)
+  "QW = RMA * PW for a control point array PW; QW is allocated by the caller.
+A banded RMA is indexed by its band.  Returns QW.
+NLib: N_RealMatrixMultiplyCPtArray."
+  (declare (type rmatrix rma) (type cpoint-array pw qw))
+  (%with-matrix-band (n m a mtp bw sbw) rma
+    (let ((s (make-cpoint)) (pj (make-cpoint)) (czero (make-cpoint 0d0 0d0 0d0 0d0)))
+      (declare (dynamic-extent s pj czero) (type real-matrix a))
+      (macrolet ((rows (jlo jhi index)
+                   ;; Qw[i] = NL_CZERO, then Qw[i] += A[i][index] * Pw[j]
+                   `(fast
+                      (do ((i 0 (1+ i))) ((> i n))
+                        (declare (type fixnum i))
+                        (copy-c-pt czero s)
+                        (do ((j ,jlo (1+ j)) (jh ,jhi)) ((> j jh))
+                          (declare (type fixnum j jh))
+                          (set-cpoint pj (aref pw j 0) (aref pw j 1) (aref pw j 2) (aref pw j 3))
+                          (vector-blend-c-pt (aref a i ,index) pj s))
+                        (setf (aref qw i 0) (aref s 0) (aref qw i 1) (aref s 1)
+                              (aref qw i 2) (aref s 2) (aref qw i 3) (aref s 3))))))
+        (cond ((= mtp +mt-lowerleft+) (rows 0 i j))
+              ((= mtp +mt-upperright+) (rows i m j))
+              ((= mtp +mt-full+) (rows 0 m j))
+              ((= mtp +mt-banded+) (rows (nl-max 0 (- i sbw)) (nl-min n (+ i sbw)) (+ (- j i) sbw)))))))
+  qw)
+
+(defun real-matrix-lu-decompose (rma)
+  "Decompose the square full or banded matrix RMA into LU in place, without
+pivoting.  Signals :ind-err for a non-square matrix, :inp-err for another
+type and :num-err for a pivot below *ludt*.  Returns RMA.
+NLib: N_RealMatrixLuDecompose."
+  (declare (type rmatrix rma))
+  (%with-matrix-band (n m a mtp bw sbw) rma
+    (when (/= m n)
+      (nurbs-error :ind-err 'real-matrix-lu-decompose))
+    (when (and (/= mtp +mt-full+) (/= mtp +mt-banded+))
+      (nurbs-error :inp-err 'real-matrix-lu-decompose))
+    (let ((ludt *ludt*))
+      (declare (type double-float ludt) (type real-matrix a))
+      (if (= mtp +mt-full+)
+          (fast
+            (do ((i 0 (1+ i))) ((> i n))
+              (declare (type fixnum i))
+              (do ((j i (1+ j))) ((> j n))
+                (declare (type fixnum j))
+                (let ((sum 0d0))
+                  (declare (type double-float sum))
+                  (dotimes (k i)
+                    (setf sum (+ sum (* (aref a i k) (aref a k j)))))
+                  (setf (aref a i j) (- (aref a i j) sum))))
+              (do ((j (1+ i) (1+ j))) ((> j n))
+                (declare (type fixnum j))
+                (let ((sum 0d0))
+                  (declare (type double-float sum))
+                  (dotimes (k i)
+                    (setf sum (+ sum (* (aref a j k) (aref a k i)))))
+                  (when (< (abs (aref a i i)) ludt)
+                    (nurbs-error :num-err 'real-matrix-lu-decompose))
+                  (setf (aref a j i) (/ (- (aref a j i) sum) (aref a i i)))))))
+          (fast
+            (do ((i 0 (1+ i))) ((> i n))
+              (declare (type fixnum i))
+              (let ((jh (nl-min n (+ i sbw))))
+                (declare (type fixnum jh))
+                (do ((j i (1+ j))) ((> j jh))
+                  (declare (type fixnum j))
+                  (let ((sum 0d0))
+                    (declare (type double-float sum))
+                    (do ((k (nl-max 0 (- j sbw)) (1+ k))) ((>= k i))
+                      (declare (type fixnum k))
+                      (setf sum (+ sum (* (aref a i (+ (- k i) sbw)) (aref a k (+ (- j k) sbw))))))
+                    (setf (aref a i (+ (- j i) sbw)) (- (aref a i (+ (- j i) sbw)) sum))))
+                (do ((j (1+ i) (1+ j))) ((> j jh))
+                  (declare (type fixnum j))
+                  (let ((sum 0d0))
+                    (declare (type double-float sum))
+                    (do ((k (nl-max 0 (- j sbw)) (1+ k))) ((>= k i))
+                      (declare (type fixnum k))
+                      (setf sum (+ sum (* (aref a j (+ (- k j) sbw)) (aref a k (+ (- i k) sbw))))))
+                    (when (< (abs (aref a i sbw)) ludt)
+                      (nurbs-error :num-err 'real-matrix-lu-decompose))
+                    (setf (aref a j (+ (- i j) sbw))
+                          (/ (- (aref a j (+ (- i j) sbw)) sum) (aref a i sbw)))))))))))
+  rma)
+
+(defun real-matrix-for-back (rma a ptp qw)
+  "Solve LU-decomposed RMA * QW = A by forward elimination and back
+substitution.  A is a point-array when PTP is +epoint+ (the solution is then
+non-rational) or a cpoint-array when PTP is +hpoint+; QW, a cpoint-array, is
+allocated by the caller.  Signals :ind-err for a non-square matrix, :inp-err
+for a type other than full or banded, :num-err for a bad pivot and :cal-err
+for another PTP.  Returns QW.  NLib: N_RealMatrixForBack."
+  (declare (type rmatrix rma) (type fixnum ptp) (type cpoint-array qw))
+  (%with-matrix-band (n m b mtp bw sbw) rma
+    (when (/= m n)
+      (nurbs-error :ind-err 'real-matrix-for-back))
+    (when (and (/= mtp +mt-full+) (/= mtp +mt-banded+))
+      (nurbs-error :inp-err 'real-matrix-for-back))
+    (locally (declare (type real-matrix b))
+      (macrolet ((diag (i) `(if (= mtp +mt-full+) (aref b ,i ,i) (aref b ,i sbw)))
+                 (elt* (i j) `(if (= mtp +mt-full+) (aref b ,i ,j) (aref b ,i (+ (- ,j ,i) sbw))))
+                 (jlo (i) `(if (= mtp +mt-full+) 0 (nl-max 0 (- ,i sbw))))
+                 (jhi (i) `(if (= mtp +mt-full+) n (nl-min n (+ ,i sbw)))))
+        (cond
+          ((= ptp +epoint+)
+           (let ((p a) (z (make-point-array (1+ n))) (q (make-point-array (1+ n)))
+                 (s (make-point)) (t1 (make-point)) (t2 (make-point)) (qc (make-cpoint)))
+             (declare (type point-array p z q) (dynamic-extent s t1 t2 qc))
+             (macrolet ((row->pt (arr i pt) `(set-point ,pt (aref ,arr ,i 0) (aref ,arr ,i 1) (aref ,arr ,i 2)))
+                        (pt->row (pt arr i) `(setf (aref ,arr ,i 0) (aref ,pt 0) (aref ,arr ,i 1) (aref ,pt 1)
+                                                   (aref ,arr ,i 2) (aref ,pt 2))))
+               (fast
+                 (do ((i 0 (1+ i))) ((> i n))
+                   (declare (type fixnum i))
+                   (set-point s 0d0 0d0 0d0)
+                   (do ((j (jlo i) (1+ j))) ((>= j i))
+                     (declare (type fixnum j))
+                     (row->pt z j t1)
+                     (vector-blend-pt (elt* i j) t1 s))
+                   (row->pt p i t1)
+                   (diff-2-pts t1 s t2)
+                   (pt->row t2 z i))
+                 (do ((i n (1- i))) ((< i 0))
+                   (declare (type fixnum i))
+                   (when (float-op-is-bad 1d0 (diag i) +division+)
+                     (nurbs-error :num-err 'real-matrix-for-back))
+                   (let ((fact (/ 1d0 (diag i))))
+                     (declare (type double-float fact))
+                     (set-point s 0d0 0d0 0d0)
+                     (do ((j (1+ i) (1+ j)) (jh (jhi i))) ((> j jh))
+                       (declare (type fixnum j jh))
+                       (row->pt q j t1)
+                       (vector-blend-pt (elt* i j) t1 s))
+                     (row->pt z i t1)
+                     (combine-2-pts fact t1 (- fact) s t2)
+                     (pt->row t2 q i)
+                     (pt-to-c-pt t2 qc)
+                     (setf (aref qw i 0) (aref qc 0) (aref qw i 1) (aref qc 1)
+                           (aref qw i 2) (aref qc 2) (aref qw i 3) (aref qc 3))))))))
+          ((= ptp +hpoint+)
+           (let ((pw a) (zw (make-cpoint-array (1+ n)))
+                 (sw (make-cpoint)) (t1 (make-cpoint)) (t2 (make-cpoint)) (czero (make-cpoint 0d0 0d0 0d0 0d0)))
+             (declare (type cpoint-array pw zw) (dynamic-extent sw t1 t2 czero))
+             (macrolet ((row->cpt (arr i cp) `(set-cpoint ,cp (aref ,arr ,i 0) (aref ,arr ,i 1)
+                                                          (aref ,arr ,i 2) (aref ,arr ,i 3)))
+                        (cpt->row (cp arr i) `(setf (aref ,arr ,i 0) (aref ,cp 0) (aref ,arr ,i 1) (aref ,cp 1)
+                                                    (aref ,arr ,i 2) (aref ,cp 2) (aref ,arr ,i 3) (aref ,cp 3))))
+               (fast
+                 (do ((i 0 (1+ i))) ((> i n))
+                   (declare (type fixnum i))
+                   (copy-c-pt czero sw)
+                   (do ((j (jlo i) (1+ j))) ((>= j i))
+                     (declare (type fixnum j))
+                     (row->cpt zw j t1)
+                     (vector-blend-c-pt (elt* i j) t1 sw))
+                   (row->cpt pw i t1)
+                   (diff-2-c-pts t1 sw t2)
+                   (cpt->row t2 zw i))
+                 (do ((i n (1- i))) ((< i 0))
+                   (declare (type fixnum i))
+                   (when (float-op-is-bad 1d0 (diag i) +division+)
+                     (nurbs-error :num-err 'real-matrix-for-back))
+                   (let ((fact (/ 1d0 (diag i))))
+                     (declare (type double-float fact))
+                     (copy-c-pt czero sw)
+                     (do ((j (1+ i) (1+ j)) (jh (jhi i))) ((> j jh))
+                       (declare (type fixnum j jh))
+                       (row->cpt qw j t1)
+                       (vector-blend-c-pt (elt* i j) t1 sw))
+                     (row->cpt zw i t1)
+                     (combine-2-c-pts fact t1 (- fact) sw t2)
+                     (cpt->row t2 qw i)))))))
+          (t (nurbs-error :cal-err 'real-matrix-for-back))))))
+  qw)
+
+(defun real-matrix-right-for-back (rma y x)
+  "Solve LU-decomposed RMA * X = Y for real vectors by forward elimination
+and back substitution; X is allocated by the caller.  Signals :ind-err for a
+non-square matrix, :inp-err for a type other than full or banded and :num-err
+for a bad division.  Returns X.  NLib: N_RealMatrixRightForBack."
+  (declare (type rmatrix rma) (type real-vector y x))
+  (%with-matrix-band (n m a mtp bw sbw) rma
+    (when (/= m n)
+      (nurbs-error :ind-err 'real-matrix-right-for-back))
+    (when (and (/= mtp +mt-full+) (/= mtp +mt-banded+))
+      (nurbs-error :inp-err 'real-matrix-right-for-back))
+    (let ((z (make-real-vector (1+ n))))
+      (declare (type real-matrix a) (type real-vector z))
+      (macrolet ((solve (jlo jhi el diag)
+                   `(fast
+                      (do ((i 0 (1+ i))) ((> i n))
+                        (declare (type fixnum i))
+                        (let ((sum 0d0))
+                          (declare (type double-float sum))
+                          (do ((j ,jlo (1+ j))) ((>= j i))
+                            (declare (type fixnum j))
+                            (setf sum (+ sum (* ,el (aref z j)))))
+                          (setf (aref z i) (- (aref y i) sum))))
+                      (do ((i n (1- i))) ((< i 0))
+                        (declare (type fixnum i))
+                        (let ((sum 0d0))
+                          (declare (type double-float sum))
+                          (do ((j (1+ i) (1+ j)) (jh ,jhi)) ((> j jh))
+                            (declare (type fixnum j jh))
+                            (setf sum (+ sum (* ,el (aref x j)))))
+                          (when (float-op-is-bad (- (aref z i) sum) ,diag +division+)
+                            (nurbs-error :num-err 'real-matrix-right-for-back))
+                          (setf (aref x i) (/ (- (aref z i) sum) ,diag)))))))
+        (if (= mtp +mt-full+)
+            (solve 0 n (aref a i j) (aref a i i))
+            (solve (nl-max 0 (- i sbw)) (nl-min n (+ i sbw)) (aref a i (+ (- j i) sbw)) (aref a i sbw))))))
+  x)
+
+(defun real-matrix-for-back-pivot (rma ind b)
+  "Solve RMA * X = B in place in B, RMA full and LU-decomposed with partial
+pivoting, IND its permutation.  Signals :ind-err for a non-square matrix,
+:inp-err for a type other than full and :num-err for a bad division.
+Returns B.  NLib: N_RealMatrixForBackPivot."
+  (declare (type rmatrix rma) (type index-vector ind) (type real-vector b))
+  (%with-matrix-band (n m a mtp bw sbw) rma
+    (when (/= m n)
+      (nurbs-error :ind-err 'real-matrix-for-back-pivot))
+    (when (/= mtp +mt-full+)
+      (nurbs-error :inp-err 'real-matrix-for-back-pivot))
+    (let ((ii -1) (ludt *ludt*))
+      (declare (type fixnum ii) (type double-float ludt) (type real-matrix a))
+      (fast
+        (do ((i 0 (1+ i))) ((> i n))
+          (declare (type fixnum i))
+          (let* ((ip (aref ind i)) (sum (aref b ip)))
+            (declare (type fixnum ip) (type double-float sum))
+            (setf (aref b ip) (aref b i))
+            (if (>= ii 0)
+                (do ((j ii (1+ j))) ((>= j i))
+                  (declare (type fixnum j))
+                  (setf sum (- sum (* (aref a i j) (aref b j)))))
+                (when (> (abs sum) ludt)
+                  (setf ii i)))
+            (setf (aref b i) sum)))
+        (do ((i n (1- i))) ((< i 0))
+          (declare (type fixnum i))
+          (let ((sum (aref b i)))
+            (declare (type double-float sum))
+            (do ((j (1+ i) (1+ j))) ((> j n))
+              (declare (type fixnum j))
+              (setf sum (- sum (* (aref a i j) (aref b j)))))
+            (when (float-op-is-bad sum (aref a i i) +division+)
+              (nurbs-error :num-err 'real-matrix-for-back-pivot))
+            (setf (aref b i) (/ sum (aref a i i))))))))
+  b)
+
+(defconstant +real-matrix-single-value-decompose--mxits+ 30
+  "MXITS in N_RealMatrixSingleValueDecompose.")
+
+(defun real-matrix-single-value-decompose (a w v m n)
+  "Singular value decomposition A = U W V^T of the (M+1) x (N+1) matrix A,
+M >= N (else :inp-err), after Numerical Recipes: A is overwritten by U, the
+singular values go to W (N+1) and the orthogonal V to V ((N+1) x (N+1)), both
+allocated by the caller.  Signals :con-err when an iteration does not
+converge.  Returns A.  NLib: N_RealMatrixSingleValueDecompose."
+  (declare (type real-matrix a v) (type real-vector w) (type fixnum m n))
+  (when (> n m)
+    (nurbs-error :inp-err 'real-matrix-single-value-decompose))
+  (let ((rv1 (make-real-vector (1+ n)))
+        (i1 0) (j1 0) (flag 0) (kk 0) (ll 0) (nm 0)
+        (c 0d0) (f 0d0) (h 0d0) (s 0d0) (x 0d0) (y 0d0) (z 0d0)
+        (anorm 0d0) (g 0d0) (scale 0d0))
+    (declare (type real-vector rv1) (type fixnum i1 j1 flag kk ll nm)
+             (type double-float c f h s x y z anorm g scale))
+    (fast
+      ;; Householder reduction to bidiagonal form
+      (setf i1 0)
+      (do () ((> i1 n))
+        (setf ll (1+ i1))
+        (setf (aref rv1 i1) (* scale g))
+        (setf g 0d0 s 0d0 scale 0d0)
+        (when (<= i1 m)
+          (setf kk i1)
+          (do () ((> kk m)) (setf scale (+ scale (abs (aref a kk i1)))) (incf kk))
+          (when (/= scale 0d0)
+            (setf kk i1)
+            (do () ((> kk m))
+              (setf (aref a kk i1) (/ (aref a kk i1) scale))
+              (setf s (+ s (* (aref a kk i1) (aref a kk i1))))
+              (incf kk))
+            (setf f (aref a i1 i1))
+            (setf g (- (nl-siab (sqrt (the (double-float 0d0) s)) f)))
+            (setf h (- (* f g) s))
+            (setf (aref a i1 i1) (- f g))
+            (when (/= i1 n)
+              (setf j1 ll)
+              (do () ((> j1 n))
+                (setf s 0d0)
+                (setf kk i1)
+                (do () ((> kk m)) (setf s (+ s (* (aref a kk i1) (aref a kk j1)))) (incf kk))
+                (setf f (/ s h))
+                (setf kk i1)
+                (do () ((> kk m)) (setf (aref a kk j1) (+ (aref a kk j1) (* f (aref a kk i1)))) (incf kk))
+                (incf j1)))
+            (setf kk i1)
+            (do () ((> kk m)) (setf (aref a kk i1) (* (aref a kk i1) scale)) (incf kk))))
+        (setf (aref w i1) (* scale g))
+        (setf g 0d0 s 0d0 scale 0d0)
+        (when (and (<= i1 m) (/= i1 n))
+          (setf kk ll)
+          (do () ((> kk n)) (setf scale (+ scale (abs (aref a i1 kk)))) (incf kk))
+          (when (/= scale 0d0)
+            (setf kk ll)
+            (do () ((> kk n))
+              (setf (aref a i1 kk) (/ (aref a i1 kk) scale))
+              (setf s (+ s (* (aref a i1 kk) (aref a i1 kk))))
+              (incf kk))
+            (setf f (aref a i1 ll))
+            (setf g (- (nl-siab (sqrt (the (double-float 0d0) s)) f)))
+            (setf h (- (* f g) s))
+            (setf (aref a i1 ll) (- f g))
+            (setf kk ll)
+            (do () ((> kk n)) (setf (aref rv1 kk) (/ (aref a i1 kk) h)) (incf kk))
+            (when (/= i1 m)
+              (setf j1 ll)
+              (do () ((> j1 m))
+                (setf s 0d0)
+                (setf kk ll)
+                (do () ((> kk n)) (setf s (+ s (* (aref a j1 kk) (aref a i1 kk)))) (incf kk))
+                (setf kk ll)
+                (do () ((> kk n)) (setf (aref a j1 kk) (+ (aref a j1 kk) (* s (aref rv1 kk)))) (incf kk))
+                (incf j1)))
+            (setf kk ll)
+            (do () ((> kk n)) (setf (aref a i1 kk) (* (aref a i1 kk) scale)) (incf kk))))
+        (setf anorm (nl-max anorm (+ (abs (aref w i1)) (abs (aref rv1 i1)))))
+        (incf i1))
+      ;; Accumulation of right hand transformations
+      (setf i1 n ll i1)
+      (do () ((< i1 0))
+        (when (< i1 n)
+          (when (/= g 0d0)
+            (setf j1 ll)
+            (do () ((> j1 n))
+              (setf (aref v j1 i1) (/ (/ (aref a i1 j1) (aref a i1 ll)) g))
+              (incf j1))
+            (setf j1 ll)
+            (do () ((> j1 n))
+              (setf s 0d0)
+              (setf kk ll)
+              (do () ((> kk n)) (setf s (+ s (* (aref a i1 kk) (aref v kk j1)))) (incf kk))
+              (setf kk ll)
+              (do () ((> kk n)) (setf (aref v kk j1) (+ (aref v kk j1) (* s (aref v kk i1)))) (incf kk))
+              (incf j1)))
+          (setf j1 ll)
+          (do () ((> j1 n))
+            (setf (aref v j1 i1) 0d0)
+            (setf (aref v i1 j1) 0d0)
+            (incf j1)))
+        (setf (aref v i1 i1) 1d0)
+        (setf g (aref rv1 i1))
+        (setf ll i1)
+        (decf i1))
+      ;; Accumulation of left hand transformations
+      (setf i1 n)
+      (do () ((< i1 0))
+        (setf ll (1+ i1))
+        (setf g (aref w i1))
+        (when (< i1 n)
+          (setf j1 ll)
+          (do () ((> j1 n)) (setf (aref a i1 j1) 0d0) (incf j1)))
+        (if (/= g 0d0)
+            (progn
+              (setf g (/ 1d0 g))
+              (when (/= i1 n)
+                (setf j1 ll)
+                (do () ((> j1 n))
+                  (setf s 0d0)
+                  (setf kk ll)
+                  (do () ((> kk m)) (setf s (+ s (* (aref a kk i1) (aref a kk j1)))) (incf kk))
+                  (setf f (* (/ s (aref a i1 i1)) g))
+                  (setf kk i1)
+                  (do () ((> kk m)) (setf (aref a kk j1) (+ (aref a kk j1) (* f (aref a kk i1)))) (incf kk))
+                  (incf j1)))
+              (setf j1 i1)
+              (do () ((> j1 m)) (setf (aref a j1 i1) (* (aref a j1 i1) g)) (incf j1)))
+            (progn
+              (setf j1 i1)
+              (do () ((> j1 m)) (setf (aref a j1 i1) 0d0) (incf j1))))
+        (setf (aref a i1 i1) (+ (aref a i1 i1) 1d0))
+        (decf i1))
+      ;; Diagonalization of the bidiagonal form
+      (setf kk n)
+      (do () ((< kk 0))
+        (block iterations
+          (do ((its 1 (1+ its))) ((> its +real-matrix-single-value-decompose--mxits+))
+            (declare (type fixnum its))
+            (setf flag 1)
+            ;; test for splitting; rv1[0] is always 0
+            (setf ll kk)
+            (block split
+              (do () ((< ll 0))
+                (setf nm (1- ll))
+                (when (= (+ (abs (aref rv1 ll)) anorm) anorm)
+                  (setf flag 0)
+                  (return-from split))
+                (when (= (+ (abs (aref w nm)) anorm) anorm)
+                  (return-from split))
+                (decf ll)))
+            (when (/= flag 0)
+              (setf c 0d0 s 1d0)
+              (setf i1 ll)
+              (do () ((> i1 kk))
+                (setf f (* s (aref rv1 i1)))
+                (when (/= (+ (abs f) anorm) anorm)
+                  (setf g (aref w i1))
+                  (setf h (sqrt (the (double-float 0d0) (+ (* f f) (* g g)))))
+                  (setf (aref w i1) h)
+                  (setf h (/ 1d0 h))
+                  (setf c (* g h))
+                  (setf s (* (- f) h))
+                  (setf j1 0)
+                  (do () ((> j1 m))
+                    (setf y (aref a j1 nm))
+                    (setf z (aref a j1 i1))
+                    (setf (aref a j1 nm) (+ (* y c) (* z s)))
+                    (setf (aref a j1 i1) (- (* z c) (* y s)))
+                    (incf j1)))
+                (incf i1)))
+            (setf z (aref w kk))
+            (when (= ll kk)
+              (when (< z 0d0)
+                (setf (aref w kk) (- z))
+                (setf j1 0)
+                (do () ((> j1 n)) (setf (aref v j1 kk) (- (aref v j1 kk))) (incf j1)))
+              (return-from iterations))
+            (when (= its +real-matrix-single-value-decompose--mxits+)
+              (nurbs-error :con-err 'real-matrix-single-value-decompose))
+            (setf x (aref w ll))
+            (setf nm (1- kk))
+            (setf y (aref w nm))
+            (setf g (aref rv1 nm))
+            (setf h (aref rv1 kk))
+            (setf f (/ (+ (* (- y z) (+ y z)) (* (- g h) (+ g h))) (* (* 2d0 h) y)))
+            (setf g (sqrt (the (double-float 0d0) (+ (* f f) 1d0))))
+            (setf f (/ (+ (* (- x z) (+ x z)) (* h (- (/ y (+ f (nl-siab g f))) h))) x))
+            (setf c 1d0 s 1d0)
+            (setf j1 ll)
+            (do () ((> j1 nm))
+              (setf i1 (1+ j1))
+              (setf g (aref rv1 i1))
+              (setf y (aref w i1))
+              (setf h (* s g))
+              (setf g (* c g))
+              (setf z (sqrt (the (double-float 0d0) (+ (* f f) (* h h)))))
+              (setf (aref rv1 j1) z)
+              (setf c (/ f z))
+              (setf s (/ h z))
+              (setf f (+ (* x c) (* g s)))
+              (setf g (- (* g c) (* x s)))
+              (setf h (* y s))
+              (setf y (* y c))
+              (dotimes (jj (1+ n))
+                (setf x (aref v jj j1))
+                (setf z (aref v jj i1))
+                (setf (aref v jj j1) (+ (* x c) (* z s)))
+                (setf (aref v jj i1) (- (* z c) (* x s))))
+              (setf z (sqrt (the (double-float 0d0) (+ (* f f) (* h h)))))
+              (setf (aref w j1) z)
+              (when (/= z 0d0)
+                (setf z (/ 1d0 z))
+                (setf c (* f z))
+                (setf s (* h z)))
+              (setf f (+ (* c g) (* s y)))
+              (setf x (- (* c y) (* s g)))
+              (dotimes (jj (1+ m))
+                (setf y (aref a jj j1))
+                (setf z (aref a jj i1))
+                (setf (aref a jj j1) (+ (* y c) (* z s)))
+                (setf (aref a jj i1) (- (* z c) (* y s))))
+              (incf j1))
+            (setf (aref rv1 ll) 0d0)
+            (setf (aref rv1 kk) f)
+            (setf (aref w kk) x)))
+        (decf kk))))
+  a)
+
+;;; ------------------------------------------------------------- minimization
+
+(defconstant +func-find-minima--mxits+ 100 "MXITS in N_FuncFindMinima.")
+
+(defun func-find-minima (xa xb xc fb f xtol ftol)
+  "Minimize the function F (double-float to double-float) by Brent's method,
+the minimum bracketed by XA, XB, XC with FB = F(XB).  Stops when the bracket
+is within the fractional tolerance XTOL or F falls to FTOL or below.  Returns
+(values xmin fmin).  NLib: N_FuncFindMinima."
+  (declare (type double-float xa xb xc fb xtol ftol) (type function f))
+  (let* ((gold 0.3819660d0) (zeps 1.0d-14) (e 0d0) (d 0d0)
+         (a (if (< xa xc) xa xc)) (b (if (< xa xc) xc xa))
+         (x xb) (w xb) (v xb) (fx fb) (fw fb) (fv fb)
+         (u 0d0) (fu 0d0) (xm 0d0) (tol1 0d0) (tol2 0d0)
+         (p 0d0) (q 0d0) (r 0d0) (etemp 0d0))
+    (declare (type double-float gold zeps e d a b x w v fx fw fv u fu xm tol1 tol2 p q r etemp))
+    (do ((its 1 (1+ its))) ((> its +func-find-minima--mxits+))
+      (declare (type fixnum its))
+      (setf xm (* 0.5d0 (+ a b)))
+      (setf tol1 (+ (* xtol (abs x)) zeps))
+      (setf tol2 (* 2d0 tol1))
+      (when (<= (abs (- x xm)) (- tol2 (* 0.5d0 (- b a))))
+        (return-from func-find-minima (values x fx)))
+      (if (> (abs e) tol1)
+          (progn
+            (setf r (* (- x w) (- fx fv)))
+            (setf q (* (- x v) (- fx fw)))
+            (setf p (- (* q (- x v)) (* r (- x w))))
+            (setf q (* 2d0 (- q r)))
+            (when (> q 0d0) (setf p (- p)))
+            (setf q (abs q))
+            (setf etemp e)
+            (setf e d)
+            (if (or (>= (abs p) (abs (* (* 0.5d0 q) etemp)))
+                    (<= p (* q (- a x)))
+                    (>= p (* q (- b x))))
+                (progn
+                  (setf e (if (>= x xm) (- a x) (- b x)))
+                  (setf d (* gold e)))
+                (progn
+                  (setf d (/ p q))
+                  (setf u (+ x d))
+                  (when (or (< (- u a) tol2) (< (- b u) tol2))
+                    (setf d (nl-siab tol1 (- xm x)))))))
+          (progn
+            (setf e (if (>= x xm) (- a x) (- b x)))
+            (setf d (* gold e))))
+      (setf u (if (>= (abs d) tol1) (+ x d) (+ x (nl-siab tol1 d))))
+      (setf fu (the double-float (funcall f u)))
+      (when (<= fu ftol)
+        (return-from func-find-minima (values u fu)))
+      (if (<= fu fx)
+          (progn
+            (if (>= u x) (setf a x) (setf b x))
+            (setf v w w x x u)
+            (setf fv fw fw fx fx fu))
+          (progn
+            (if (< u x) (setf a u) (setf b u))
+            (cond ((or (<= fu fw) (= w x))
+                   (setf v w w u fv fw fw fu))
+                  ((or (<= fu fv) (= v x) (= v w))
+                   (setf v u fv fu))))))
+    (values x fx)))
