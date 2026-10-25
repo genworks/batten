@@ -1762,3 +1762,640 @@ NLib: N_FitCrvWeightedLstSqKnots."
                   (when (< (aref wp r) 0d0)
                     (%copy-c-pt-row e r pw n)))))
           cur)))))
+
+;;; ------------------------------------------------ L3: interpolation with end derivatives
+
+(defun %crv-fit-estimate-end-deriv (pts kk whr d)
+  "Estimate the end derivative of the data PTS[0..KK] at the start (WHR
++start+) or the end (+end+) as N_FitCrvDerivs and N_FitCubicSplineInterp do
+when it is the zero vector: the derivative of the cubic Bezier interpolating
+the first (or last) four points, normalized and scaled by the length of the
+data polygon, written into D.  The C ignores the errors of N_CrvDerivs and
+N_VectorNormalizeRef (D is then left as it was), but not those of
+N_FitCrvInterp, which propagate here.  KK must be at least 3."
+  (declare (type point-array pts) (type fixnum kk whr) (type point d))
+  (let ((cd (make-point-array 2)) (s (make-point)))
+    (declare (type point-array cd) (dynamic-extent s))
+    (if (= whr +start+)
+        (let ((cub (fit-crv-interp pts 3 3 +chordlength+)))
+          (handler-case (crv-derivs cub 0d0 +left+ 1 cd) (nurbs-error () nil)))
+        (let ((sub (make-point-array 4)))
+          (declare (type point-array sub))
+          (dotimes (i 4)
+            (%copy-pt-row pts (+ (- kk 3) i) sub i))
+          (let ((cub (fit-crv-interp sub 3 3 +chordlength+)))
+            (handler-case (crv-derivs cub 1d0 +right+ 1 cd) (nurbs-error () nil)))))
+    (vector-copy (%row-pt cd 1 s) d)
+    (let ((len (dist-polygon pts kk)))
+      (declare (type double-float len))
+      (handler-case (vector-normalize-ref d) (nurbs-error () nil))
+      (vector-scale d len d))
+    d))
+
+(declaim (inline %crv-fit-zero-vector-p))
+(defun %crv-fit-zero-vector-p (v)
+  "True when all three coordinates of V are 0.0."
+  (declare (type point v))
+  (and (= (aref v 0) 0d0) (= (aref v 1) 0d0) (= (aref v 2) 0d0)))
+
+(defun fit-crv-derivs (pts kk p ds de par &optional knots)
+  "The curve of degree P interpolating the points PTS[0..KK] (a point-array)
+with the start and end derivatives DS and DE (points, not modified), as a
+fresh non-rational curve of KK+3 control points.  A zero DS or DE is
+estimated from a cubic Bezier through the first or last four points (KK must
+then be at least 3).  PAR is +uniform+, +chordlength+ or +centripetal+, the
+parameters must then lie in [0,1] as these give them; or +inherited+, which
+takes the parameters from the knot vector of the curve passed in: KNOTS,
+standing for the knots of the C's non-NULL output curve, of at least KK+P+4
+knots, which the curve then keeps (with no KNOTS the C reads its freshly
+allocated knot array; here that is zero-filled).  Signals :inp-err when P < 2
+or P > KK+2, :sto-err when KNOTS is too short, :cal-err for another PAR, and
+whatever BASIS-EVAL and the banded solver signal.
+NLib: N_FitCrvDerivs."
+  (declare (type point-array pts) (type fixnum kk p par) (type point ds de))
+  (when (or (< p 2) (> p (+ kk 2)))
+    (nurbs-error :inp-err 'fit-crv-derivs))
+  ;; C passes the derivatives by value
+  (let ((ds (copy-seq ds))
+        (de (copy-seq de)))
+    (declare (type point ds de))
+    (when (%crv-fit-zero-vector-p ds)
+      (%crv-fit-estimate-end-deriv pts kk +start+ ds))
+    (when (%crv-fit-zero-vector-p de)
+      (%crv-fit-estimate-end-deriv pts kk +end+ de))
+    (let ((n (+ kk 2)))
+      (declare (type fixnum n))
+      (when (and knots (< (length (the real-vector knots)) (+ n p 2)))
+        (nurbs-error :sto-err 'fit-crv-derivs))
+      (let* ((pw (make-cpoint-array (1+ n)))
+             (knt (if knots (subseq (the real-vector knots) 0 (+ n p 2)) (make-real-vector (+ n p 2))))
+             (cur (%make-curve p knt pw))
+             (u (make-real-vector (1+ kk))))
+        (declare (type cpoint-array pw) (type real-vector knt u))
+        ;; parameters and knot vector
+        (if (= par +inherited+)
+            (dotimes (i (1+ kk))
+              (setf (aref u i) (aref knt (+ i p))))
+            (progn
+              (fit-calc-crv-param-values pts kk +epoint+ par u)
+              (fit-calc-knot-vector-end-derivs u kk p knt)))
+        ;; coefficient matrix
+        (let* ((bw (1- (* 2 p)))
+               (sbw (1- p))
+               (nb (make-real-vector (1+ p)))
+               (cm (set-real-matrix (make-rmatrix) n n +mt-banded+ bw))
+               (a (rmatrix-rm cm)))
+          (declare (type fixnum bw sbw) (type real-vector nb) (type real-matrix a))
+          (%crv-fit-rm-set a 0 sbw 1d0)
+          (%crv-fit-rm-set a 1 (1- sbw) -1d0)
+          (%crv-fit-rm-set a 1 sbw 1d0)
+          (%crv-fit-rm-set a (1- n) sbw -1d0)
+          (%crv-fit-rm-set a (1- n) (1+ sbw) 1d0)
+          (%crv-fit-rm-set a n sbw 1d0)
+          (do ((i 2 (1+ i))) ((> i kk))
+            (declare (type fixnum i))
+            (let* ((j (basis-eval knt p (aref u (1- i)) +left+ nb))
+                   (l (- j i 1)))
+              (declare (type fixnum j l))
+              (dotimes (k (1+ p))
+                (%crv-fit-rm-set a i (+ l k) (aref nb k)))))
+          (real-matrix-lu-decompose cm)
+          ;; solve
+          (let ((q (make-point-array (1+ n)))
+                (s (make-point))
+                (pf (float p 1d0)))
+            (declare (type point-array q) (dynamic-extent s) (type double-float pf))
+            (let ((fact (/ (aref knt (1+ p)) pf)))
+              (%copy-pt-row pts 0 q 0)
+              (%pt-row (scale-pt fact ds s) q 1))
+            (do ((i 2 (1+ i))) ((> i kk))
+              (declare (type fixnum i))
+              (%copy-pt-row pts (1- i) q i))
+            (let ((fact (/ (- 1d0 (aref knt n)) pf)))
+              (%pt-row (scale-pt fact de s) q (1- n))
+              (%copy-pt-row pts kk q n))
+            (real-matrix-for-back cm q +epoint+ pw)))
+        cur))))
+
+(defun fit-cubic-spline-interp (pts k ds de par)
+  "The cubic spline interpolating the points PTS[0..K] (a point-array) with
+the start and end derivatives DS and DE (points, not modified), parametrized
+by PAR, as a fresh non-rational curve of K+3 control points, solved as a
+tridiagonal system.  A zero DS or DE is estimated from a cubic Bezier through
+the first or last four points (K must then be at least 3).  Signals :inp-err
+when K <= 0, :cal-err for another PAR, and whatever BASIS-EVAL signals.
+NLib: N_FitCubicSplineInterp."
+  (declare (type point-array pts) (type fixnum k par) (type point ds de))
+  (when (<= k 0)
+    (nurbs-error :inp-err 'fit-cubic-spline-interp))
+  (let ((ds (copy-seq ds))
+        (de (copy-seq de)))
+    (declare (type point ds de))
+    (when (%crv-fit-zero-vector-p ds)
+      (%crv-fit-estimate-end-deriv pts k +start+ ds))
+    (when (%crv-fit-zero-vector-p de)
+      (%crv-fit-estimate-end-deriv pts k +end+ de))
+    (let* ((n (+ k 2))
+           (pw (make-cpoint-array (1+ n)))
+           (uk (make-real-vector (+ n 5)))
+           (cur (%make-curve 3 uk pw))
+           (u (make-real-vector (1+ k)))
+           (abc (make-real-vector 4))
+           (a (make-point)) (s (make-point))
+           (aw (make-cpoint)) (c1 (make-cpoint)) (c2 (make-cpoint))
+           (alf 0d0) (bet 0d0) (gam 0d0) (den 0d0))
+      (declare (type fixnum n) (type cpoint-array pw) (type real-vector uk u abc)
+               (dynamic-extent a s aw c1 c2) (type double-float alf bet gam den))
+      ;; parameters
+      (fit-calc-crv-param-values pts k +epoint+ par u)
+      ;; knot vector
+      (dotimes (i 4)
+        (setf (aref uk i) 0d0
+              (aref uk (+ n i 1)) 1d0))
+      (do ((i 1 (1+ i))) ((>= i k))
+        (declare (type fixnum i))
+        (setf (aref uk (+ i 3)) (aref u i)))
+      ;; first two and last two control points
+      (setf alf 1d0
+            bet (/ (aref uk 4) 3d0))
+      (%c-pt-row (pt-to-c-pt (%row-pt pts 0 s) aw) pw 0)
+      (combine-2-pts alf (%row-pt pts 0 s) bet ds a)
+      (%c-pt-row (pt-to-c-pt a aw) pw 1)
+      (setf bet (/ (- (aref uk n) 1d0) 3d0))
+      (%c-pt-row (pt-to-c-pt (%row-pt pts k s) aw) pw n)
+      (combine-2-pts alf (%row-pt pts k s) bet de a)
+      (%c-pt-row (pt-to-c-pt a aw) pw (1- n))
+      (when (= k 1)
+        (return-from fit-cubic-spline-interp cur))
+      ;; k = 2
+      (when (= k 2)
+        (basis-eval uk 3 (aref uk 4) +left+ abc)
+        (setf den (aref abc 1)
+              alf (/ 1d0 den)
+              bet (/ (- (aref abc 0)) den))
+        (pt-to-c-pt (%row-pt pts 1 s) aw)
+        (%c-pt-row (combine-2-c-pts alf aw bet (%row-c-pt pw 1 c1) c2) pw 2)
+        (setf alf 1d0
+              bet (/ (- (aref abc 2)) den))
+        (%combine-2-c-pt-rows alf pw 2 bet pw 3 pw 2)
+        (return-from fit-cubic-spline-interp cur))
+      ;; tridiagonal system
+      (let ((rw (make-cpoint-array (1+ k)))
+            (dd (make-real-vector (1+ k))))
+        (declare (type cpoint-array rw) (type real-vector dd))
+        (do ((i 3 (1+ i))) ((>= i k))
+          (declare (type fixnum i))
+          (%c-pt-row (pt-to-c-pt (%row-pt pts (1- i) s) aw) rw i))
+        (basis-eval uk 3 (aref uk 4) +left+ abc)
+        (setf den (aref abc 1)
+              alf (/ 1d0 den)
+              bet (/ (- (aref abc 0)) den))
+        (pt-to-c-pt (%row-pt pts 1 s) aw)
+        (%c-pt-row (combine-2-c-pts alf aw bet (%row-c-pt pw 1 c1) c2) pw 2)
+        (do ((i 3 (1+ i))) ((>= i k))
+          (declare (type fixnum i))
+          (setf (aref dd i) (/ (aref abc 2) den))
+          (basis-eval uk 3 (aref uk (+ i 2)) +left+ abc)
+          (setf den (- (aref abc 1) (* (aref abc 0) (aref dd i)))
+                alf (/ 1d0 den)
+                bet (/ (- (aref abc 0)) den))
+          (%combine-2-c-pt-rows alf rw i bet pw (1- i) pw i))
+        (setf (aref dd k) (/ (aref abc 2) den))
+        (basis-eval uk 3 (aref uk n) +left+ abc)
+        (setf den (- (aref abc 1) (* (aref abc 0) (aref dd k)))
+              alf (/ 1d0 den)
+              bet (/ (- (aref abc 2)) den)
+              gam (/ (- (aref abc 0)) den))
+        (pt-to-c-pt (%row-pt pts (1- k) s) aw)
+        (%c-pt-row (combine-2-c-pts alf aw bet (%row-c-pt pw (1+ k) c1) c2) pw k)
+        (%vector-blend-c-pt-row gam pw (1- k) pw k)
+        (do ((i (1- k) (1- i))) ((< i 2))
+          (declare (type fixnum i))
+          (%vector-blend-c-pt-row (- (aref dd (1+ i))) pw (1+ i) pw i)))
+      cur)))
+
+;;; ------------------------------------------------- approximation to a tolerance
+
+(defun fit-crv-approx (pts m cld ps pr e ktp)
+  "The curve of degree PR approximating the points PTS[0..M] (a point-array)
+within the error E, as a fresh non-rational curve: starting from the
+interpolant of degree PS (chord length parameters), knots are removed, the
+curve refitted by least squares one degree higher on single (KTP +single+)
+or multiple knots (any other KTP), and the parameters corrected by point
+projection, up to degree PR; when a step fails the process restarts from the
+interpolant one degree higher.  With CLD +yes+ and PTS[0] = PTS[M] (within
+*mtol*) the curve is closed with matching end derivatives (PS must then be at
+least 2).  Signals :inp-err when PR > M, PR < PS, or the data is closed and
+PS = 1, and whatever the interpolation and knot removal routines signal.
+NLib: N_FitCrvApprox."
+  (declare (type point-array pts) (type fixnum m cld ps pr ktp) (type double-float e))
+  (let* ((d (pts-1d-get-max-extent pts m))
+         (ltop (* d 1.0d-4))
+         (ltoc 1.0d-6))
+    (declare (type double-float d ltop ltoc))
+    (when (> pr m)
+      (nurbs-error :inp-err 'fit-crv-approx))
+    (when (< pr ps)
+      (nurbs-error :inp-err 'fit-crv-approx))
+    (let ((uu (make-real-vector (+ m pr 4)))      ; the knot array of the C's cur
+          (u (make-real-vector (1+ m)))
+          (us (make-real-vector (1+ m)))
+          (er (make-real-vector (1+ m)))
+          (closed nil)
+          (wp (make-real-vector (1+ m)))
+          (wd (make-real-vector 2))
+          (ii (make-index-vector 2))
+          (dv (make-point-array 2))             ; D[0], D[1]
+          (vs (make-point))
+          (ve (make-point))
+          (r (make-point))
+          (pk (make-point))
+          (cur nil))
+      (declare (type real-vector uu u us er wp wd) (type index-vector ii) (type point-array dv)
+               (type point vs ve r pk))
+      ;; closed data set?
+      (when (1d-pt-set-is-closed pts m +epoint+ *mtol*)
+        (when (= cld +yes+)
+          (setf closed t)))
+      (when closed
+        (when (= ps 1)
+          (nurbs-error :inp-err 'fit-crv-approx))
+        ;; derivative at the end points
+        (let ((q (make-point-array (1+ m)))
+              (nc (truncate m 2)))
+          (declare (type point-array q) (type fixnum nc))
+          (do ((k 0 (1+ k))) ((> k m))
+            (declare (type fixnum k))
+            (let ((l (mod (+ nc k) m)))
+              (declare (type fixnum l))
+              (when (= l 0)
+                (setf l m))
+              (%copy-pt-row pts l q k)
+              (setf (aref wp k) 1d0
+                    (aref er k) 0d0)))
+          (fit-calc-crv-param-values q m +epoint+ +chordlength+ u)
+          (let* ((kna (fit-crv-calc-knot-vector u m pr (make-real-vector (+ m pr 2))))
+                 (cura (fit-crv-interp-given-params q m +epoint+ u kna pr)))
+            (fit-remove-knots cura u er m e)
+            (setf cura (fit-crv-approx-knots q m +epoint+ u (curve-knots cura) (curve-n cura) pr))
+            (let ((i (truncate (1+ m) 2)))
+              (declare (type fixnum i))
+              (crv-derivs cura (aref u i) +left+ 1 dv))
+            (%copy-pt-row dv 1 dv 0)
+            (%row-pt dv 0 vs)
+            (%row-pt dv 1 ve)))
+        ;; prepare for constrained fitting
+        (setf (aref wp 0) -1d0
+              (aref wp m) -1d0
+              (aref wd 0) -1d0
+              (aref wd 1) -1d0
+              (aref ii 0) 0
+              (aref ii 1) m))
+      ;; parameters
+      (fit-calc-crv-param-values pts m +epoint+ +chordlength+ us)
+      ;; for i = ps..pr: interpolate with degree i; for j = i..pr: remove knots,
+      ;; least-squares fit one degree higher, adjust parameters and errors
+      (do ((i ps (1+ i))) ((> i pr))
+        (declare (type fixnum i))
+        (dotimes (k (1+ m))
+          (setf (aref u k) (aref us k)
+                (aref er k) 0d0))
+        (if closed
+            (progn
+              (fit-calc-knot-vector-end-derivs u m i uu)
+              (setf cur (fit-crv-knots-and-derivs pts m +epoint+ u (subseq uu 0 (+ m i 4)) i vs ve)))
+            (progn
+              (fit-crv-calc-knot-vector u m i uu)
+              (setf cur (fit-crv-interp-given-params pts m +epoint+ u (subseq uu 0 (+ m i 2)) i))))
+        (let ((j i))
+          (declare (type fixnum j))
+          (do () ((> j pr))
+            ;; remove as many knots as possible
+            (fit-remove-knots cur u er m e)
+            (replace uu (the real-vector (curve-knots cur)))
+            (when (= j pr)
+              (return))
+            (let ((nc (curve-n cur))
+                  (mc (curve-m cur))
+                  (nh 0) (mh 0))
+              (declare (type fixnum nc mc nh mh))
+              ;; new knot vector, in place in the curve's knot array
+              (if (= ktp +single+)
+                  (progn
+                    (setf nh (1+ nc)
+                          mh (+ mc 2))
+                    (when (> nh m)
+                      (return))
+                    (dotimes (k (+ j 2))
+                      (setf (aref uu mh) (aref uu mc))
+                      (decf mh))
+                    (do ((k nc (1- k))) ((< k (1+ j)))
+                      (declare (type fixnum k))
+                      (setf (aref uu mh) (aref uu k))
+                      (decf mh))
+                    (dotimes (k (+ j 2))
+                      (setf (aref uu mh) (aref uu 0))
+                      (decf mh)))
+                  (let ((nsp (basis-get-span-count (curve-knots cur) j)))
+                    (declare (type fixnum nsp))
+                    (setf nh (+ nc nsp)
+                          mh (+ mc nsp 1))
+                    (when (> nh m)
+                      (return))
+                    (do () ((not (> mc 0)))
+                      (let ((k mc))
+                        (declare (type fixnum k))
+                        (do () ((not (and (> mc 0) (= (aref uu mc) (aref uu (1- mc))))))
+                          (decf mc))
+                        (let ((mlt (1+ (- k mc))))
+                          (declare (type fixnum mlt))
+                          (dotimes (l (1+ mlt))
+                            (setf (aref uu mh) (aref uu mc))
+                            (decf mh)))
+                        (decf mc)))))
+              ;; approximate by least squares
+              (let ((knt (subseq uu 0 (+ nh j 3)))
+                    (q (1+ j)))
+                (declare (type real-vector knt) (type fixnum q))
+                (handler-case
+                    (setf cur (if closed
+                                  (fit-crv-weighted-lst-sq-knots pts wp m dv wd ii 1 +epoint+ u knt nh q)
+                                  (fit-crv-approx-knots pts m +epoint+ u knt nh q)))
+                  (nurbs-error () (return))))
+              ;; adjust parameters and error vector
+              (let ((apr t))
+                (do ((k 1 (1+ k))) ((>= k m))
+                  (declare (type fixnum k))
+                  (%row-pt pts k pk)
+                  (handler-case
+                      (setf (aref u k) (crv-closest-pt cur pk (aref u k) ltop ltoc r))
+                    (nurbs-error ()
+                      (setf apr nil)
+                      (return)))
+                  (setf (aref er k) (dist-pt-pt pk r))
+                  (when (> (aref er k) e)
+                    (setf apr nil)
+                    (return)))
+                (unless apr
+                  (return))))
+            (incf j))
+          (when (= j pr)
+            (return))))
+      ;; compact curve
+      (crv-compress cur))))
+
+;;; ---------------------------------------- interpolation with knots and tangents
+
+(defun %crv-fit-tan-knot-vector (ul k p tan knv)
+  "Write into KNV the knot vector N_FitCrvKnotsAndTangents uses for the
+tangency case TAN (+no+, +start+, +end+ or +both+) at the parameters
+UL[0..K] for degree P.  The C ignores the error of N_FitCalcKnotVectorDeriv,
+which then leaves KNV as it was.  Returns KNV."
+  (declare (type real-vector ul knv) (type fixnum k p tan))
+  (cond ((= tan +no+) (fit-crv-calc-knot-vector ul k p knv))
+        ((= tan +start+)
+         (handler-case (fit-calc-knot-vector-deriv ul k p +start+ knv) (nurbs-error () nil)))
+        ((= tan +end+)
+         (handler-case (fit-calc-knot-vector-deriv ul k p +end+ knv) (nurbs-error () nil)))
+        ((= tan +both+) (fit-calc-knot-vector-end-derivs ul k p knv)))
+  knv)
+
+(defun fit-crv-knots-and-tangents (pts k u ts te der knt per p)
+  "The curve of degree P interpolating the points PTS[0..K] (a point-array)
+at the parameters U[0..K] (or, when U is nil, chord length parameters scaled
+to KNT's domain), with the start tangent TS and/or end tangent TE when given
+(points; nil for none), as a fresh non-rational curve.  With DER +tangent+
+TS and TE are directions, normalized and scaled IN PLACE by the polygon
+length times the parameter range; with +derivative+ they are used as given.
+KNT, a knot vector or nil, offers the knots: for each interior knot the
+averaged one is replaced by the KNT knot closest to it within a window set
+by PER in [0,1], and averaged knots for which KNT has none are added to it.
+Returns (values curve knot-vector): the knot vector is KNT itself when
+nothing was added, a fresh merged one when knots were added, and the curve's
+own knots (a fresh copy) when KNT is nil.  Signals :inp-err for a KNT with
+no distinct knots, P < 2, PER outside [0,1] or U not spanning KNT's domain,
+:knt-err for an invalid KNT, :geo-err for a zero tangent, and whatever the
+interpolation routines signal.
+NLib: N_FitCrvKnotsAndTangents."
+  (declare (type point-array pts) (type fixnum k der p) (type double-float per))
+  (let ((mt 0) (pt 0) (n 0) (tan +no+) (mo 0) (ms -1)
+        (ut (or knt (make-real-vector 1))))
+    (declare (type fixnum mt pt n tan mo ms) (type real-vector ut))
+    ;; incoming data
+    (when knt
+      (setf mt (1- (length ut)))
+      (setf pt (do ((q 0 (1+ q))) ((or (>= q mt) (/= (aref ut q) (aref ut (1+ q)))) q)
+                 (declare (type fixnum q))))
+      (when (>= pt mt)
+        (nurbs-error :inp-err 'fit-crv-knots-and-tangents))
+      (knot-vector-is-valid ut pt 'fit-crv-knots-and-tangents))
+    (when (< p 2)
+      (nurbs-error :inp-err 'fit-crv-knots-and-tangents))
+    (when (or (< per 0d0) (> per 1d0))
+      (nurbs-error :inp-err 'fit-crv-knots-and-tangents))
+    (when (and u knt)
+      (when (or (/= (aref (the real-vector u) 0) (aref ut 0))
+                (/= (aref (the real-vector u) k) (aref ut mt)))
+        (nurbs-error :inp-err 'fit-crv-knots-and-tangents)))
+    ;; tangency conditions
+    (cond ((and (null ts) (null te)) (setf tan +no+ n k))
+          ((and ts (null te)) (setf tan +start+ n (1+ k)))
+          ((and (null ts) te) (setf tan +end+ n (1+ k)))
+          (t (setf tan +both+ n (+ k 2))))
+    ;; parameters, if not passed in
+    (let ((ul (or u
+                  (let ((ul (fit-calc-crv-param-values pts k +epoint+ +chordlength+ (make-real-vector (1+ k)))))
+                    (declare (type real-vector ul))
+                    (when knt
+                      (when (or (/= (aref ul 0) (aref ut 0)) (/= (aref ul k) (aref ut mt)))
+                        (let ((fac (/ (- (aref ut mt) (aref ut 0)) (- (aref ul k) (aref ul 0)))))
+                          (declare (type double-float fac))
+                          (do ((i 1 (1+ i))) ((>= i k))
+                            (declare (type fixnum i))
+                            (setf (aref ul i) (+ (aref ut 0) (* fac (- (aref ul i) (aref ul 0))))))
+                          (setf (aref ul 0) (aref ut 0)
+                                (aref ul k) (aref ut mt)))))
+                    ul)))
+          (ui (make-real-vector (+ n p 2)))
+          (us nil))
+      (declare (type real-vector ul ui))
+      ;; knot vector, if none passed in
+      (unless knt
+        (%crv-fit-tan-knot-vector ul k p tan ui)
+        (setf mo (+ n p 1)))
+      ;; tangent magnitudes
+      (when (and (/= tan +no+) (= der +tangent+))
+        (let ((fac (dist-polygon pts k)))
+          (declare (type double-float fac))
+          (setf fac (* fac (- (aref ul k) (aref ul 0))))
+          (when ts
+            (vector-normalize-ref ts)
+            (vector-scale ts fac ts))
+          (when te
+            (vector-normalize-ref te)
+            (vector-scale te fac te))))
+      ;; select knots for interpolation
+      (when knt
+        (let ((uss (make-real-vector (+ n p 2)))
+              (ua (make-real-vector (+ n p 2)))
+              (up (make-real-vector (+ n p 1))))
+          (declare (type real-vector uss ua up))
+          (setf us uss)
+          (dotimes (i (1+ p))
+            (setf (aref ui i) (aref ul 0)
+                  (aref ui (+ n i 1)) (aref ul k)))
+          ;; ideal knot vectors for degrees p and p-1
+          (%crv-fit-tan-knot-vector ul k p tan ua)
+          (%crv-fit-tan-knot-vector ul k (1- p) tan up)
+          ;; select knots from knt
+          (let ((j (1+ pt)))
+            (declare (type fixnum j))
+            (setf ms -1)
+            (do ((i (1+ p) (1+ i))) ((> i n))
+              (declare (type fixnum i))
+              (let* ((a (+ (* (- 1d0 per) (aref ua i)) (* per (aref up (1- i)))))
+                     (b (+ (* (- 1d0 per) (aref ua i)) (* per (aref up i))))
+                     (fac (- b a))
+                     (jc -1))
+                (declare (type double-float a b fac) (type fixnum jc))
+                (do () ((not (<= (aref ut j) a)))
+                  (incf j))
+                (do () ((not (and (> (aref ut j) a) (< (aref ut j) b))))
+                  (let ((d (abs (- (aref ua i) (aref ut j)))))
+                    (declare (type double-float d))
+                    (when (< d fac)
+                      (setf fac d
+                            jc j)))
+                  (incf j))
+                (if (= jc -1)
+                    (setf (aref ui i) (aref ua i)
+                          (aref uss (incf ms)) (aref ua i))
+                    (setf (aref ui i) (aref ut jc))))))))
+      ;; interpolate the data points
+      (let ((cur (cond ((= tan +no+)
+                        (fit-crv-interp-given-params pts k +epoint+ ul ui p))
+                       ((= tan +start+)
+                        (fit-crv-knots-and-deriv pts k +epoint+ ul ui p ts +start+))
+                       ((= tan +end+)
+                        (fit-crv-knots-and-deriv pts k +epoint+ ul ui p te +end+))
+                       (t
+                        (fit-crv-knots-and-derivs pts k +epoint+ ul ui p ts te)))))
+        ;; the knot vector handed back
+        (values cur
+                (cond
+                  ((null knt) (subseq ui 0 (1+ mo)))
+                  ((> ms -1)
+                   (let ((uo (make-real-vector (+ mt ms 2)))
+                         (us us)
+                         (o -1) (i 0) (j 0))
+                     (declare (type real-vector uo us) (type fixnum o i j))
+                     (do () ((not (and (<= i mt) (<= j ms))))
+                       (if (< (aref ut i) (aref us j))
+                           (progn (setf (aref uo (incf o)) (aref ut i)) (incf i))
+                           (progn (setf (aref uo (incf o)) (aref us j)) (incf j))))
+                     (do () ((not (<= i mt)))
+                       (setf (aref uo (incf o)) (aref ut i))
+                       (incf i))
+                     uo))
+                  (t knt)))))))
+
+;;; ------------------------------------------------------ closed interpolation
+
+(defun fit-crv-approx-closed-conditions (pts n p d k par)
+  "The curve of degree P interpolating the closed data PTS[0..N] (a
+point-array, PTS[0] = PTS[N]) with the derivatives of orders 1..K the same
+at both ends, parametrized by PAR, as a fresh non-rational curve
+(FIT-CRV-HIGH-DERIVS).  D, a point-array whose rows 1..K are the
+derivatives, or nil: they are then taken off a local interpolant of degree P
+through the data around the start point.  Signals whatever
+FIT-CALC-CRV-PARAM-VALUES, FIT-CRV-INTERP-GIVEN-PARAMS, CRV-DERIVS and
+FIT-CRV-HIGH-DERIVS signal.
+NLib: N_FitCrvApproxClosedConditions."
+  (declare (type point-array pts) (type fixnum n p k par))
+  (let ((ds (make-point-array (1+ k)))
+        (de (make-point-array (1+ k))))
+    (declare (type point-array ds de))
+    (if d
+        ;; derivatives passed in
+        (do ((i 1 (1+ i))) ((> i k))
+          (declare (type fixnum i))
+          (%copy-pt-row d i ds i)
+          (%copy-pt-row d i de i))
+        ;; none: compute them
+        (let* ((nm (truncate n 2))
+               (is (nl-max nm (- n p 1)))
+               (ie (nl-min nm (1+ p)))
+               (nl (+ (- n is) ie))
+               (q (make-point-array (1+ nl)))
+               (dl (make-point-array (1+ k)))
+               (u (make-real-vector (1+ nl)))
+               (v (make-real-vector (1+ n)))
+               (knt (make-real-vector (+ nl p 2)))
+               (id 0))
+          (declare (type fixnum nm is ie nl id) (type point-array q dl) (type real-vector u v knt))
+          ;; data points for local fitting
+          (fit-calc-crv-param-values pts n +epoint+ par v)
+          (%copy-pt-row pts is q 0)
+          (setf (aref u 0) 0d0)
+          (let ((i (1+ is))
+                (j 1))
+            (declare (type fixnum i j))
+            (do () ((not (<= j nl)))
+              (%copy-pt-row pts i q j)
+              (setf (aref u j) (+ (aref u (1- j)) (- (aref v i) (aref v (1- i)))))
+              (when (= i n)
+                (setf i 0
+                      id j))
+              (incf i)
+              (incf j)))
+          ;; interpolate local data through the start point
+          (fit-crv-calc-knot-vector u nl p knt)
+          (let ((curi (fit-crv-interp-given-params q nl +epoint+ u knt p)))
+            ;; derivatives off the local interpolant
+            (crv-derivs curi (aref u id) +left+ k dl))
+          (do ((i 1 (1+ i))) ((> i k))
+            (declare (type fixnum i))
+            (%copy-pt-row dl i ds i)
+            (%copy-pt-row dl i de i))))
+    ;; interpolate the data set
+    (fit-crv-high-derivs pts n p ds k de k par)))
+
+;;; ----------------------------------------------- interpolation with normals
+
+(defun fit-crv-pts-normals (pts nrm kk p)
+  "The curve of degree P (2 or 3) interpolating the points PTS[0..KK] with
+tangents perpendicular to the normals NRM[0..KK] (point-arrays), as a fresh
+non-rational curve: the derivatives of the chord length interpolant at the
+data points (found by projection), projected into the planes normal to NRM,
+are the tangent directions of FIT-CRV-FIRST-DERIV (centripetal parameters).
+For another degree the C returns without error and without a curve: NIL.
+Signals whatever FIT-CRV-INTERP, CRV-CLOSEST-PT, CRV-DERIVS and
+FIT-CRV-FIRST-DERIV signal.
+NLib: N_FitCrvPtsNormals."
+  (declare (type point-array pts nrm) (type fixnum kk p))
+  (when (or (< p 2) (> p 3))
+    (return-from fit-crv-pts-normals nil))
+  (let ((crv (fit-crv-interp pts kk p +chordlength+))
+        (tdir (make-point-array (1+ kk)))
+        (pntder (make-point-array 2))
+        (q (make-point)) (pi* (make-point)) (ni (make-point)) (d1 (make-point)) (mv (make-point)) (tv (make-point))
+        (ui 0d0))
+    (declare (type point-array tdir pntder) (type point q pi* ni d1 mv tv) (type double-float ui))
+    (multiple-value-bind (u0 u1) (crv-get-param-bounds crv)
+      (declare (type double-float u0 u1))
+      (do ((i 0 (1+ i))) ((> i kk))
+        (declare (type fixnum i))
+        (cond ((= i 0) (setf ui u0))
+              ((= i kk) (setf ui u1))
+              (t
+               ;; parameter value for this point, from the previous one
+               (setf u0 ui)
+               (setf ui (crv-closest-pt crv (%row-pt pts i pi*) u0 1.0d-4 1.0d-4 q))))
+        ;; point and first derivative
+        (crv-derivs crv ui +left+ 1 pntder)
+        ;; the derivative projected into the plane normal to nrm[i]
+        (%row-pt nrm i ni)
+        (vector-cross ni (%row-pt pntder 1 d1) mv)
+        (vector-cross mv ni tv)
+        (%pt-row tv tdir i)))
+    (fit-crv-first-deriv pts tdir kk p +tangent+ +centripetal+)))
