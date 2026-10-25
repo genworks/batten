@@ -108,6 +108,22 @@ tolerance)."
                  (let ((failed (c-flag-error-p (c-crv-remove-all-knots cur tol q sq))))
                    (values failed (unless failed (list (from-foreign q :curve)))))))))))
 
+;;; ------------------------------------------------------------- L3-g6
+
+(define-oracle-test crv-remove-knots-deriv-constraints (:file "crv-adv" :trials 3000)
+  (let* ((c (%crv-adv-removable-curve))
+         (tol (case (rnd 8) (0 0d0) (1 1d-9) (2 1d-6) (3 1d-3) (4 1d-1) (5 1d0) (6 30d0) (t 1d6)))
+         (whr (case (rnd 4) (0 +no+) (1 +start+) (2 +end+) (t +both+)))
+         (der (rnd (+ (curve-degree c) 2))))
+    (agree (list :curve c :tol tol :whr whr :der der)
+           (list (batten::crv-remove-knots-deriv-constraints c tol whr der))
+           (with-foreign ((cur c :curve))
+             (with-stacks (sq)
+               (with-foreign-out ((q :curve))
+                 (let ((failed (c-flag-error-p
+                                (c-crv-remove-knots-deriv-constraints cur tol whr der q sq))))
+                   (values failed (unless failed (list (from-foreign q :curve)))))))))))
+
 (define-oracle-test crv-planar-offset-get-deriv (:file "crv-adv" :trials 8000)
   (let* ((two-d (zerop (rnd 2)))
          ;; now and then a straight line (zero curvature) or a degenerate curve

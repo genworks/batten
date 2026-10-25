@@ -308,3 +308,63 @@ domain) is given, some of its interior knots are reused."
                (c-make-knots-compatible rp sp p q xrp xsp)
                (values nil (list (from-foreign rp :knots) (from-foreign sp :knots)
                                  (from-foreign xrp :knots) (from-foreign xsp :knots))))))))
+
+;;; ------------------------------------------------------------- L3-g6
+
+(defun %jiggle-knots (kv eps ends)
+  "Knot vector KV with each interior knot moved by up to EPS either way and
+left unsorted (NLib's [B168] case of slightly out-of-order knots); with ENDS
+(a distance), each end run moved as a whole by up to ENDS too."
+  (let* ((kv (copy-seq kv)) (m (1- (length kv))) (lo (aref kv 0)) (hi (aref kv m)))
+    (when (plusp eps)
+      (dotimes (i (1+ m))
+        (let ((x (aref kv i)))
+          (unless (or (= x lo) (= x hi))
+            (setf (aref kv i) (+ x (* eps (- (rnd 2d0) 1d0)))))))
+      (when ends
+        (let ((dl (* ends (- (rnd 2d0) 1d0))) (dh (* ends (- (rnd 2d0) 1d0))))
+          (dotimes (i (1+ m))
+            (cond ((= (aref kv i) lo) (setf (aref kv i) (+ lo dl)))
+                  ((= (aref kv i) hi) (setf (aref kv i) (+ hi dh))))))))
+    kv))
+
+(define-oracle-test get-compatible-knot-vector-to-tol (:file "basis-basic" :trials 3000)
+  (let* ((k (rnd 4))
+         (lo (if (zerop (rnd 3)) 0d0 (rnd-range -5d0 5d0)))
+         (hi (+ lo 0.5d0 (rnd 5d0)))
+         (tol (case (rnd 6) (0 1d-12) (1 1d-9) (2 1d-6) (3 1d-4) (4 1d-2) (t 0.3d0)))
+         ;; perturbations below, around or above the tolerance
+         ;; (interior knots kept off the ends)
+         (eps (min (* 0.01d0 (- hi lo))
+                   (case (rnd 5) (0 0d0) (1 (* 0.1d0 tol)) (2 (* 0.45d0 tol)) (3 tol) (t (* 3d0 tol)))))
+         ;; end runs a hair apart, mostly within the tolerance
+         (ends (case (rnd 6) ((0 1) (* 0.45d0 tol)) (2 (* 0.1d0 tol)) (3 (* 2d0 tol)) (t nil)))
+         ;; each vector shares some interior knots with the one before it
+         (knt (let (l (prev nil))
+                (dotimes (r (1+ k) (coerce (nreverse l) 'simple-vector))
+                  (setf prev (%compatible-knots (1+ (rnd 5)) lo hi prev))
+                  (push (%jiggle-knots prev eps ends) l)))))
+    ;; now and then one vector on another domain: the vectors run out unevenly
+    (when (and (plusp k) (zerop (rnd 15)))
+      (setf (svref knt (rnd (1+ k))) (%compatible-knots (1+ (rnd 5)) lo (+ hi 1d0))))
+    (agree (list :knt knt :k k :tol tol)
+           (let* ((kc (map 'simple-vector #'copy-seq knt))
+                  (kx (batten::get-compatible-knot-vector-to-tol kc k tol)))
+             (list (coerce kc 'list) (coerce kx 'list)))
+           (with-stacks (sk)
+             (cffi:with-foreign-objects ((kp :pointer (1+ k)) (kxp :pointer))
+               ;; TO-FOREIGN inside WITH-FOREIGN: the copies are freed with it
+               (with-foreign ((dummy (make-real-vector 1) :real-vector))
+                 (declare (ignore dummy))
+                 (dotimes (r (1+ k))
+                   (setf (cffi:mem-aref kp :pointer r) (to-foreign (svref knt r) :knots)))
+                 (setf (cffi:mem-ref kxp :pointer) (cffi:null-pointer))
+                 (let ((failed (c-flag-error-p
+                                (c-get-compatible-knot-vector-to-tol kp k tol kxp sk))))
+                   (values failed
+                           (unless failed
+                             (let ((kna (cffi:mem-ref kxp :pointer)) (ks nil) (xs nil))
+                               (dotimes (r (1+ k))
+                                 (push (from-foreign (cffi:mem-aref kp :pointer r) :knots) ks)
+                                 (push (from-foreign (cffi:mem-aref kna :pointer r) :knots) xs))
+                               (list (nreverse ks) (nreverse xs))))))))))))

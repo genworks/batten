@@ -689,3 +689,127 @@ C records), either possibly empty.  NLib: N_MakeKnotsCompatible."
           (setf (aref xr (incf mxr)) (aref s j))
           (incf j)))
       (values (subseq xr 0 (1+ mxr)) (subseq xs 0 (1+ mxs))))))
+
+;;; ------------------------------------------------------------- L3-g6
+
+(defun basis-basic--st-notdone (knot-indices knt k)
+  "True when some KNOT-INDICES[j], j = 0..K, is below the highest knot index
+of the knot vector KNT[j] (KNT a simple-vector of real-vectors): the knots of
+the vectors being made compatible are not all processed yet.
+NLib: ST_notdone (NL_BasisBasic.cpp)."
+  (declare (type index-vector knot-indices) (type simple-vector knt) (type fixnum k))
+  (do ((j 0 (1+ j))) ((> j k) nil)
+    (declare (type fixnum j))
+    (when (< (aref knot-indices j) (1- (length (the real-vector (svref knt j)))))
+      (return t))))
+
+(defun get-compatible-knot-vector-to-tol (knt k tol)
+  "The knots to insert into each of the knot vectors KNT[0..K] (a
+simple-vector of real-vectors) to make them compatible, knots closer than TOL
+(reduced below the next gap where a gap is smaller) counting as one.  Each
+cluster of near-equal knots is first moved, in place in KNT, to its average,
+so the input knots may change.  Returns a fresh simple-vector of K+1
+real-vectors, the knots to insert into each KNT[r] (the C's knx, sized by the
+knot index it records; possibly empty).  Signals :inp-err when the knot
+vectors run out unevenly (their end knots differ).  TOL must be positive (the
+C does not terminate otherwise).
+NLib: N_GetCompatibleKnotVectorToTol."
+  (declare (type simple-vector knt) (type fixnum k) (type double-float tol))
+  (let ((s 0))
+    (declare (type fixnum s))
+    (dotimes (r (1+ k))
+      (incf s (1- (length (the real-vector (svref knt r))))))
+    (let ((ki (make-index-vector (1+ k)))
+          (mlt (make-index-vector (1+ k)))
+          (kna (make-array (1+ k)))
+          (kmx (make-index-vector (1+ k))))
+      (declare (type index-vector ki mlt kmx) (type simple-vector kna))
+      ;; each output vector gets room for every knot of every input vector
+      (dotimes (r (1+ k))
+        (setf (svref kna r) (make-real-vector (+ s k 1))
+              (aref ki r) 0
+              (aref kmx r) -1))
+      (macrolet ((knots (r) `(the real-vector (svref knt ,r))))
+        (do () ((not (basis-basic--st-notdone ki knt k)))
+          (let ((us 0d0) (gap-size 0d0) (u-tol 0d0) (u-ave 0d0) (num-ave 0) (mh 0))
+            (declare (type double-float us gap-size u-tol u-ave) (type fixnum num-ave mh))
+            ;; smallest next knot value in any vector, and the gap after it
+            (let* ((u (knots 0))
+                   (m (1- (length u))))
+              (declare (type real-vector u) (type fixnum m))
+              (when (> (aref ki 0) m)
+                (nurbs-error :inp-err 'get-compatible-knot-vector-to-tol))
+              (setf us (aref u (aref ki 0)))
+              (let ((kx (1+ (aref ki 0))))
+                (declare (type fixnum kx))
+                (do () ((not (and (<= kx m) (<= (aref u kx) (aref u (aref ki 0))))))
+                  (incf kx))
+                (setf gap-size (if (<= kx m) (- (aref u kx) (aref u (aref ki 0))) -1d0))))
+            (do ((r 1 (1+ r))) ((> r k))
+              (declare (type fixnum r))
+              (let* ((u (knots r))
+                     (m (1- (length u))))
+                (declare (type real-vector u) (type fixnum m))
+                (when (> (aref ki r) m)
+                  (nurbs-error :inp-err 'get-compatible-knot-vector-to-tol))
+                (when (< (aref u (aref ki r)) us)
+                  (setf us (aref u (aref ki r)))
+                  (let ((kx (1+ (aref ki r))))
+                    (declare (type fixnum kx))
+                    (do () ((not (and (<= kx m) (<= (aref u kx) (aref u (aref ki r))))))
+                      (incf kx))
+                    (setf gap-size (if (<= kx m) (- (aref u kx) (aref u (aref ki r))) -1d0))))))
+            ;; a gap smaller than tol reduces tol below it
+            (setf u-tol (if (and (< gap-size tol) (/= gap-size -1d0)) (* 0.99999d0 gap-size) tol))
+            ;; multiplicities
+            (dotimes (r (1+ k))
+              (let* ((u (knots r))
+                     (m (1- (length u))))
+                (declare (type real-vector u) (type fixnum m))
+                (cond ((< (abs (- (aref u (aref ki r)) us)) u-tol)
+                       (let ((s0 (aref ki r)))
+                         (declare (type fixnum s0))
+                         (do () ((not (and (< (aref ki r) m)
+                                           (<= (aref u (1+ (aref ki r))) (aref u (aref ki r))))))
+                           (incf (aref ki r)))
+                         (setf (aref mlt r) (1+ (- (aref ki r) s0)))))
+                      (t
+                       (setf (aref mlt r) 0)
+                       (decf (aref ki r))))))
+            ;; average of the knots within u-tol of the smallest
+            (dotimes (r (1+ k))
+              (let ((u (knots r)))
+                (declare (type real-vector u))
+                (when (and (> (aref mlt r) 0) (< (abs (- (aref u (aref ki r)) us)) u-tol))
+                  (setf u-ave (+ u-ave (aref u (aref ki r))))
+                  (incf num-ave))))
+            (setf us (/ u-ave (float num-ave 1d0)))
+            ;; move the knots within u-tol of the average to it (the C tests
+            ;; vectors with no such knot too, where the move is empty)
+            (dotimes (r (1+ k))
+              (let ((u (knots r))
+                    (kr (aref ki r))
+                    (ml (aref mlt r)))
+                (declare (type real-vector u) (type fixnum kr ml))
+                (when (and (> ml 0) (< (abs (- (aref u kr) us)) u-tol))
+                  (do ((s 1 (1+ s))) ((> s ml))
+                    (declare (type fixnum s))
+                    (setf (aref u (+ (- kr ml) s)) us)))))
+            ;; highest multiplicity
+            (setf mh (aref mlt 0))
+            (do ((r 1 (1+ r))) ((> r k))
+              (declare (type fixnum r))
+              (when (> (aref mlt r) mh)
+                (setf mh (aref mlt r))))
+            ;; the new knots for each vector
+            (dotimes (r (1+ k))
+              (let ((v (svref kna r))
+                    (mm (aref kmx r)))
+                (declare (type real-vector v) (type fixnum mm))
+                (do ((s (1+ (aref mlt r)) (1+ s))) ((> s mh))
+                  (declare (type fixnum s))
+                  (setf (aref v (incf mm)) us))
+                (setf (aref kmx r) mm)
+                (incf (aref ki r)))))))
+      (dotimes (r (1+ k) kna)
+        (setf (svref kna r) (subseq (the real-vector (svref kna r)) 0 (1+ (aref kmx r))))))))
