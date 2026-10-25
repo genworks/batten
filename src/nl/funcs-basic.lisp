@@ -129,3 +129,98 @@ NLib: N_SFuncGetArrayAndKnotVectors."
   (declare (type sfun sfn))
   (values (sfun-vals sfn) (sfun-degree-u sfn) (sfun-degree-v sfn)
           (sfun-knots-u sfn) (sfun-knots-v sfn)))
+
+;;; ------------------------------------------------------------ level 1, group 1
+
+(defun c-func-from-knots (cfn fu n p u m)
+  "Make curve function CFN, in place, from function values FU[0..N], degree
+P and knots U[0..M], sharing the arrays where they are exactly that long, as
+the C shares the pointers.  Return CFN.
+NLib: N_CFuncFromKnots."
+  (declare (type cfun cfn) (type real-vector fu u) (type fixnum n p m))
+  (let ((cvl (c-value-from-array fu n))
+        (knt (knot-vector-from-real-array u m)))
+    (declare (type real-vector cvl knt))
+    (c-func-from-knot-vector cfn cvl p knt)))
+
+(defun crv-func-compact (cfn)
+  "Give curve function CFN, in place, fresh control value and knot arrays
+holding copies of its values and knots.  Return CFN.
+NLib: N_CrvFuncCompact."
+  (declare (type cfun cfn))
+  (multiple-value-bind (fu u) (crv-func-cntrl-val-knots cfn)
+    (declare (type real-vector fu u))
+    (let* ((n (1- (length fu)))
+           (m (1- (length u)))
+           (fv (make-real-vector (1+ n)))
+           (v (make-real-vector (1+ m))))
+      (declare (type fixnum n m) (type real-vector fv v))
+      (fast
+        (dotimes (i (1+ n))
+          (setf (aref fv i) (aref fu i)))
+        (dotimes (i (1+ m))
+          (setf (aref v i) (aref u i))))
+      (crv-func-set-ptrs cfn fv v))))
+
+(defun crv-func-copy (cfnp)
+  "A fresh copy of curve function CFNP: its degree, control values and knots.
+NLib: N_CrvFuncCopy."
+  (declare (type cfun cfnp))
+  (let* ((fp (cfun-vals cfnp))
+         (up (cfun-knots cfnp))
+         (n (1- (length fp)))
+         (m (1- (length up)))
+         (fq (make-real-vector (1+ n)))
+         (uq (make-real-vector (1+ m))))
+    (declare (type real-vector fp up fq uq) (type fixnum n m))
+    (fast
+      (dotimes (i (1+ n))
+        (setf (aref fq i) (aref fp i)))
+      (dotimes (i (1+ m))
+        (setf (aref uq i) (aref up i))))
+    (%make-cfun (cfun-degree cfnp) uq fq)))
+
+(defun c-func-eval (cfn u flg)
+  "The value of curve function CFN at parameter U, FLG (+left+ or +right+)
+choosing the knot span at a knot.  Signals :par-err for U outside the
+domain.
+NLib: N_CFuncEval."
+  (declare (type cfun cfn) (type double-float u) (type fixnum flg))
+  (multiple-value-bind (fu knots) (crv-func-cntrl-val-knots cfn)
+    (declare (type real-vector fu knots))
+    (let ((p (cfun-degree cfn)))
+      (declare (type fixnum p))
+      (knot-vector-is-param-out-of-bounds knots u 'c-func-eval)
+      (let ((n (make-array (1+ p) :element-type 'double-float :initial-element 0d0)))
+        (declare (dynamic-extent n))
+        (let ((spn (basis-eval knots p u flg n))
+              (f 0d0))
+          (declare (type fixnum spn) (type double-float f))
+          (fast
+            (dotimes (i (1+ p))
+              (setf f (+ f (* (aref fu (+ (- spn p) i)) (aref n i))))))
+          f)))))
+
+(defun c-func-derivs (cfn u flg der fd)
+  "Write the derivatives of curve function CFN at parameter U, orders 0 to
+DER, into FD (a real-vector of at least DER+1, allocated by the caller):
+FD[k] is the kth derivative.  FLG (+left+ or +right+) chooses the knot span
+at a knot.  Signals :par-err for U outside the domain.  Return FD.
+NLib: N_CFuncDerivs."
+  (declare (type cfun cfn) (type double-float u) (type fixnum flg der) (type real-vector fd))
+  (multiple-value-bind (fu knots) (crv-func-cntrl-val-knots cfn)
+    (declare (type real-vector fu knots))
+    (let ((p (cfun-degree cfn)))
+      (declare (type fixnum p))
+      (knot-vector-is-param-out-of-bounds knots u 'c-func-derivs)
+      (let* ((nd (make-real-matrix (1+ der) (1+ p)))
+             (spn (basis-derivs knots p u flg der nd)))
+        (declare (type real-matrix nd) (type fixnum spn))
+        (fast
+          (do ((k 0 (1+ k))) ((> k der))
+            (declare (type fixnum k))
+            (setf (aref fd k) 0d0)
+            (do ((j (- spn p) (1+ j))) ((> j spn))
+              (declare (type fixnum j))
+              (setf (aref fd k) (+ (aref fd k) (* (aref fu j) (aref nd k (+ (- j spn) p))))))))
+        fd))))

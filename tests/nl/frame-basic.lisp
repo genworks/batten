@@ -92,3 +92,55 @@
                (c-e-net-get-pts ntl nn mm pp)
                (let ((n (cffi:mem-ref nn :long)) (m (cffi:mem-ref mm :long)))
                  (values nil (list n m (from-foreign (cffi:mem-ref pp :pointer) :point-net (1+ n) (1+ m))))))))))
+
+;;; ------------------------------------------------------------ level 1, group 1
+
+(defun %frame-basic-signed-zeros (a)
+  "Now and then set some coordinates of point array or net A to 0 or -0, so
+min-max comparisons meet ties."
+  (when (zerop (rnd 3))
+    (dotimes (i (array-total-size a))
+      (when (zerop (rnd 4))
+        (setf (row-major-aref a i) (if (zerop (rnd 2)) 0d0 -0d0)))))
+  a)
+
+(define-oracle-test polygon-get-b-box (:file "frame-basic" :trials 3000)
+  (let ((p (%frame-basic-signed-zeros (random-points (1+ (rnd 15))))))
+    (agree (list :p p)
+           (list (batten::polygon-get-b-box p (make-real-vector 6)))
+           (with-foreign ((ppl p :epolygon))
+             (with-foreign-out ((box :box))
+               (c-polygon-get-b-box ppl box)
+               (values nil (list (from-foreign box :box))))))))
+
+(define-oracle-test e-net-get-b-box (:file "frame-basic" :trials 3000)
+  (let ((p (%frame-basic-signed-zeros (%frame-basic-net (1+ (rnd 8)) (1+ (rnd 8)) 3))))
+    (agree (list :p p)
+           (list (batten::e-net-get-b-box p (make-real-vector 6)))
+           (with-foreign ((ntl p :enet))
+             (with-foreign-out ((box :box))
+               (c-e-net-get-b-box ntl box)
+               (values nil (list (from-foreign box :box))))))))
+
+(defun %frame-basic-closed-net (rows cols)
+  "A random point net, now and then closed (give or take about *mtol*) in u
+or in v."
+  (let ((p (%frame-basic-net rows cols 3)))
+    (case (rnd 3)
+      (0 (dotimes (j cols)
+           (dotimes (c 3)
+             (setf (aref p (1- rows) j c)
+                   (+ (aref p 0 j c) (case (rnd 4) (0 0d0) (1 3d-8) (2 6d-8) (t 2d-7)))))))
+      (1 (dotimes (i rows)
+           (dotimes (c 3)
+             (setf (aref p i (1- cols) c)
+                   (+ (aref p i 0 c) (case (rnd 4) (0 0d0) (1 3d-8) (2 6d-8) (t 2d-7))))))))
+    p))
+
+(define-oracle-test e-net-is-closed (:file "frame-basic" :trials 3000)
+  (let ((p (%frame-basic-closed-net (1+ (rnd 8)) (1+ (rnd 8))))
+        (dir (case (rnd 8) (0 0) (1 3) ((2 3 4) +udir+) (t +vdir+))))
+    (agree (list :p p :dir dir)
+           (list (if (batten::e-net-is-closed p dir) 1 0))
+           (with-foreign ((ntl p :enet))
+             (values nil (list (c-e-net-is-closed ntl dir)))))))

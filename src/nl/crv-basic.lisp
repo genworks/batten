@@ -178,3 +178,254 @@ NLib: N_CreateCrvFromNumAndDenom."
         (dotimes (i (1+ mn))
           (setf (aref uc i) (aref un i))))
       (%make-curve pn uc pw))))
+
+;;; ------------------------------------------------------------ level 1, group 1
+
+(defun crv-from-c-pts-and-knots (cur pw n p u m)
+  "Make curve CUR (modified in place) the curve of control points PW[0..N],
+degree P and knots U[0..M], sharing the arrays where they are exactly that
+long, as the C shares the pointers.  Return CUR.
+NLib: N_CrvFromCPtsAndKnots."
+  (declare (type curve cur) (type cpoint-array pw) (type fixnum n p m) (type real-vector u))
+  (let ((pol (c-polygon-from-c-pts pw n))
+        (knt (knot-vector-from-real-array u m)))
+    (declare (type cpoint-array pol) (type real-vector knt))
+    (crv-from-c-polygon-and-knot-vector cur pol p knt)))
+
+(defun crv-compress (cur)
+  "Give curve CUR (modified in place) fresh control point and knot arrays
+holding copies of its control points and knots.  Return CUR.
+NLib: N_CrvCompress."
+  (declare (type curve cur))
+  (let* ((pw (curve-cpoints cur))
+         (u (curve-knots cur))
+         (n (curve-n cur))
+         (m (curve-m cur))
+         (qw (make-cpoint-array (1+ n)))
+         (v (make-real-vector (1+ m))))
+    (declare (type cpoint-array pw qw) (type real-vector u v) (type fixnum n m))
+    (fast
+      (dotimes (i (1+ n))
+        (%copy-c-pt-row pw i qw i))
+      (dotimes (i (1+ m))
+        (setf (aref v i) (aref u i))))
+    (crv-set-c-pts-and-knots cur qw v)))
+
+(defun crv-is-line (cur tol)
+  "True when curve CUR is a straight line to within TOL: every interior
+control point projects inside the segment between the end points (extended
+by TOL at each end) and lies within TOL of it.  When the end points are
+within TOL of each other, every control point must also lie within TOL of
+the first one.
+NLib: N_CrvIsLine."
+  (declare (type curve cur) (type double-float tol))
+  (let ((pw (curve-cpoints cur))
+        (n (curve-n cur))
+        (q (make-point)) (a (make-point)) (b (make-point))
+        (line (make-point)) (aprime (make-point)) (bprime (make-point)))
+    (declare (type cpoint-array pw) (type fixnum n)
+             (dynamic-extent q a b line aprime bprime))
+    (multiple-value-bind (x y z) (%cpoint-row-to-euclid pw 0)
+      (set-point a x y z))
+    (multiple-value-bind (x y z) (%cpoint-row-to-euclid pw n)
+      (set-point b x y z))
+    (when (<= (dist-pt-pt a b) tol)
+      (do ((i 1 (1+ i))) ((>= i n))
+        (declare (type fixnum i))
+        (multiple-value-bind (x y z) (%cpoint-row-to-euclid pw i)
+          (set-point q x y z))
+        (when (> (dist-pt-pt a q) tol)
+          (return-from crv-is-line nil))))
+    (vector-dir a b line)
+    (let ((length (vector-magnitude line)))
+      (declare (type double-float length))
+      ;; the C ignores N_VectorNormalizeRef's error, leaving LINE unscaled
+      (handler-case (vector-normalize-ref line)
+        (nurbs-error () nil))
+      (vector-pt-along-vector a (+ length tol) line bprime)
+      (vector-reverse-in-place line)
+      (vector-pt-along-vector b (+ length tol) line aprime))
+    (do ((i 1 (1+ i))) ((>= i n) t)
+      (declare (type fixnum i))
+      (multiple-value-bind (x y z) (%cpoint-row-to-euclid pw i)
+        (set-point q x y z))
+      (let ((d (handler-case (dist-perp-pt-line-seg q aprime bprime)
+                 (nurbs-error () nil))))
+        (when (null d)
+          (return nil))
+        (locally (declare (type double-float d))
+          (when (or (< d 0d0) (> d tol))
+            (return nil)))))))
+
+(defun crvs-are-combatible (cur k)
+  "True when the curves CUR[0..K] (a simple-vector of curves) are compatible:
+all rational or all non-rational, all 2D or all 3D, with the same highest
+control point and knot indexes, and knots equal to within *ptol*.
+NLib: N_CrvsAreCombatible."
+  (declare (type simple-vector cur) (type fixnum k))
+  (let ((allra t) (allnra t) (all2d t) (all3d t))
+    (dotimes (i (1+ k))
+      (unless (is-crv-rat (svref cur i))
+        (setf allra nil)
+        (return)))
+    (dotimes (i (1+ k))
+      (when (is-crv-rat (svref cur i))
+        (setf allnra nil)
+        (return)))
+    (when (and (not allra) (not allnra))
+      (return-from crvs-are-combatible nil))
+    (dotimes (i (1+ k))
+      (when (crv-is-3d (svref cur i))
+        (setf all2d nil)
+        (return)))
+    (dotimes (i (1+ k))
+      (unless (crv-is-3d (svref cur i))
+        (setf all3d nil)
+        (return)))
+    (when (and (not all2d) (not all3d))
+      (return-from crvs-are-combatible nil))
+    (let ((n0 (curve-n (svref cur 0)))
+          (m0 (curve-m (svref cur 0))))
+      (declare (type fixnum n0 m0))
+      (do ((i 1 (1+ i))) ((> i k))
+        (declare (type fixnum i))
+        (unless (and (= (curve-n (svref cur i)) n0) (= (curve-m (svref cur i)) m0))
+          (return-from crvs-are-combatible nil))))
+    (let ((u0 (curve-knots (svref cur 0)))
+          (ptol *ptol*))
+      (declare (type real-vector u0) (type double-float ptol))
+      (do ((i 1 (1+ i))) ((> i k) t)
+        (declare (type fixnum i))
+        (let* ((u (curve-knots (svref cur i)))
+               (m (curve-m (svref cur i))))
+          (declare (type real-vector u) (type fixnum m))
+          (do ((j 0 (1+ j))) ((> j m))
+            (declare (type fixnum j))
+            (when (> (abs (- (aref u j) (aref u0 j))) ptol)
+              (return-from crvs-are-combatible nil))))))))
+
+(defun crv-get-num-and-denom (cur)
+  "The numerator and denominator of curve CUR, as two values: a fresh
+non-rational curve whose control points are CUR's homogeneous (wx wy wz),
+and, when CUR is rational, a fresh cfun whose values are CUR's weights (nil
+when CUR is non-rational).
+NLib: N_CrvGetNumAndDenom."
+  (declare (type curve cur))
+  (let* ((pw (curve-cpoints cur))
+         (uc (curve-knots cur))
+         (n (curve-n cur))
+         (m (curve-m cur))
+         (p (curve-degree cur))
+         (rat (is-crv-rat cur))
+         (nw (make-cpoint-array (1+ n)))
+         (un (make-real-vector (1+ m)))
+         (fu (if rat (make-real-vector (1+ n)) nil))
+         (ud (if rat (make-real-vector (1+ m)) nil))
+         (pt (make-cpoint)))
+    (declare (type cpoint-array pw nw) (type real-vector uc un) (type fixnum n m p)
+             (type (or null real-vector) fu ud) (dynamic-extent pt))
+    (dotimes (i (1+ n))
+      (%row-c-pt pw i pt)
+      (multiple-value-bind (xw yw zw w) (c-pt-to-wx-wy-wz pt)
+        (c-pt-from-wx-wy-wz xw yw zw +no-w+ pt)
+        (%c-pt-row pt nw i)
+        (when rat
+          (setf (aref fu i) w))))
+    (dotimes (i (1+ m))
+      (setf (aref un i) (aref uc i))
+      (when rat
+        (setf (aref ud i) (aref uc i))))
+    (values (%make-curve p un nw)
+            (if rat (%make-cfun p ud fu) nil))))
+
+(defun crv-get-e-polygon (cur k l)
+  "The Euclidean polygon of control points PW[K..L] of curve CUR, a fresh
+point-array of L-K+1 vertices.  Signals :ind-err unless 0 <= K <= L <= n.
+NLib: N_CrvGetEPolygon."
+  (declare (type curve cur) (type fixnum k l))
+  (let ((pw (curve-cpoints cur))
+        (n (curve-n cur)))
+    (declare (type cpoint-array pw) (type fixnum n))
+    (when (or (> k l) (< k 0) (> l n))
+      (nurbs-error :ind-err 'crv-get-e-polygon))
+    (let ((p (make-point-array (1+ (- l k)))))
+      (declare (type point-array p))
+      (do ((i k (1+ i))) ((> i l))
+        (declare (type fixnum i))
+        (multiple-value-bind (x y z) (%cpoint-row-to-euclid pw i)
+          (setf (aref p (- i k) 0) x
+                (aref p (- i k) 1) y
+                (aref p (- i k) 2) z)))
+      (e-polygon-from-pts (- l k) p))))
+
+(defun crv-3d-to-2d (cur)
+  "Make curve CUR 2D, in place, by setting every control point's wz to
++no-z+.  Return CUR.
+NLib: N_Crv3dTo2d."
+  (declare (type curve cur))
+  (let ((pw (curve-cpoints cur)))
+    (declare (type cpoint-array pw))
+    (dotimes (i (array-dimension pw 0))
+      (setf (aref pw i 2) +no-z+)))
+  cur)
+
+(defun crv-2d-to-3d (cur)
+  "Make curve CUR 3D, in place, by setting every control point's wz to 0.
+Return CUR.
+NLib: N_Crv2dTo3d."
+  (declare (type curve cur))
+  (let ((pw (curve-cpoints cur)))
+    (declare (type cpoint-array pw))
+    (dotimes (i (array-dimension pw 0))
+      (setf (aref pw i 2) 0d0)))
+  cur)
+
+(defun crv-rat-to-non-rat (cur)
+  "Make curve CUR non-rational, in place, by setting every control point's
+weight to +no-w+.  Return CUR.
+NLib: N_CrvRatToNonRat."
+  (declare (type curve cur))
+  (let ((pw (curve-cpoints cur)))
+    (declare (type cpoint-array pw))
+    (dotimes (i (array-dimension pw 0))
+      (setf (aref pw i 3) +no-w+)))
+  cur)
+
+(defun crv-non-rat-to-rat (cur)
+  "Make curve CUR rational, in place, by setting every control point's weight
+to 1.  Return CUR.
+NLib: N_CrvNonRatToRat."
+  (declare (type curve cur))
+  (let ((pw (curve-cpoints cur)))
+    (declare (type cpoint-array pw))
+    (dotimes (i (array-dimension pw 0))
+      (setf (aref pw i 3) 1d0)))
+  cur)
+
+(defun crv-reparam-to-interval (cur i)
+  "Map the knots of curve CUR, in place, linearly onto interval I (a
+real-vector (a b)): the first p+1 knots become a, the last p+1 become b.
+Nothing changes when the domain already is [a, b].  Return CUR.
+NLib: N_CrvReparamToInterval."
+  (declare (type curve cur) (type real-vector i))
+  (let* ((p (curve-degree cur))
+         (u (curve-knots cur))
+         (m (curve-m cur)))
+    (declare (type fixnum p m) (type real-vector u))
+    (multiple-value-bind (a b) (interval-get-data i)
+      (declare (type double-float a b))
+      (when (or (/= a (aref u 0)) (/= b (aref u m)))
+        (let* ((u0 (aref u 0))
+               (fac (/ (- b a) (- (aref u m) (aref u 0)))))
+          (declare (type double-float u0 fac))
+          (fast
+            (do ((j 0 (1+ j))) ((> j p))
+              (declare (type fixnum j))
+              (setf (aref u j) a))
+            (do ((j (1+ p) (1+ j))) ((> j (- m p 1)))
+              (declare (type fixnum j))
+              (setf (aref u j) (+ (* fac (- (aref u j) u0)) a)))
+            (do ((j (- m p) (1+ j))) ((> j m))
+              (declare (type fixnum j))
+              (setf (aref u j) b)))))))
+  cur)
