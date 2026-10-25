@@ -25,6 +25,21 @@
                          (unless (cffi:null-pointer-p pw)
                            (list (from-foreign pw :cpoint-net (1+ n) (1+ m)))))))))))
 
+(define-oracle-test check-real-mat-storage (:file "util" :trials 2000)
+  (let* ((n (1- (rnd 7))) (m (1- (rnd 7)))
+         ;; expected sizes mostly within the matrix, now and then one over
+         (nr (+ (- n (rnd 3)) (if (zerop (rnd 4)) 1 0)))
+         (mc (+ (- m (rnd 3)) (if (zerop (rnd 4)) 1 0)))
+         (rows (max 1 (1+ n))) (cols (max 1 (1+ m)))
+         (rm (random-real-matrix rows cols))
+         (mtp (rnd 4)) (bw (rnd 5)))
+    (agree (list :n n :m m :nr nr :mc mc)
+           (list (batten::check-real-mat-storage (batten::make-rmatrix n m rm mtp bw) nr mc
+                                                 'check-real-mat-storage))
+           (with-foreign ((rma (batten::make-rmatrix n m rm mtp bw) :rmatrix))
+             (cffi:with-foreign-string (rn "N_CheckRealMatStorage")
+               (values (c-flag-error-p (c-check-real-mat-storage rma nr mc rn)) (list nil)))))))
+
 (defun %file-length-or-nil (path)
   (with-open-file (in path :direction :input :if-does-not-exist nil
                            :element-type '(unsigned-byte 8))

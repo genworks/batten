@@ -600,3 +600,159 @@ a zero pivot, now and then the wrong shape."
                                      :pointer (cffi:callback %minima-callback)
                                      :double xtol :double ftol :pointer xmin :pointer fmin :void)
                (values nil (list (cffi:mem-ref xmin :double) (cffi:mem-ref fmin :double))))))))
+
+;;; ------------------------------------------------------------ L1-g0 routines
+
+(defun %rm-copy (rma)
+  "A copy of Batten rmatrix RMA with its own storage."
+  (let ((r (batten::copy-rmatrix rma)))
+    (when (batten::rmatrix-rm r)
+      (setf (batten::rmatrix-rm r) (%copy-array (batten::rmatrix-rm r))))
+    r))
+
+(defun %rm-row-stride (rm rows)
+  "The elements per row of a foreign NL_REAL** whose rows are contiguous, as
+N_AllocReal2dArray lays them out: NIL with a single row."
+  (when (> rows 1)
+    (/ (- (cffi:pointer-address (cffi:mem-aref rm :pointer 1))
+          (cffi:pointer-address (cffi:mem-aref rm :pointer 0)))
+       8)))
+
+(define-oracle-test set-real-matrix (:file "math" :trials 1000)
+  ;; the storage NLib allocates is uninitialized: compare the members and the
+  ;; row length (from the row pointers' spacing)
+  (let* ((n (rnd 7)) (m (rnd 7)) (mtp (rnd 4)) (bw (1+ (rnd 6))))
+    (agree (list :n n :m m :mtp mtp :bw bw)
+           (let ((r (batten::set-real-matrix (batten::make-rmatrix) n m mtp bw)))
+             (list (batten::rmatrix-n r) (batten::rmatrix-m r) (batten::rmatrix-mtp r)
+                   (batten::rmatrix-bw r) (array-dimension (batten::rmatrix-rm r) 0)
+                   (when (> n 0) (array-dimension (batten::rmatrix-rm r) 1))))
+           (with-stacks (s)
+             (with-foreign ()
+               (let ((r (%foreign-rmatrix -1 -1 (cffi:null-pointer) 0 0)))
+                 (if (c-flag-error-p (c-set-real-matrix r n m mtp bw s))
+                     (values t nil)
+                     (multiple-value-bind (cn cm crm cmtp cbw) (%rmatrix-members r)
+                       (values nil (list cn cm cmtp cbw (1+ cn) (%rm-row-stride crm (1+ cn))))))))))))
+
+(defun %transpose-mask (rma)
+  "Zero the entries of the result matrix RMA (type and size as transposed)
+that N_RealMatrixTranspose never writes: storage the C leaves uninitialized."
+  (let* ((n (batten::rmatrix-n rma)) (m (batten::rmatrix-m rma)) (mtp (batten::rmatrix-mtp rma))
+         (sbw (floor (batten::rmatrix-bw rma) 2)) (b (batten::rmatrix-rm rma)))
+    (dotimes (r (array-dimension b 0) rma)
+      (dotimes (c (array-dimension b 1))
+        (unless (cond ((= mtp batten::+mt-upperright+) (and (<= r n) (<= c m) (>= c r)))
+                      ((= mtp batten::+mt-lowerleft+) (and (<= r n) (<= c m) (<= c r)))
+                      ((= mtp batten::+mt-banded+) (and (<= r n) (<= c (* 2 sbw))
+                                                        (<= 0 (+ r c (- sbw)) m)))
+                      (t (and (<= r n) (<= c m))))
+          (setf (aref b r c) 0d0))))))
+
+(define-oracle-test real-matrix-transpose (:file "math" :trials 3000)
+  (let* ((mta (rnd 4)) (full (= mta batten::+mt-full+))
+         (n (rnd 7)) (m (if full (rnd 7) n))
+         ;; an odd bandwidth with 2*sbw <= n, so the in-place case's (n+1)-wide
+         ;; storage holds the band
+         (bw (if (= mta batten::+mt-banded+) (1+ (* 2 (rnd (1+ (floor n 2))))) (1+ n)))
+         (rma (if (= mta batten::+mt-banded+)
+                  (%random-band-rmatrix n mta bw)
+                  (%random-rmatrix (1+ n) (1+ m) mta :bw bw)))
+         (mode (case (rnd 4) (0 :in-place) (1 :null) (t :given)))
+         ;; a given output matrix, now and then too small (:sto-err); its storage
+         ;; is roomy enough for any band
+         (cn (if (zerop (rnd 8)) (max 0 (1- m)) (+ m (rnd 2))))
+         (cm (if (zerop (rnd 8)) (max 0 (1- n)) (+ n (rnd 2))))
+         (crm (random-real-matrix (+ cn 2) (+ cm 2))))
+    (agree (list :mta mta :n n :m m :bw bw :mode mode :cn cn :cm cm)
+           (let* ((a (%rm-copy rma))
+                  (b (ecase mode
+                       (:in-place a)
+                       (:null (batten::make-rmatrix))
+                       (:given (batten::make-rmatrix cn cm (%copy-array crm) batten::+mt-full+ 1)))))
+             (batten::real-matrix-transpose a b)
+             (list (if (eq mode :given) b (%transpose-mask (%rm-copy b)))))
+           (with-stacks (sa)
+             (with-foreign ()
+               (let* ((a (%rmatrix-to-foreign rma))
+                      (b (ecase mode
+                           (:in-place a)
+                           (:null (%foreign-rmatrix -1 -1 (cffi:null-pointer) 0 0))
+                           (:given (%foreign-rmatrix cn cm (to-foreign crm :real-matrix)
+                                                     batten::+mt-full+ 1)))))
+                 (if (c-flag-error-p (c-real-matrix-transpose a b sa sa))
+                     (values t nil)
+                     (multiple-value-bind (bn bm brm bmtp bbw) (%rmatrix-members b)
+                       (let* ((rows (ecase mode
+                                      (:in-place (if (member mta '(1 2)) (1+ n) (1+ m)))
+                                      (:null (1+ bn))
+                                      (:given (+ cn 2))))
+                              (cols (ecase mode
+                                      (:in-place (if (member mta '(1 2)) (1+ m) (1+ n)))
+                                      (:null (if (= bmtp batten::+mt-banded+) (if (= bbw 1) 2 bbw) (1+ bm)))
+                                      (:given (+ cm 2))))
+                              (r (batten::make-rmatrix bn bm (from-foreign brm :real-matrix rows cols)
+                                                       bmtp bbw)))
+                         (values nil (list (if (eq mode :given) r (%transpose-mask r)))))))))))))
+
+(define-oracle-test real-matrix-lu-decompose-pivot (:file "math" :trials 3000)
+  (let* ((n (rnd 9))
+         (rma (%wrong-shape (%random-rmatrix (1+ n) (1+ n) batten::+mt-full+ :scale 10d0)))
+         (a (batten::rmatrix-rm rma)))
+    ;; now and then singular: a zero row (scaling fails) or a repeated row (a
+    ;; pivot fails), or a tiny row
+    (case (rnd 24)
+      (0 (let ((i (rnd (1+ n)))) (dotimes (j (1+ n)) (setf (aref a i j) 0d0))))
+      (1 (let ((i (rnd (1+ n))) (k (rnd (1+ n)))) (dotimes (j (1+ n)) (setf (aref a i j) (aref a k j)))))
+      (2 (let ((i (rnd (1+ n)))) (dotimes (j (1+ n)) (setf (aref a i j) (* 1d-13 (aref a i j)))))))
+    (agree (list :n n :mtp (batten::rmatrix-mtp rma) :m (batten::rmatrix-m rma) :a a)
+           (let ((r (%rm-copy rma)) (ind (batten::make-index-vector (1+ n))))
+             (batten::real-matrix-lu-decompose-pivot r ind)
+             (list (batten::rmatrix-rm r) ind))
+           (with-foreign ((rmp a :real-matrix) (ip (batten::make-index-vector (1+ n)) :index-vector))
+             (let ((err (c-flag-error-p (c-real-matrix-lu-decompose-pivot
+                                         (%foreign-rmatrix n (batten::rmatrix-m rma) rmp
+                                                           (batten::rmatrix-mtp rma) (batten::rmatrix-bw rma))
+                                         ip))))
+               (values err (list (from-foreign rmp :real-matrix (1+ n) (1+ n))
+                                 (from-foreign ip :index-vector (1+ n)))))))))
+
+(define-oracle-test real-matrix-inverse (:file "math" :trials 3000)
+  (let* ((n (rnd 9)) (banded (zerop (rnd 2)))
+         (bw (if banded (1+ (* 2 (rnd (1+ (min n 3))))) (1+ n)))
+         (rma (%dominant-rmatrix n (if banded batten::+mt-banded+ batten::+mt-full+) bw :bad-pivot 15))
+         (lud (if (zerop (rnd 2)) batten::+no+ batten::+yes+))
+         (null-b (zerop (rnd 2)))
+         (cn (if (zerop (rnd 8)) (max 0 (1- n)) (+ n (rnd 2))))
+         (cm (if (zerop (rnd 8)) (max 0 (1- n)) (+ n (rnd 2))))
+         (crm (random-real-matrix (1+ cn) (1+ cm))))
+    (when (= lud batten::+yes+)
+      (handler-case (batten::real-matrix-lu-decompose rma)
+        (nurbs-error () nil)))
+    (%wrong-shape rma)
+    (let ((ar (batten::rmatrix-rm rma)))
+      (agree (list :n n :bw bw :mtp (batten::rmatrix-mtp rma) :m (batten::rmatrix-m rma)
+                   :lud lud :null-b null-b :cn cn :cm cm)
+             (let ((a (%rm-copy rma))
+                   (b (if null-b
+                          (batten::make-rmatrix)
+                          (batten::make-rmatrix cn cm (%copy-array crm) batten::+mt-full+ 1))))
+               (batten::real-matrix-inverse a lud b)
+               (list b (batten::rmatrix-rm a)))
+             (with-stacks (sb)
+               (with-foreign ((arp ar :real-matrix))
+                 (let ((a (%foreign-rmatrix n (batten::rmatrix-m rma) arp (batten::rmatrix-mtp rma) bw))
+                       (b (if null-b
+                              (%foreign-rmatrix -1 -1 (cffi:null-pointer) 0 0)
+                              (%foreign-rmatrix cn cm (to-foreign crm :real-matrix) batten::+mt-full+ 1))))
+                   (if (c-flag-error-p (c-real-matrix-inverse a lud b sb))
+                       (values t nil)
+                       (multiple-value-bind (bn bm brm bmtp bbw) (%rmatrix-members b)
+                         (values nil
+                                 (list (batten::make-rmatrix
+                                        bn bm (if null-b
+                                                  (from-foreign brm :real-matrix (1+ bn) (1+ bm))
+                                                  (from-foreign brm :real-matrix (1+ cn) (1+ cm)))
+                                        bmtp bbw)
+                                       (from-foreign arp :real-matrix (array-dimension ar 0)
+                                                     (array-dimension ar 1)))))))))))))
