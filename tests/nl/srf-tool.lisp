@@ -156,6 +156,52 @@ with knots[r] /= knots[r+1], and its multiplicity; NIL when there is none."
                        (values t nil)
                        (values nil (list (cffi:mem-ref cmr :double)))))))))))
 
+(defun %srf-removable-surface ()
+  "A random surface with knots inserted in u, v or both (so some are removable
+exactly), its control points now and then perturbed a little (removable
+within some tolerance)."
+  (let ((s (random-surface :max-degree 4 :max-extra 4 :two-d (zerop (rnd 5)))))
+    (dolist (dir (list +udir+ +vdir+))
+      (when (plusp (rnd 3))
+        (let* ((vd (= dir +vdir+))
+               (knots (if vd (surface-knots-v s) (surface-knots-u s)))
+               (p (if vd (surface-degree-v s) (surface-degree-u s)))
+               (lo (aref knots 0))
+               (hi (aref knots (1- (length knots))))
+               (xs (if (zerop (rnd 2))
+                       (coerce (%random-insert-knots knots p) 'list)
+                       (let (l)
+                         (dotimes (i (1+ (rnd 5)) l)
+                           (let ((x (+ lo (* (- hi lo) (+ 0.03d0 (rnd 0.94d0))))))
+                             (push x l)
+                             (case (rnd 6)
+                               ;; a repeated knot
+                               ((0 1) (when (> p 1) (push x l)))
+                               ;; a nearly coincident one: steep basis
+                               ;; functions, whose span maxima may not converge
+                               (2 (push (+ x (* (- hi lo) (expt 10d0 (- (+ 5 (rnd 10)))))) l))))))))
+               (xs (sort (remove-if (lambda (x) (or (<= x lo) (>= x hi))) xs) #'<)))
+          (when xs
+            (setf s (batten::srf-insert-knots s (coerce xs 'batten::real-vector) dir))))))
+    (when (zerop (rnd 3))
+      (let ((eps (expt 10d0 (- (rnd 10)))) (pw (surface-cpoints s)))
+        (dotimes (i (array-dimension pw 0))
+          (dotimes (j (array-dimension pw 1))
+            (dotimes (k 2) (incf (aref pw i j k) (* eps (- (rnd 2d0) 1d0))))))))
+    s))
+
+(define-oracle-test srf-remove-all-knots (:file "srf-tool" :trials 2000)
+  (let ((s (%srf-removable-surface))
+        (tol (case (rnd 8) (0 0d0) (1 1d-9) (2 1d-6) (3 1d-3) (4 1d-1) (5 1d0) (6 30d0) (t 1d6)))
+        (dir (case (rnd 3) (0 +udir+) (1 +vdir+) (t +uvdir+))))
+    (agree (list :surface s :tol tol :dir dir)
+           (list (batten::srf-remove-all-knots s tol dir))
+           (with-foreign ((sp s :surface))
+             (with-stacks (sq)
+               (with-foreign-out ((q :surface))
+                 (let ((failed (c-flag-error-p (c-srf-remove-all-knots sp tol dir q sq))))
+                   (values failed (unless failed (list (from-foreign q :surface)))))))))))
+
 (defun %patch-param (knots)
   "A parameter for a patch corner in the domain of KNOTS: inside, an end, an
 existing knot, or within the C's 1e-8 snapping tolerance of a knot (an end
