@@ -239,3 +239,180 @@ NLib: N_CreateQuarticArcTol."
       (dotimes (i 5)
         (setf (aref u (+ n i 1)) 1d0))
       (%make-curve 4 u pw))))
+
+;;; ------------------------------------------------------------ level 3, group 5
+
+(defun create-quintic-arc-tol (c x y r as ae at)
+  "A fresh quintic rational NURBS circle or circular arc of center C, axes X
+and Y (normalized here, on copies) and radius R, from angle AS to angle AE in
+degrees, with no interior knots: a quintic full circle starting at the point
+opposite the arc's middle is built, and when the sweep is at most 360 - AT
+degrees the arc is extracted from it between the parameters of its end
+points.  Signals :geo-err for a zero axis, and what crv-closest-pt and
+crv-extract-crv-seg signal.
+NLib: N_CreateQuinticArcTol."
+  (declare (type point c x y) (type double-float r as ae at))
+  (multiple-value-bind (ae n p m) (crv-get-conic-data +quintic+ as ae)
+    (declare (type double-float ae) (type fixnum n p m))
+    (let* ((pw (make-cpoint-array (1+ n)))
+           (u (make-real-vector (1+ m)))
+           (angle-tol-deg at)
+           (xx (make-point)) (yy (make-point))
+           (ps (make-point)) (pe (make-point)) (pm (make-point)) (a (make-point))
+           (tv (make-point)) (sv (make-point))
+           (angle 0d0) (dangle 0d0) (alf 0d0) (bet 0d0) (cosa 0d0) (sina 0d0)
+           (am 0d0) (us 0d0) (ue 0d0) (u0 0d0))
+      (declare (type cpoint-array pw) (type real-vector u)
+               (type double-float angle-tol-deg angle dangle alf bet cosa sina am us ue u0)
+               (dynamic-extent xx yy ps pe pm a tv sv))
+      ;; start, end and mid points
+      (setf am (* 0.5d0 (+ as ae)))
+      (setf am (+ am 180d0))
+      (copy-pt x xx)
+      (copy-pt y yy)
+      (vector-normalize-ref xx)
+      (vector-normalize-ref yy)
+      (setf angle (/ (* +pi+ as) 180d0)
+            alf (* r (cos angle))
+            bet (* r (sin angle)))
+      (translate-sum-2-pts c alf xx bet yy ps)
+      (setf angle (/ (* +pi+ ae) 180d0)
+            alf (* r (cos angle))
+            bet (* r (sin angle)))
+      (translate-sum-2-pts c alf xx bet yy pe)
+      (setf angle (/ (* +pi+ am) 180d0)
+            cosa (cos angle)
+            sina (sin angle)
+            alf (* r cosa)
+            bet (* r sina))
+      (translate-sum-2-pts c alf xx bet yy pm)
+      (combine-2-pts (- sina) xx cosa yy tv)
+      (combine-2-pts (- cosa) xx (- sina) yy sv)
+      (vector-normalize-ref tv)
+      (vector-normalize-ref sv)
+      ;; quintic full circle
+      (%crv-common-row-weight pm 5d0 pw 0)
+      (%crv-common-row-weight pm 5d0 pw 5)
+      (combine-2-pts 1d0 pm (* 4d0 r) tv a)
+      (%crv-common-row-weight a 1d0 pw 1)
+      (combine-2-pts 1d0 pm (* -4d0 r) tv a)
+      (%crv-common-row-weight a 1d0 pw 4)
+      (translate-sum-2-pts c (* 3d0 r) sv (* 2d0 r) tv a)
+      (%crv-common-row-weight a 1d0 pw 2)
+      (translate-sum-2-pts c (* 3d0 r) sv (* -2d0 r) tv a)
+      (%crv-common-row-weight a 1d0 pw 3)
+      (dotimes (i 6)
+        (setf (aref u i) 0d0
+              (aref u (+ i 6)) 1d0))
+      (let ((cur (%make-curve p u pw)))
+        ;; full circle
+        (when (> (- ae as) (- 360d0 angle-tol-deg))
+          (%copy-c-pt-row pw 0 pw 5)
+          (return-from create-quintic-arc-tol cur))
+        ;; extract the arc
+        (setf dangle (- as am))
+        (setf dangle (+ 360d0 dangle))
+        (setf u0 (/ dangle 360d0))
+        (setf us (crv-closest-pt cur ps u0 *mtol* *mtol* a))
+        (setf dangle (- ae am))
+        (when (< dangle 0d0)
+          (setf dangle (+ 360d0 dangle)))
+        (setf u0 (/ dangle 360d0))
+        (setf ue (crv-closest-pt cur pe u0 *mtol* *mtol* a))
+        (crv-extract-crv-seg cur us ue)))))
+
+(defun create-conic-arc (p0 t0 p2 t2 p)
+  "A fresh rational quadratic NURBS conic arc from P0 (tangent T0) to P2
+(tangent T2) through point P: one Bezier arc, or the arc split at its
+shoulder point into two or four, by its middle weight and the angle between
+the tangents.  When the middle point cannot be found
+(bez-conic-arc-from-pts-and-tangents fails), a straight 'conic' with the
+middle point halfway between P0 and P2 and weight 1 is made instead.  Signals
+:wei-err when the middle weight is -1 or less.  A NaN classification (zero
+tangents) leaves no arc chosen: the C then makes a curve with one control
+point, P2, and that is returned too.
+NLib: N_CreateConicArc."
+  (declare (type point p0 t0 p2 t2 p))
+  (let ((p1 (make-point))
+        (wp 0d0)
+        (one-arc nil) (two-arcs nil) (four-arcs nil)
+        (n 0))
+    (declare (type double-float wp) (type fixnum n))
+    ;; one arc first
+    (handler-case (setf wp (bez-conic-arc-from-pts-and-tangents p0 t0 p2 t2 p p1))
+      (nurbs-error ()
+        ;; a conic 'line'
+        (set-point p1
+                   (/ (+ (aref p0 0) (aref p2 0)) 2d0)
+                   (/ (+ (aref p0 1) (aref p2 1)) 2d0)
+                   (/ (+ (aref p0 2) (aref p2 2)) 2d0))
+        (setf wp 1d0)))
+    (when (<= wp -1d0)
+      (nurbs-error :wei-err 'create-conic-arc))
+    ;; classify by the number of arcs
+    (if (>= wp 1d0)
+        (setf one-arc t)
+        (let* ((dot (vector-dot t0 t2))
+               (m1 (vector-magnitude t0))
+               (m2 (vector-magnitude t2))
+               (cosa (/ (- dot) (* m1 m2))))
+          (declare (type double-float dot m1 m2 cosa))
+          (cond ((and (>= wp 0d0) (<= cosa 0.5d0)) (setf one-arc t))
+                ((and (= wp 0d0) (> cosa (- 1d0 (the double-float *ptol*)))) (setf two-arcs t))
+                ((and (>= wp 0d0) (> cosa 0.5d0)) (setf two-arcs t))
+                ((and (< wp 0d0) (>= cosa 0d0)) (setf two-arcs t))
+                ((and (< wp 0d0) (< cosa 0d0)) (setf four-arcs t)))))
+    (cond (one-arc (setf n 2))
+          (two-arcs (setf n 4))
+          (four-arcs (setf n 8)))
+    (let* ((m (+ n 3))
+           (pw (make-cpoint-array (1+ n)))
+           (u (make-real-vector (1+ m))))
+      (declare (type fixnum m) (type cpoint-array pw) (type real-vector u))
+      ;; end points and end knots
+      (%crv-common-row-weight p0 1d0 pw 0)
+      (%crv-common-row-weight p2 1d0 pw n)
+      (dotimes (i 3)
+        (setf (aref u i) 0d0
+              (aref u (+ n i 1)) 1d0))
+      (cond
+        (one-arc
+         (%crv-common-row-weight p1 wp pw 1))
+        (t
+         (let ((pp (make-point-array 3)) (q (make-point-array 3)) (r (make-point-array 3))
+               (pt (make-point)))
+           (declare (dynamic-extent pp q r pt))
+           (%pt-row p0 pp 0)
+           (%pt-row p1 pp 1)
+           (%pt-row p2 pp 2)
+           (multiple-value-bind (wq wr) (bez-conic-split pp wp q r)
+             (declare (type double-float wq wr))
+             (flet ((put (arr i w k)
+                      (%row-pt arr i pt)
+                      (%crv-common-row-weight pt w pw k)))
+               (cond
+                 (two-arcs
+                  (put q 1 wq 1)
+                  (put q 2 1d0 2)
+                  (put r 1 wr 3)
+                  (setf (aref u 3) 0.5d0
+                        (aref u 4) 0.5d0))
+                 (four-arcs
+                  (let ((q1 (make-point-array 3)) (q2 (make-point-array 3))
+                        (r1 (make-point-array 3)) (r2 (make-point-array 3)))
+                    (declare (dynamic-extent q1 q2 r1 r2))
+                    (multiple-value-bind (wq1 wq2) (bez-conic-split q wq q1 q2)
+                      (declare (type double-float wq1 wq2))
+                      (multiple-value-bind (wr1 wr2) (bez-conic-split r wr r1 r2)
+                        (declare (type double-float wr1 wr2))
+                        (put q1 1 wq1 1)
+                        (put q1 2 1d0 2)
+                        (put q2 1 wq2 3)
+                        (put q2 2 1d0 4)
+                        (put r1 1 wr1 5)
+                        (put r1 2 1d0 6)
+                        (put r2 1 wr2 7)
+                        (setf (aref u 3) 0.25d0 (aref u 4) 0.25d0
+                              (aref u 5) 0.50d0 (aref u 6) 0.50d0
+                              (aref u 7) 0.75d0 (aref u 8) 0.75d0)))))))))))
+      (%make-curve 2 u pw))))

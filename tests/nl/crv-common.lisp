@@ -61,3 +61,63 @@ circles."
 
 (define-oracle-test create-quartic-arc-tol (:file "crv-common" :trials 4000)
   (%cc-arc-test batten::create-quartic-arc-tol c-create-quartic-arc-tol))
+
+;;; ------------------------------------------------------------ level 3, group 5
+
+(define-oracle-test create-quintic-arc-tol (:file "crv-common" :trials 3000)
+  (%cc-arc-test batten::create-quintic-arc-tol c-create-quintic-arc-tol))
+
+(defun %cc-conic-input ()
+  "Inputs for N_CreateConicArc, as (list P0 T0 P2 T2 P): a conic arc of
+middle weight from -0.95 to 6 (P on it, tangents along the control
+triangle, scaled or reversed), parallel tangents, zero tangents, random
+points, or P at an end; planar a third of the time."
+  (let* ((planar (zerop (rnd 3)))
+         (pt (lambda () (let ((q (random-point))) (when planar (setf (aref q 2) 0d0)) q)))
+         (p0 (funcall pt)) (p2 (funcall pt)) (p1 (funcall pt))
+         (lin (lambda (a x b y) (make-point (+ (* a (aref x 0)) (* b (aref y 0)))
+                                            (+ (* a (aref x 1)) (* b (aref y 1)))
+                                            (+ (* a (aref x 2)) (* b (aref y 2)))))))
+    (case (rnd 12)
+      ((0 1 2 3 4)                       ; a conic arc
+       (let* ((w (case (rnd 6)
+                   (0 (rnd-range -0.95d0 0d0))
+                   (1 (rnd-range 1d0 6d0))
+                   (2 1d0)
+                   (t (rnd-range 0.02d0 1d0))))
+              (u (case (rnd 8) (0 0.5d0) (t (rnd-range 0.05d0 0.95d0))))
+              (a (* (- 1d0 u) (- 1d0 u))) (b (* 2d0 u (- 1d0 u) w)) (c (* u u))
+              (d (+ a b c))
+              (sc (rnd-range 0.2d0 3d0))
+              (q (make-point (/ (+ (* a (aref p0 0)) (* b (aref p1 0)) (* c (aref p2 0))) d)
+                             (/ (+ (* a (aref p0 1)) (* b (aref p1 1)) (* c (aref p2 1))) d)
+                             (/ (+ (* a (aref p0 2)) (* b (aref p1 2)) (* c (aref p2 2))) d))))
+         (when (zerop (rnd 4))
+           ;; a sharp (or obtuse) control triangle: P1 near the chord's middle
+           ;; or far out
+           (setf p1 (funcall lin 0.5d0 (funcall lin 1d0 p0 1d0 p2) (rnd-range -0.3d0 0.3d0) p1)))
+         (list p0 (funcall lin sc p1 (- sc) p0)
+               p2 (funcall lin (if (zerop (rnd 6)) -1d0 1d0) p2 -1d0 p1) q)))
+      ((5 6)                             ; parallel tangents
+       (let* ((tv (funcall pt))
+              (s (case (rnd 6) (0 0d0) (1 1d0) (t (rnd 1d0))))
+              (k (rnd-range -2d0 2d0)))
+         (list p0 tv p2 (funcall lin (if (zerop (rnd 2)) 1d0 -1.5d0) tv 0d0 tv)
+               (funcall lin 1d0 (funcall lin (- 1d0 s) p0 s p2) k tv))))
+      (7 (list p0 (funcall pt) p2 (funcall pt) (funcall pt)))
+      (8 (list p0 (make-point) p2 (funcall pt) (funcall pt)))
+      (9 (list p0 (funcall pt) p2 (make-point) (funcall pt)))
+      (t (list p0 (funcall lin 1d0 p1 -1d0 p0) p2 (funcall lin 1d0 p2 -1d0 p1)
+               (if (zerop (rnd 2)) (copy-seq p2) (copy-seq p0)))))))
+
+(define-oracle-test create-conic-arc (:file "crv-common" :trials 5000)
+  (destructuring-bind (p0 t0 p2 t2 p) (%cc-conic-input)
+    (agree (list :p0 p0 :t0 t0 :p2 p2 :t2 t2 :p p)
+           (list (batten::create-conic-arc p0 t0 p2 t2 p))
+           (with-stacks (s)
+             (with-foreign ((a p0 :point) (b t0 :point) (c p2 :point) (d t2 :point) (e p :point))
+               (with-foreign-out ((cur :curve))
+                 (let ((rc (c-create-conic-arc a b c d e cur s)))
+                   (values (c-flag-error-p rc)
+                           (unless (c-flag-error-p rc)
+                             (list (from-foreign cur :curve)))))))))))

@@ -312,3 +312,44 @@ of the time."
                                :index-matrix))
                (values (c-flag-error-p (c-bez-reparam a p fp q (if bin b (cffi:null-pointer)) qw))
                        (list (from-foreign qw :cpoint-array (1+ pq)))))))))
+
+;;; ------------------------------------------------------------- L3-g5
+
+(defun %bezier-arc-cpoints (p)
+  "P+1 control points for the arc length test: random, collinear (a straight
+segment, where the bounds meet at once), or all coincident."
+  (let ((pw (%bezier-random-cpoints (1+ p))))
+    (case (rnd 10)
+      (0 ;; collinear and in order, weights 1 or none
+       (let ((a (random-point)) (b (random-point)) (w (if (zerop (rnd 2)) 1d0 +no-w+)))
+         (dotimes (i (1+ p) pw)
+           (let ((s (if (zerop p) 0d0 (/ (float i 1d0) p))))
+             (dotimes (k 3)
+               (setf (aref pw i k) (+ (* (- 1d0 s) (aref a k)) (* s (aref b k)))))
+             (setf (aref pw i 3) w)))))
+      (1 ;; coincident
+       (dotimes (i (1+ p) pw)
+         (dotimes (k 4) (setf (aref pw i k) (aref pw 0 k)))))
+      (t pw))))
+
+(define-oracle-test bez-calc-arc-length (:file "bezier" :trials 1500)
+  (let* ((p (rnd 10))
+         (pw (%bezier-arc-cpoints p))
+         (scale (let ((s 0d0))
+                  ;; x and y only: z and w may hold +no-z+ / +no-w+
+                  (dotimes (i 2 (max s 1d0)) (setf s (max s (abs (aref pw 0 i)))))))
+         (eps (case (rnd 12)
+                (0 0d0)
+                (1 (- (rnd 1d0)))
+                (2 (* scale (rnd 10d0)))
+                (t (* scale (expt 10d0 (- (rnd 7d0)))))))
+         (len (if (zerop (rnd 3)) 0d0 (rnd 100d0))))
+    (agree (list :pw pw :p p :eps eps :len len)
+           (multiple-value-list (batten::bez-calc-arc-length pw p eps len))
+           (with-foreign ((a pw :cpoint-array))
+             (with-scalars ((e :double) (l :double))
+               (setf (cffi:mem-ref e :double) eps
+                     (cffi:mem-ref l :double) len)
+               (let ((failed (c-flag-error-p (c-bez-calc-arc-length a p e l))))
+                 (values failed (unless failed
+                                  (list (cffi:mem-ref e :double) (cffi:mem-ref l :double))))))))))
