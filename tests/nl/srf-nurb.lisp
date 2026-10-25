@@ -71,3 +71,21 @@
                (values (c-flag-error-p (c-srf-eval-pt-pt-deriv-normal sp u v ufl vfl p su sv n))
                        (list (from-foreign p :point) (from-foreign su :point)
                              (from-foreign sv :point) (from-foreign n :point))))))))
+
+(define-oracle-test srf-min-max-weight-pos-vectors (:file "srf-nurb" :trials 3000)
+  (let ((s (some-surface)))
+    (agree s
+           (multiple-value-list (batten::srf-min-max-weight-pos-vectors s))
+           (with-foreign ((sp s :surface))
+             (with-scalars ((wmin :double) (wmax :double) (pmin :double) (pmax :double))
+               (c-srf-min-max-weight-pos-vectors sp wmin wmax pmin pmax)
+               (values nil (list (cffi:mem-ref wmin :double) (cffi:mem-ref wmax :double)
+                                 (cffi:mem-ref pmin :double) (cffi:mem-ref pmax :double))))))))
+
+(define-oracle-test srf-translate (:file "srf-nurb" :trials 3000)
+  (let ((s (some-surface)) (tv (random-point)))
+    (agree (list s tv)
+           (list (batten::srf-translate (batten::srf-copy s) tv))
+           (with-foreign ((sp s :surface) (tp tv :point))
+             (c-srf-translate sp tp)
+             (values nil (list (from-foreign sp :surface)))))))
