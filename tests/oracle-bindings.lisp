@@ -19,6 +19,10 @@
 (cffi:defcfun ("shim_N_BasisIncreaseKnotMult" c-basis-increase-knot-mult) :short
   (knt :pointer) (p :short) (t* :long) (knx :pointer))
 
+;; NL_FLAG N_BasisEvalArray(NL_KNOTVECTOR *knt, NL_DEGREE p, NL_PARAMETER *u, NL_INDEX n, NL_FLAG flg, NL_REAL ** N, NL_INDEX *spn)
+(cffi:defcfun ("shim_N_BasisEvalArray" c-basis-eval-array) :short
+  (knt :pointer) (p :short) (u :pointer) (n :long) (flg :short) (n* :pointer) (spn :pointer))
+
 ;; NL_FLAG N_BasisDerivsArray(NL_KNOTVECTOR *knt, NL_DEGREE p, NL_PARAMETER *u, NL_INDEX n, NL_FLAG flg, NL_INDEX der, NL_REAL *** ND, NL_INDEX *spn)
 (cffi:defcfun ("shim_N_BasisDerivsArray" c-basis-derivs-array) :short
   (knt :pointer) (p :short) (u :pointer) (n :long) (flg :short) (der :long) (nd :pointer) (spn :pointer))
@@ -251,10 +255,6 @@
 (cffi:defcfun ("shim_N_SrfReparamMultKnots" c-srf-reparam-mult-knots) :short
   (cur-p :pointer) (tol :double) (cur-q :pointer) (sg :pointer))
 
-;; NL_FLAG N_ApproxArcWithCrv(NL_POINT C, NL_VECTOR X, NL_VECTOR Y, NL_REAL rad, NL_REAL as, NL_REAL ae, NL_DEGREE p, NL_INDEX der, NL_INDEX n, NL_REAL tol, NL_FLAG tfl, NL_CURVE *cur, NL_STACKS *SG)
-(cffi:defcfun ("shim_N_ApproxArcWithCrv" c-approx-arc-with-crv) :short
-  (c :pointer) (x :pointer) (y :pointer) (rad :double) (as :double) (ae :double) (p :short) (der :long) (n :long) (tol :double) (tfl :short) (cur :pointer) (sg :pointer))
-
 ;; NL_FLAG N_ApproxNurbsWithNonRatCrv(NL_CURVE *curP, NL_REAL tol, NL_DEGREE deg, NL_FLAG par, NL_FLAG tan, NL_CURVE *curQ, NL_STACKS *SG)
 (cffi:defcfun ("shim_N_ApproxNurbsWithNonRatCrv" c-approx-nurbs-with-non-rat-crv) :short
   (cur-p :pointer) (tol :double) (deg :short) (par :short) (tan :short) (cur-q :pointer) (sg :pointer))
@@ -443,10 +443,6 @@
 (cffi:defcfun ("shim_N_CreateQuadraticArcTol" c-create-quadratic-arc-tol) :short
   (c :pointer) (x :pointer) (y :pointer) (r :double) (as :double) (ae :double) (at :double) (cur :pointer) (sg :pointer))
 
-;; NL_FLAG N_CreateQuarticArc(NL_POINT C, NL_VECTOR X, NL_VECTOR Y, NL_REAL r, NL_REAL as, NL_REAL ae, NL_CURVE *cur, NL_STACKS *SG)
-(cffi:defcfun ("shim_N_CreateQuarticArc" c-create-quartic-arc) :short
-  (c :pointer) (x :pointer) (y :pointer) (r :double) (as :double) (ae :double) (cur :pointer) (sg :pointer))
-
 ;; NL_FLAG N_CreateQuarticArcTol(NL_POINT C, NL_VECTOR X, NL_VECTOR Y, NL_REAL r, NL_REAL as, NL_REAL ae, NL_REAL at, NL_CURVE *cur, NL_STACKS *SG)
 (cffi:defcfun ("shim_N_CreateQuarticArcTol" c-create-quartic-arc-tol) :short
   (c :pointer) (x :pointer) (y :pointer) (r :double) (as :double) (ae :double) (at :double) (cur :pointer) (sg :pointer))
@@ -587,9 +583,17 @@
 (cffi:defcfun ("shim_N_FitCrvPtsNormals" c-fit-crv-pts-normals) :short
   (pts :pointer) (nrm :pointer) (kk :long) (p :short) (cur :pointer) (sg :pointer))
 
+;; NL_FLAG N_CrvClosestPt(NL_CURVE *cur, NL_POINT P, NL_PARAMETER u0, NL_REAL top, NL_REAL toc, NL_PARAMETER *u, NL_POINT *Q)
+(cffi:defcfun ("shim_N_CrvClosestPt" c-crv-closest-pt) :short
+  (cur :pointer) (p :pointer) (u-0 :double) (top :double) (toc :double) (u :pointer) (q :pointer))
+
 ;; NL_FLAG N_CrvArcLength(NL_CURVE *cur, NL_PARAMETER ul, NL_PARAMETER ur, NL_REAL tol, NL_FLAG flg, NL_REAL *len)
 (cffi:defcfun ("shim_N_CrvArcLength" c-crv-arc-length) :short
   (cur :pointer) (ul :double) (ur :double) (tol :double) (flg :short) (len :pointer))
+
+;; NL_FLAG N_ApproxCrvWithPolyline(NL_CURVE * cur, NL_REAL tol, NL_FLAG tflg, NL_FLAG rflg, NL_POINT ** pts, NL_REAL ** pars, NL_INDEX * n, NL_STACKS * S)
+(cffi:defcfun ("shim_N_ApproxCrvWithPolyline" c-approx-crv-with-polyline) :short
+  (cur :pointer) (tol :double) (tflg :short) (rflg :short) (pts :pointer) (pars :pointer) (n :pointer) (s :pointer))
 
 ;; NL_FLAG N_CrvPercentageAlongPt(NL_CURVE *cur, NL_REAL per, NL_REAL atl, NL_REAL ctl, NL_FLAG flg, NL_REAL *len, NL_REAL *up, NL_POINT *P)
 (cffi:defcfun ("shim_N_CrvPercentageAlongPt" c-crv-percentage-along-pt) :short
@@ -634,10 +638,6 @@
 ;; NL_FLAG N_CrvLineFromPtAndVector(NL_POINT P, NL_VECTOR V, NL_CURVE *cur, NL_STACKS *SG)
 (cffi:defcfun ("shim_N_CrvLineFromPtAndVector" c-crv-line-from-pt-and-vector) :short
   (p :pointer) (v :pointer) (cur :pointer) (sg :pointer))
-
-;; NL_VOID N_CrvScale(NL_CURVE *cur, NL_POINT C, NL_VECTOR f)
-(cffi:defcfun ("shim_N_CrvScale" c-crv-scale) :void
-  (cur :pointer) (c :pointer) (f :pointer))
 
 ;; NL_VOID N_CrvTranslate(NL_CURVE *cur, NL_VECTOR T)
 (cffi:defcfun ("shim_N_CrvTranslate" c-crv-translate) :void
@@ -1231,10 +1231,6 @@
 (cffi:defcfun ("shim_N_LineFitPts" c-line-fit-pts) :short
   (p :pointer) (n :long) (c :pointer) (v :pointer) (era :pointer) (erm :pointer))
 
-;; NL_VOID N_CalcCircArcDerivs(NL_POINT O, NL_VECTOR X, NL_VECTOR Y, NL_REAL R, NL_REAL ang, NL_INDEX k, NL_VECTOR *D)
-(cffi:defcfun ("shim_N_CalcCircArcDerivs" c-calc-circ-arc-derivs) :void
-  (o :pointer) (x :pointer) (y :pointer) (r :double) (ang :double) (k :long) (d :pointer))
-
 ;; NL_BOOLEAN N_PtsAreColinear(NL_POINT A, NL_POINT B, NL_POINT C, NL_REAL tol)
 (cffi:defcfun ("shim_N_PtsAreColinear" c-pts-are-colinear) :long
   (a :pointer) (b :pointer) (c :pointer) (tol :double))
@@ -1318,10 +1314,6 @@
 ;; NL_VOID N_TranslateCPt(NL_CPOINT Pw, NL_VECTOR T, NL_CPOINT *Qw)
 (cffi:defcfun ("shim_N_TranslateCPt" c-translate-c-pt) :void
   (pw :pointer) (t* :pointer) (qw :pointer))
-
-;; NL_VOID N_ScaleCPtWithPtAndVector(NL_CPOINT Pw, NL_POINT C, NL_VECTOR f, NL_CPOINT *Qw)
-(cffi:defcfun ("shim_N_ScaleCPtWithPtAndVector" c-scale-c-pt-with-pt-and-vector) :void
-  (pw :pointer) (c :pointer) (f :pointer) (qw :pointer))
 
 ;; NL_VOID N_PtToCPt(NL_POINT P, NL_CPOINT *Pw)
 (cffi:defcfun ("shim_N_PtToCPt" c-pt-to-c-pt) :void
@@ -1507,6 +1499,10 @@
 (cffi:defcfun ("shim_N_CrvApproxSpiral" c-crv-approx-spiral) :short
   (height :double) (rad-0 :double) (rad-1 :double) (num-turns :double) (ror-l :long) (num-points :pointer) (tol :pointer) (crv :pointer) (s :pointer))
 
+;; NL_FLAG N_SrfEvalPtGrid(NL_SURFACE *sur, NL_PARAMETER *u, NL_PARAMETER *v, NL_INDEX nn, NL_INDEX mm, NL_FLAG ufl, NL_FLAG vfl, NL_POINT ** S)
+(cffi:defcfun ("shim_N_SrfEvalPtGrid" c-srf-eval-pt-grid) :short
+  (sur :pointer) (u :pointer) (v :pointer) (nn :long) (mm :long) (ufl :short) (vfl :short) (s :pointer))
+
 ;; NL_FLAG N_SrfModifyBoundaryCrv(NL_SURFACE *surP, NL_CURVE *newbdy, NL_FLAG dirflg, NL_FLAG end, NL_REAL uv, NL_FLAG cont, NL_SURFACE *surQ, NL_STACKS *SP, NL_STACKS *SQ)
 (cffi:defcfun ("shim_N_SrfModifyBoundaryCrv" c-srf-modify-boundary-crv) :short
   (sur-p :pointer) (newbdy :pointer) (dirflg :short) (end :short) (uv :double) (cont :short) (sur-q :pointer) (sp :pointer) (sq :pointer))
@@ -1691,10 +1687,6 @@
 (cffi:defcfun ("shim_N_SrfGetENet" c-srf-get-e-net) :short
   (sur :pointer) (ku :long) (lu :long) (kv :long) (lv :long) (ntl :pointer) (s :pointer))
 
-;; NL_VOID N_SrfRatToNonRat(NL_SURFACE *sur)
-(cffi:defcfun ("shim_N_SrfRatToNonRat" c-srf-rat-to-non-rat) :void
-  (sur :pointer))
-
 ;; NL_VOID N_SrfNonRatToRat(NL_SURFACE *sur)
 (cffi:defcfun ("shim_N_SrfNonRatToRat" c-srf-non-rat-to-rat) :void
   (sur :pointer))
@@ -1730,6 +1722,10 @@
 ;; NL_FLAG N_CreateSphere(NL_POINT C, NL_REAL r, NL_REAL as, NL_REAL ae, NL_REAL al, NL_FLAG ctp, NL_FLAG rtp, NL_SURFACE *sur, NL_STACKS *SG)
 (cffi:defcfun ("shim_N_CreateSphere" c-create-sphere) :short
   (c :pointer) (r :double) (as :double) (ae :double) (al :double) (ctp :short) (rtp :short) (sur :pointer) (sg :pointer))
+
+;; NL_FLAG N_FitCalcSrfParamValues(NL_VOID ** A, NL_INDEX n, NL_INDEX m, NL_FLAG ptp, NL_FLAG par, NL_PARAMETER *u, NL_PARAMETER *v)
+(cffi:defcfun ("shim_N_FitCalcSrfParamValues" c-fit-calc-srf-param-values) :short
+  (a :pointer) (n :long) (m :long) (ptp :short) (par :short) (u :pointer) (v :pointer))
 
 ;; NL_FLAG N_FitSrfToPts(NL_POINT ** P, NL_INDEX n, NL_INDEX m, NL_DEGREE p, NL_DEGREE q, NL_FLAG par, NL_SURFACE *sur, NL_STACKS *SG)
 (cffi:defcfun ("shim_N_FitSrfToPts" c-fit-srf-to-pts) :short
@@ -1986,6 +1982,18 @@
 ;; NL_FLAG N_Realloc1dRealArray(NL_REAL ** r1d, NL_INDEX n, NL_INDEX m, NL_STACKS *S)
 (cffi:defcfun ("shim_N_Realloc1dRealArray" c-realloc-1d-real-array) :short
   (r-1d :pointer) (n :long) (m :long) (s :pointer))
+
+;; NL_FLAG N_Realloc2dRealArray(NL_REAL *** r2d, NL_INDEX n, NL_INDEX m, NL_INDEX k, NL_INDEX l, NL_STACKS *S)
+(cffi:defcfun ("shim_N_Realloc2dRealArray" c-realloc-2d-real-array) :short
+  (r-2d :pointer) (n :long) (m :long) (k :long) (l :long) (s :pointer))
+
+;; NL_FLAG N_Realloc1dPtArray(NL_POINT ** p1d, NL_INDEX n, NL_INDEX m, NL_STACKS *S)
+(cffi:defcfun ("shim_N_Realloc1dPtArray" c-realloc-1d-pt-array) :short
+  (p-1d :pointer) (n :long) (m :long) (s :pointer))
+
+;; NL_FLAG N_Realloc2dCPtArray(NL_CPOINT *** c2d, NL_INDEX n, NL_INDEX m, NL_INDEX k, NL_INDEX l, NL_STACKS *S)
+(cffi:defcfun ("shim_N_Realloc2dCPtArray" c-realloc-2d-c-pt-array) :short
+  (c-2d :pointer) (n :long) (m :long) (k :long) (l :long) (s :pointer))
 
 ;; NL_VOID N_PrintStack(NL_STACKS *S)
 (cffi:defcfun ("shim_N_PrintStack" c-print-stack) :void

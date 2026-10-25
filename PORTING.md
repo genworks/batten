@@ -145,7 +145,11 @@ Use these rather than writing private copies (`src/nl/math.lisp`):
 - `%check-mem-real-matrix`: `N_CheckMemRealMatrix` for an optional
   caller-allocated `NL_RMATRIX` output.
 - `knot-vector-is-end-param`, `knot-vector-is-param-out-of-bounds`
-  (`basis-basic.lisp`); `crv-decompose-bez` (`crv-tool.lisp`).
+  (`basis-basic.lisp`); `crv-decompose-bez` (`crv-tool.lisp`);
+  `%reverse-knots`, NLib's inline `NI_ReverseKnots` (`crv-nurb.lisp`).
+- A routine that was first written as a private `%helper` and is now in
+  the manifest under its own name: port it under that name (rename the
+  helper and its callers in your own files) and give it a test.
 
 Look in the lower-level files for what is already ported before writing a
 helper: `git grep -n "(defun NAME"` in your worktree.
