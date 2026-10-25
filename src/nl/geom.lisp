@@ -1123,3 +1123,205 @@ NLib: N_LineFitPts."
     (when (and fit-error (< n 0))
       (error fit-error))
     (values da dm)))
+
+;;; ------------------------------------------------------------- L5-g1
+
+(declaim (inline %geom-c-sqrt))
+(defun %geom-c-sqrt (x)
+  "C's sqrt of the double X: a NaN (glibc's -NaN) for a negative or NaN X,
+where CL's SQRT would return a complex."
+  (declare (type double-float x))
+  (if (>= x 0d0)
+      (sqrt (the (double-float 0d0) x))
+      (sb-kernel:make-double-float -524288 0)))
+
+(defun create-circ-from-2d-pts (pp n tol etp)
+  "The least-squares circle through the points PP[0..N] (a point-array; x and
+y are fitted, the points' z only enters the collinearity check), minimizing
+Sum (r^2 - (x-cx)^2 - (y-cy)^2)^2 for the first guess and improved by up to 31
+Gauss-Newton steps, stopped when the relative average error changes or the
+center moves by less than TOL.  Returns (values cx cy rr era erm cfl): the
+center, the radius, the average and maximum absolute errors and CFL +true+.
+CFL is +false+ when the points are collinear -- the average (ETP +average+) or
+maximum (ETP +maximum+) distance of LINE-FIT-PTS below TOL, ERA and ERM then
+being the line's -- or, for N = 2, when CALC-CIRC-CENTER-AND-RADIUS finds no
+circle; cx, cy and rr, which the C leaves unwritten then, are returned as 0.
+A failing least-squares step ends the iteration with the best circle so far.
+Signals :cal-err for another ETP, :num-err for a bad division, and what
+line-fit-pts, calc-circ-center-and-radius and the 3 x 3 solver signal.
+NLib: N_CreateCircFrom2dPts."
+  (declare (type point-array pp) (type fixnum n etp) (type double-float tol))
+  (let ((cc (make-point))
+        (vv (make-point)))
+    (declare (type point cc vv) (dynamic-extent cc vv))
+    ;; see if the points are collinear
+    (multiple-value-bind (era erm) (line-fit-pts pp n cc vv)
+      (declare (type double-float era erm))
+      (cond ((= etp +maximum+)
+             (when (< erm tol)
+               (return-from create-circ-from-2d-pts (values 0d0 0d0 0d0 era erm +false+))))
+            ((= etp +average+)
+             (when (< era tol)
+               (return-from create-circ-from-2d-pts (values 0d0 0d0 0d0 era erm +false+))))
+            (t (nurbs-error :cal-err 'create-circ-from-2d-pts)))
+      ;; the special case n = 2
+      (when (= n 2)
+        (let ((p0 (make-point)) (p1 (make-point)) (p2 (make-point)))
+          (declare (dynamic-extent p0 p1 p2))
+          (%row-pt pp 0 p0)
+          (%row-pt pp 1 p1)
+          (%row-pt pp 2 p2)
+          (multiple-value-bind (rr cfl) (calc-circ-center-and-radius p0 p1 p2 cc)
+            (declare (type double-float rr) (type fixnum cfl))
+            (when (= cfl +false+)
+              (return-from create-circ-from-2d-pts (values 0d0 0d0 0d0 era erm +false+)))
+            (multiple-value-bind (cx cy) (pt-to-xyz cc)
+              (declare (type double-float cx cy))
+              (return-from create-circ-from-2d-pts (values cx cy rr 0d0 0d0 +true+))))))))
+  ;; various entities
+  (let ((a 0d0) (b 0d0) (c 0d0) (d 0d0) (e 0d0) (f 0d0) (g 0d0) (h 0d0)
+        (fac (+ (float n 1d0) 1d0))
+        (sol (make-real-vector 3))
+        (ind (make-index-vector 3))
+        (rma (make-rmatrix))
+        (itlm 30))
+    (declare (type double-float a b c d e f g h fac) (type real-vector sol)
+             (type index-vector ind) (type fixnum itlm))
+    (dotimes (i (1+ n))
+      (let* ((x (aref pp i 0))
+             (y (aref pp i 1))
+             (x2 (* x x))
+             (y2 (* y y))
+             (xy (* x y))
+             (x2py2 (+ x2 y2)))
+        (declare (type double-float x y x2 y2 xy x2py2))
+        (setf a (+ a x)
+              b (+ b y)
+              c (+ c x2)
+              d (+ d y2)
+              e (+ e xy)
+              g (+ g (* x x2py2))
+              h (+ h (* y x2py2)))))
+    (setf f (+ c d))
+    ;; solve the system of equations
+    (set-real-matrix rma 2 2 +mt-full+ 2)
+    (let ((rm (rmatrix-rm rma)))
+      (declare (type real-matrix rm))
+      (setf (aref rm 0 0) (* 2.0d0 c)
+            (aref rm 0 1) (* 2.0d0 e)
+            (aref rm 0 2) a
+            (aref sol 0) g
+            (aref rm 1 0) (* 2.0d0 e)
+            (aref rm 1 1) (* 2.0d0 d)
+            (aref rm 1 2) b
+            (aref sol 1) h
+            (aref rm 2 0) (* 2.0d0 a)
+            (aref rm 2 1) (* 2.0d0 b)
+            (aref rm 2 2) fac
+            (aref sol 2) f))
+    (real-matrix-lu-decompose-pivot rma ind)
+    (real-matrix-for-back-pivot rma ind sol)
+    ;; the initial center and radius and the error measures
+    (let* ((xc (aref sol 0))
+           (yc (aref sol 1))
+           (rc (%geom-c-sqrt (+ (+ (* xc xc) (* yc yc)) (aref sol 2))))
+           (eavp 0d0) (eavn 0d0) (eavo 0d0)
+           (dm -1.0d0)
+           (xo 0d0) (yo 0d0) (ro 0d0) (dao 0d0) (dmo 0d0))
+      (declare (type double-float xc yc rc eavp eavn eavo dm xo yo ro dao dmo))
+      (dotimes (i (1+ n))
+        (let* ((x (aref pp i 0))
+               (y (aref pp i 1))
+               (ri (%geom-c-sqrt (+ (* (- x xc) (- x xc)) (* (- y yc) (- y yc))))))
+          (declare (type double-float x y ri))
+          (setf eavp (+ eavp (abs (- rc ri))))
+          (when (> (abs (- rc ri)) dm)
+            (setf dm (abs (- rc ri))))))
+      (when (float-op-is-bad eavp fac +division+)
+        (nurbs-error :num-err 'create-circ-from-2d-pts))
+      (setf eavp (/ eavp fac))
+      (setf xo xc
+            yo yc
+            ro rc
+            dao eavp
+            dmo dm)
+      (when (< eavp (the double-float *mtol*))
+        (return-from create-circ-from-2d-pts (values xo yo ro eavp dm +true+)))
+      (when (float-op-is-bad eavp rc +division+)
+        (nurbs-error :num-err 'create-circ-from-2d-pts))
+      (setf eavp (/ eavp rc))
+      (setf eavo eavp)
+      ;; improve the fit by Gauss-Newton iteration: the least-squares problem
+      (let ((rmj (make-rmatrix))
+            (rhs (make-real-vector (1+ n)))
+            (itc 0))
+        (declare (type real-vector rhs) (type fixnum itc))
+        (set-real-matrix rmj n 2 +mt-full+ 2)
+        (let ((jm (rmatrix-rm rmj)))
+          (declare (type real-matrix jm))
+          (do () ((> itc itlm))
+            ;; the Jacobian and the right hand side
+            (dotimes (i (1+ n))
+              (let* ((x (aref pp i 0))
+                     (y (aref pp i 1))
+                     (ri (%geom-c-sqrt (+ (* (- x xc) (- x xc)) (* (- y yc) (- y yc))))))
+                (declare (type double-float x y ri))
+                (when (float-op-is-bad 1.0d0 ri +division+)
+                  (nurbs-error :num-err 'create-circ-from-2d-pts))
+                (let ((inv (/ 1.0d0 ri)))
+                  (declare (type double-float inv))
+                  (setf (aref jm i 0) (* (- xc x) inv)
+                        (aref jm i 1) (* (- yc y) inv)
+                        (aref jm i 2) -1.0d0
+                        (aref rhs i) (- rc ri)))))
+            ;; solve by least squares; a failure ends the iteration
+            (unless (handler-case (progn (real-matrix-lst-sq-solve rmj rhs sol) t)
+                      (nurbs-error () (err-clear) nil))
+              (return))
+            (setf xc (+ xc (aref sol 0))
+                  yc (+ yc (aref sol 1))
+                  rc (+ rc (aref sol 2)))
+            ;; recompute the average error
+            (setf eavn 0d0
+                  dm -1.0d0)
+            (dotimes (i (1+ n))
+              (let* ((x (aref pp i 0))
+                     (y (aref pp i 1))
+                     (ri (%geom-c-sqrt (+ (* (- x xc) (- x xc)) (* (- y yc) (- y yc))))))
+                (declare (type double-float x y ri))
+                (setf eavn (+ eavn (abs (- rc ri))))
+                (when (> (abs (- rc ri)) dm)
+                  (setf dm (abs (- rc ri))))))
+            (when (float-op-is-bad eavn fac +division+)
+              (nurbs-error :num-err 'create-circ-from-2d-pts))
+            (setf eavn (/ eavn fac))
+            (let ((da eavn)
+                  (dis 0d0))
+              (declare (type double-float da dis))
+              (when (float-op-is-bad eavn rc +division+)
+                (nurbs-error :num-err 'create-circ-from-2d-pts))
+              (setf eavn (/ eavn rc))
+              ;; check for convergence and save the best result
+              (setf dis (%geom-c-sqrt (+ (+ (* (aref sol 0) (aref sol 0)) (* (aref sol 1) (aref sol 1)))
+                                         (* (aref sol 2) (aref sol 2)))))
+              (when (float-op-is-bad dis rc +division+)
+                (nurbs-error :num-err 'create-circ-from-2d-pts))
+              (setf dis (/ dis rc))
+              ;; the best result has the smallest average error
+              (when (< eavn eavo)
+                (setf xo xc
+                      yo yc
+                      ro rc
+                      dao da
+                      dmo dm
+                      eavo eavn))
+              ;; out when the average error does not change, or the center
+              ;; does not move
+              (when (< (abs (- eavp eavn)) tol)
+                (return))
+              (when (< dis tol)
+                (return)))
+            (setf eavp eavn)
+            (incf itc))))
+      ;; the output
+      (values xo yo ro dao dmo +true+))))

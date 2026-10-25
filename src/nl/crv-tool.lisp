@@ -983,3 +983,82 @@ same curve)."
                       (dotimes (i (1+ q))
                         (setf (aref uq (+ kind i)) (aref up b))))))))))
       (%make-curve q uq qw))))
+
+;;; ------------------------------------------------------------- L5-g1
+
+(defun %crv-tool-become-crv (cur new)
+  "Make curve CUR, in place, the curve NEW (sharing NEW's arrays), as the C's
+in-place operators (curP = curQ) overwrite their input.  Returns CUR."
+  (declare (type curve cur new))
+  (setf (curve-degree cur) (curve-degree new)
+        (curve-knots cur) (curve-knots new)
+        (curve-cpoints cur) (curve-cpoints new))
+  cur)
+
+(defun crvs-make-compatible-knot-tol (cur k knot-tol)
+  "Make the curves CUR[0..K] (a simple-vector of curves, each modified in
+place) compatible: the same rationality and dimension (CRVS-MAKE-RAT-COMPATIBLE),
+all reparametrized onto [0, 1] when their domains differ by more than 1e-12,
+all elevated to the highest degree, and their knot vectors merged and
+inserted.  Knots closer than KNOT-TOL count as one (and are moved to their
+average, in place); KNOT-TOL 0 means 0.001 after a reparametrization, else a
+thousandth of CUR[0]'s domain, and a KNOT-TOL of 1e-8 or less means 1e-8.  A
+nil CUR is left alone.  Returns CUR.  Signals what the elevation, the merge
+and the refinement signal.
+NLib: N_CrvsMakeCompatibleKnotTol."
+  (declare (type (or null simple-vector) cur) (type fixnum k) (type double-float knot-tol))
+  (when (null cur)
+    (return-from crvs-make-compatible-knot-tol nil))
+  (crvs-make-rat-compatible cur k)
+  ;; if necessary, scale the knot vectors to the unit interval
+  (multiple-value-bind (us ue) (crv-get-param-bounds (svref cur 0))
+    (declare (type double-float us ue))
+    (let ((i 1))
+      (declare (type fixnum i))
+      ;; remember whether any curve's bounds differ
+      (do () ((> i k))
+        (multiple-value-bind (u1 u2) (crv-get-param-bounds (svref cur i))
+          (declare (type double-float u1 u2))
+          (when (or (> (abs (- u1 us)) 1.0d-12) (> (abs (- u2 ue)) 1.0d-12))
+            (return)))
+        (incf i))
+      (when (<= i k)
+        (let ((unitspan (make-real-vector 2)))
+          (create-interval unitspan 0d0 1d0)
+          (dotimes (j (1+ k))
+            (crv-reparam-to-interval (svref cur j) unitspan)))
+        (when (= knot-tol 0d0)
+          (setf knot-tol 0.001d0))))
+    (when (= knot-tol 0d0)
+      (setf knot-tol (/ (- ue us) 1000.0d0))))
+  ;; the highest degree
+  (let ((ph (curve-degree (svref cur 0))))
+    (declare (type fixnum ph))
+    (do ((i 1 (1+ i))) ((> i k))
+      (declare (type fixnum i))
+      (let ((p (curve-degree (svref cur i))))
+        (declare (type fixnum p))
+        (when (> p ph)
+          (setf ph p))))
+    ;; elevate the degrees
+    (dotimes (i (1+ k))
+      (let ((tt (- ph (curve-degree (svref cur i)))))
+        (declare (type fixnum tt))
+        (when (> tt 0)
+          (%crv-tool-become-crv (svref cur i) (crv-elevate-degree (svref cur i) tt))))))
+  ;; merge the knot vectors
+  (let ((knt (make-array (1+ k))))
+    (declare (type simple-vector knt))
+    (dotimes (i (1+ k))
+      (setf (svref knt i) (curve-knots (svref cur i))))
+    (let ((knx (if (<= knot-tol 1.0d-8)
+                   (get-compatible-knot-array knt k)
+                   (get-compatible-knot-vector-to-tol knt k knot-tol))))
+      (declare (type simple-vector knx))
+      ;; refine the curves
+      (dotimes (i (1+ k))
+        (let ((x (svref knx i)))
+          (declare (type real-vector x))
+          (when (>= (1- (length x)) 0)
+            (%crv-tool-become-crv (svref cur i) (crv-refine (svref cur i) x)))))))
+  cur)

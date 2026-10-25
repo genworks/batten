@@ -316,3 +316,76 @@ test."
                    (if (c-flag-error-p (c-crv-elevate-degree cp tt cq sp sq))
                        (values t nil)
                        (values nil (list (from-foreign cq :curve)))))))))))
+
+;;; ------------------------------------------------------------- L5-g1
+
+(defun %crv-tool-curve-set ()
+  "K and K+1 random curves for N_CrvsMakeCompatibleKnotTol, as (values curves
+k): on one domain mostly (whose knots now and then nearly coincide across
+curves), domains differing by 1e-13 or 1e-11 now and then, or each its own;
+rational or not, 2D or not, each at random."
+  (let* ((k (rnd 4))
+         (curves (make-array (1+ k)))
+         (lo (if (zerop (rnd 3)) 0d0 (rnd-range -10d0 10d0)))
+         (hi (+ lo 0.5d0 (rnd 10d0)))
+         (dom (case (rnd 8) (0 :own) (1 :tiny) (2 :small) (t :same)))
+         (shared (%crv-tool-knots 3 (+ 4 (rnd 6)) lo hi :full 6)))
+    (dotimes (i (1+ k))
+      (let* ((c (random-curve :max-degree 5 :max-extra 8))
+             (p (curve-degree c))
+             (n+1 (array-dimension (curve-cpoints c) 0)))
+        (case dom
+          (:own nil)
+          (t
+           (let ((knots (%crv-tool-knots p n+1 lo hi :full 5)))
+             (when (and (plusp i) (not (eq dom :same)))
+               (let ((d (if (eq dom :tiny) 1d-13 1d-11)))
+                 (dotimes (j (1+ p))
+                   (incf (aref knots (- (length knots) 1 j)) d))))
+             ;; now and then interior knots copied, perturbed a little, from
+             ;; a shared vector
+             (when (and (zerop (rnd 3)) (> (- n+1 p 1) 0))
+               (let ((src (subseq shared 4 (- (length shared) 4))))
+                 (dotimes (j (min (length src) (- n+1 p 1)))
+                   (setf (aref knots (+ p 1 j)) (+ (aref src j) (* (- hi lo) (rnd-range -1d-5 1d-5))))))
+               (setf knots (sort knots #'<)))
+             (setf (curve-knots c) knots))))
+        (setf (svref curves i) c)))
+    ;; now and then a knot vector that is not valid (start multiplicity p),
+    ;; which the degree elevation rejects
+    (when (and (zerop (rnd 20)) (> k 0))
+      (let* ((c (svref curves (rnd (1+ k))))
+             (u (curve-knots c))
+             (p (curve-degree c)))
+        (setf (aref u p) (* 0.5d0 (+ (aref u p) (aref u (1+ p)))))))
+    (values curves k)))
+
+(define-oracle-test crvs-make-compatible-knot-tol (:file "crv-tool" :trials 2000)
+  (multiple-value-bind (curves k) (%crv-tool-curve-set)
+    (let ((tol (case (rnd 9)
+                 ((0 1) 0d0) (2 -1d0) (3 1d-9) (4 1d-8) (5 1d-6) (6 1d-4) (7 1d-3) (t 1d-2))))
+      (if (zerop (rnd 50))
+          ;; now and then no curve array at all
+          (agree (list :curves nil :k k :tol tol)
+                 (list (batten::crvs-make-compatible-knot-tol nil k tol))
+                 (with-stacks (s)
+                   (values (c-flag-error-p
+                            (c-crvs-make-compatible-knot-tol (cffi:null-pointer) k tol s))
+                           (list nil))))
+          (agree (list :curves curves :k k :tol tol)
+                 (let ((copies (map 'simple-vector #'batten::crv-copy curves)))
+                   (batten::crvs-make-compatible-knot-tol copies k tol)
+                   (coerce copies 'list))
+                 (with-foreign ()
+                   (with-stacks (s)
+                     (let ((arr (batten-oracle::falloc :pointer (1+ k))))
+                       (dotimes (i (1+ k))
+                         (setf (cffi:mem-aref arr :pointer i)
+                               (batten-oracle::to-foreign (svref curves i) :curve)))
+                       (let ((failed (c-flag-error-p (c-crvs-make-compatible-knot-tol arr k tol s))))
+                         (values failed
+                                 (unless failed
+                                   (let (out)
+                                     (dotimes (i (1+ k) (nreverse out))
+                                       (push (from-foreign (cffi:mem-aref arr :pointer i) :curve)
+                                             out))))))))))))))
