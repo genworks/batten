@@ -1,0 +1,174 @@
+;;;; SPDX-FileCopyrightText: Copyright (c) 2020-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+;;;; SPDX-FileCopyrightText: Copyright (c) 2026 Genworks International
+;;;; SPDX-License-Identifier: Apache-2.0
+;;;;
+;;;; Ported from NLib's NL_BasisBasic.cpp (usd-brep source/SMLib/src).
+;;;; Modified: translated to Common Lisp; scratch arrays on the stack where
+;;;; the implementation allows, in place of NL_STACKS.
+;;;;
+;;;; Each routine keeps its C source's arithmetic, operation for operation,
+;;;; so that results agree with NLib to the bit.
+
+(in-package :batten)
+
+(declaim (inline find-span))
+(defun find-span (knots p u side)
+  "The knot span containing parameter U: the index i with U[i] < u <= U[i+1]
+for SIDE :left, U[i] <= u < U[i+1] for :right.  A parameter on or beyond an
+end of the domain lands in the first or last span, stepping past degenerate
+(zero-length) end spans.  NLib: N_BasisFindSpan."
+  (declare (type real-vector knots) (type fixnum p) (type double-float u))
+  (fast
+    (let* ((m (1- (length knots)))
+           (low p)
+           (high (- m p))
+           (mid (ash (+ low high) -1))
+           (lastmid mid))
+      (declare (type fixnum m low high mid lastmid))
+      (cond
+        ((>= u (aref knots (- m p)))
+         (let ((i (- m p 1)))
+           (declare (type fixnum i))
+           (do ()
+               ((not (and (< (aref knots (1+ i)) (+ (aref knots i) 1d-12)) (> i p))) i)
+             (decf i))))
+        ((<= u (aref knots p))
+         (let ((i p))
+           (declare (type fixnum i))
+           (do ()
+               ((not (and (< (aref knots (1+ i)) (+ (aref knots i) 1d-12)) (< i (- m p 1)))) i)
+             (incf i))))
+        ((eq side :left)
+         (do ()
+             ((not (or (< u (aref knots mid)) (>= u (aref knots (1+ mid))))) mid)
+           (if (< u (aref knots mid))
+               (setf high mid)
+               (setf low mid))
+           (setf mid (ash (+ low high) -1))
+           (when (= mid lastmid) (return mid))
+           (setf lastmid mid)))
+        ((eq side :right)
+         (do ()
+             ((not (or (<= u (aref knots mid)) (> u (aref knots (1+ mid))))) mid)
+           (if (> u (aref knots mid))
+               (setf low mid)
+               (setf high mid))
+           (setf mid (ash (+ low high) -1))
+           (when (= mid lastmid) (return mid))
+           (setf lastmid mid)))
+        (t (nurbs-error :call 'find-span))))))
+
+(declaim (inline basis-functions!))
+(defun basis-functions! (knots p u side n)
+  "Fill N[0..p] with the non-vanishing B-spline basis functions of degree P at
+U, and return the span index i (N[k] is basis function i-p+k).
+NLib: N_BasisEval."
+  (declare (type real-vector knots n) (type fixnum p) (type double-float u))
+  (fast
+    (let ((m (1- (length knots))))
+      (declare (type fixnum m))
+      (cond
+        ((= u (aref knots p))
+         (setf (aref n 0) 1d0)
+         (do ((k 1 (1+ k))) ((> k p)) (declare (type fixnum k))
+           (setf (aref n k) 0d0))
+         p)
+        ((= u (aref knots (- m p)))
+         (setf (aref n p) 1d0)
+         (dotimes (k p) (setf (aref n k) 0d0))
+         (- m p 1))
+        (t
+         (let ((i (find-span knots p u side))
+               (left (make-array (+ p 2) :element-type 'double-float))
+               (right (make-array (+ p 2) :element-type 'double-float)))
+           (declare (type fixnum i) (dynamic-extent left right))
+           (setf (aref n 0) 1d0)
+           (do ((k 1 (1+ k))) ((> k p))
+             (declare (type fixnum k))
+             (setf (aref left k) (- u (aref knots (- (+ i 1) k)))
+                   (aref right k) (- (aref knots (+ i k)) u))
+             (let ((saved 0d0))
+               (declare (type double-float saved))
+               (dotimes (l k)
+                 (let ((delta (+ (aref right (1+ l)) (aref left (- k l))))
+                       (temp (aref n l)))
+                   (declare (type double-float delta temp))
+                   (when (< delta 1d-24) (nurbs-error :numeric 'basis-functions!))
+                   (setf (aref n l) (+ saved (* temp (/ (aref right (1+ l)) delta)))
+                         saved (* temp (/ (aref left (- k l)) delta)))))
+               (setf (aref n k) saved)))
+           i))))))
+
+(defun basis-derivatives! (knots p u side der nd)
+  "Fill ND[k][0..p], k = 0..DER, with the non-vanishing basis functions of
+degree P at U and their derivatives (ND[k][j] is the kth derivative of basis
+function i-p+j), and return the span index i.  ND must be at least
+(1+ DER) by (1+ P).  NLib: N_BasisDerivs."
+  (declare (type real-vector knots) (type real-matrix nd)
+           (type fixnum p der) (type double-float u))
+  (fast
+    (let* ((i (find-span knots p u side))
+           (mder (min p der))
+           (p+1 (1+ p))
+           (left (make-array p+1 :element-type 'double-float))
+           (right (make-array p+1 :element-type 'double-float))
+           (ndu (make-array (* p+1 p+1) :element-type 'double-float))
+           (a (make-array (* 2 p+1) :element-type 'double-float)))
+      (declare (type fixnum i mder p+1) (dynamic-extent left right ndu a))
+      (macrolet ((ndu (r c) `(aref ndu (+ (the fixnum (* ,r p+1)) ,c)))
+                 (a (r c) `(aref a (+ (the fixnum (* ,r p+1)) ,c))))
+        (do ((k (1+ p) (1+ k))) ((> k der))
+          (declare (type fixnum k))
+          (dotimes (j p+1) (setf (aref nd k j) 0d0)))
+        ;; the basis functions
+        (setf (ndu 0 0) 1d0)
+        (do ((j 1 (1+ j))) ((> j p))
+          (declare (type fixnum j))
+          (setf (aref left j) (- u (aref knots (- (+ i 1) j)))
+                (aref right j) (- (aref knots (+ i j)) u))
+          (let ((saved 0d0))
+            (declare (type double-float saved))
+            (dotimes (r j)
+              (let ((delta (+ (aref right (1+ r)) (aref left (- j r)))))
+                (declare (type double-float delta))
+                (setf (ndu j r) delta)
+                (when (< delta 1d-24) (nurbs-error :numeric 'basis-derivatives!))
+                (setf (ndu r j) (+ saved (* (ndu r (1- j)) (/ (aref right (1+ r)) delta)))
+                      saved (* (ndu r (1- j)) (/ (aref left (- j r)) delta)))))
+            (setf (ndu j j) saved)))
+        (dotimes (j p+1)
+          (setf (aref nd 0 j) (ndu j p)))
+        ;; the derivatives
+        (dotimes (r p+1)
+          (let ((s1 0) (s2 1))
+            (declare (type fixnum s1 s2))
+            (setf (a 0 0) 1d0)
+            (do ((k 1 (1+ k))) ((> k mder))
+              (declare (type fixnum k))
+              (let* ((d 0d0)
+                     (rk (- r k))
+                     (pk (- p k))
+                     (j1 (if (>= rk -1) 1 (- rk)))
+                     (j2 (if (<= (1- r) pk) (1- k) (- p r))))
+                (declare (type double-float d) (type fixnum rk pk j1 j2))
+                (when (>= r k)
+                  (setf (a s2 0) (/ (a s1 0) (ndu (1+ pk) rk))
+                        d (* (a s2 0) (ndu rk pk))))
+                (do ((j j1 (1+ j))) ((> j j2))
+                  (declare (type fixnum j))
+                  (setf (a s2 j) (/ (- (a s1 j) (a s1 (1- j))) (ndu (1+ pk) (+ rk j))))
+                  (incf d (* (a s2 j) (ndu (+ rk j) pk))))
+                (when (<= r pk)
+                  (setf (a s2 k) (/ (- (a s1 (1- k))) (ndu (1+ pk) r)))
+                  (incf d (* (a s2 k) (ndu r pk))))
+                (setf (aref nd k r) d)
+                (rotatef s1 s2)))))
+        ;; the factors p!/(p-k)!
+        (let ((r p))
+          (declare (type fixnum r))
+          (do ((k 1 (1+ k))) ((> k mder))
+            (declare (type fixnum k))
+            (dotimes (j p+1)
+              (setf (aref nd k j) (* (aref nd k j) (float r 1d0))))
+            (setf r (* r (- p k)))))
+        i))))

@@ -1,0 +1,14 @@
+Batten -- NURBS curves and surfaces in Common Lisp
+Copyright 2026 Genworks International
+
+Batten is a port to Common Lisp of NLib, the NURBS curve and surface
+library inside NVIDIA's open-source SMLib (USD BRep):
+
+  https://github.com/NVIDIA-Omniverse/usd-brep
+  Copyright (c) 2020-2026 NVIDIA CORPORATION & AFFILIATES.
+  Licensed under the Apache License, Version 2.0.
+
+Each source file says which NLib file it was ported from.  The port is a
+modified version of that work and is distributed under the same license.
+"NLib", "SMLib" and "USD BRep" are names used by NVIDIA; Batten is not
+affiliated with or endorsed by NVIDIA.
