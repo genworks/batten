@@ -88,3 +88,73 @@ three values.
 NLib: N_ENetGetPts."
   (declare (type point-net ntl))
   (values (1- (array-dimension ntl 0)) (1- (array-dimension ntl 1)) ntl))
+
+;;; ------------------------------------------------------------ level 1, group 1
+
+(defun polygon-get-b-box (ppl box)
+  "Write the min-max box of polygon PPL (a point-array) into BOX (a
+real-vector of 6: xl xr yb yt zn zf) and return BOX.
+NLib: N_PolygonGetBBox."
+  (declare (type point-array ppl) (type real-vector box))
+  (multiple-value-bind (n p) (e-polygon-get-pts ppl)
+    (declare (type fixnum n) (type point-array p))
+    (let* ((x (aref p 0 0)) (y (aref p 0 1)) (z (aref p 0 2))
+           (xl x) (xr x) (yb y) (yt y) (zn z) (zf z))
+      (declare (type double-float x y z xl xr yb yt zn zf))
+      (fast
+        (do ((i 1 (1+ i))) ((> i n))
+          (declare (type fixnum i))
+          (setf x (aref p i 0) y (aref p i 1) z (aref p i 2))
+          (when (< x xl) (setf xl x))
+          (when (> x xr) (setf xr x))
+          (when (< y yb) (setf yb y))
+          (when (> y yt) (setf yt y))
+          (when (< z zn) (setf zn z))
+          (when (> z zf) (setf zf z))))
+      (b-box-define box xl xr yb yt zn zf))))
+
+(defun e-net-get-b-box (ntl box)
+  "Write the min-max box of point net NTL (a point-net) into BOX (a
+real-vector of 6: xl xr yb yt zn zf) and return BOX.
+NLib: N_ENetGetBBox."
+  (declare (type point-net ntl) (type real-vector box))
+  (multiple-value-bind (n m p) (e-net-get-pts ntl)
+    (declare (type fixnum n m) (type point-net p))
+    (let* ((x (aref p 0 0 0)) (y (aref p 0 0 1)) (z (aref p 0 0 2))
+           (xl x) (xr x) (yb y) (yt y) (zn z) (zf z))
+      (declare (type double-float x y z xl xr yb yt zn zf))
+      (fast
+        (dotimes (i (1+ n))
+          (dotimes (j (1+ m))
+            (setf x (aref p i j 0) y (aref p i j 1) z (aref p i j 2))
+            (when (< x xl) (setf xl x))
+            (when (> x xr) (setf xr x))
+            (when (< y yb) (setf yb y))
+            (when (> y yt) (setf yt y))
+            (when (< z zn) (setf zn z))
+            (when (> z zf) (setf zf z)))))
+      (b-box-define box xl xr yb yt zn zf))))
+
+(defun e-net-is-closed (ntl dir)
+  "True when point net NTL is closed in direction DIR: for +udir+ every
+column's first and last points, for +vdir+ every row's, lie within *mtol*
+of each other.  Any other DIR answers false.
+NLib: N_ENetIsClosed."
+  (declare (type point-net ntl) (type fixnum dir))
+  (multiple-value-bind (n m p) (e-net-get-pts ntl)
+    (declare (type fixnum n m) (type point-net p))
+    (let ((a (make-point)) (b (make-point)) (mtol *mtol*))
+      (declare (dynamic-extent a b) (type double-float mtol))
+      (cond ((= dir +udir+)
+             (dotimes (j (1+ m) t)
+               (%net-pt p 0 j a)
+               (%net-pt p n j b)
+               (when (> (dist-pt-pt a b) mtol)
+                 (return nil))))
+            ((= dir +vdir+)
+             (dotimes (i (1+ n) t)
+               (%net-pt p i 0 a)
+               (%net-pt p i m b)
+               (when (> (dist-pt-pt a b) mtol)
+                 (return nil))))
+            (t nil)))))

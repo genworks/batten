@@ -183,3 +183,70 @@
                                  (cffi:mem-ref p :short) (cffi:mem-ref q :short)
                                  (from-foreign (cffi:mem-ref knu :pointer) :knots)
                                  (from-foreign (cffi:mem-ref knv :pointer) :knots))))))))
+
+;;; ------------------------------------------------------------ level 1, group 1
+
+(define-oracle-test c-func-from-knots (:file "funcs-basic" :trials 1000)
+  ;; N and M are the arrays' highest indexes, or now and then smaller ones
+  (let* ((f (random-cfun))
+         (fu (cfun-vals f)) (u (cfun-knots f)) (p (cfun-degree f))
+         (n (if (zerop (rnd 3)) (rnd (length fu)) (1- (length fu))))
+         (m (if (zerop (rnd 3)) (rnd (length u)) (1- (length u)))))
+    (agree (list :fu fu :n n :p p :u u :m m)
+           (list (batten::c-func-from-knots (%fb-empty-cfun) fu n p u m))
+           (with-stacks (s)
+             (with-foreign ((ffu fu :real-vector) (fuk u :real-vector))
+               (with-foreign-out ((g :cfun))
+                 (let ((rc (c-c-func-from-knots g ffu n p fuk m s)))
+                   (values (c-flag-error-p rc) (list (from-foreign g :cfun))))))))))
+
+(define-oracle-test crv-func-compact (:file "funcs-basic" :trials 1000)
+  ;; the C frees the old arrays on SG; they are not on the fresh stack, so
+  ;; the frees find nothing and the foreign copies stay WITH-FOREIGN's to free
+  (let ((f (random-cfun)))
+    (agree (list :cfun f)
+           (list (batten::crv-func-compact (batten::copy-cfun f)))
+           (with-stacks (s)
+             (with-foreign ((fp f :cfun))
+               (let ((rc (c-crv-func-compact fp s)))
+                 (values (c-flag-error-p rc) (list (from-foreign fp :cfun)))))))))
+
+(define-oracle-test crv-func-copy (:file "funcs-basic" :trials 1000)
+  (let ((f (random-cfun)))
+    (agree (list :cfun f)
+           (list (batten::crv-func-copy f))
+           (with-stacks (s)
+             (with-foreign ((fp f :cfun))
+               (with-foreign-out ((g :cfun))
+                 (let ((rc (c-crv-func-copy fp g s)))
+                   (values (c-flag-error-p rc) (list (from-foreign g :cfun))))))))))
+
+(defun %fb-parameter (knots)
+  "A parameter in the knot vector's domain (often a knot or an end), or now
+and then just outside it."
+  (let ((lo (aref knots 0)) (hi (aref knots (1- (length knots)))))
+    (case (rnd 12)
+      (0 (- lo (+ 1d-9 (rnd 1d0))))
+      (1 (+ hi (+ 1d-9 (rnd 1d0))))
+      (t (random-parameter knots)))))
+
+(define-oracle-test c-func-eval (:file "funcs-basic" :trials 4000)
+  (let* ((f (random-cfun)) (u (%fb-parameter (cfun-knots f))) (flg (random-side)))
+    (agree (list :cfun f :u u :flg flg)
+           (list (batten::c-func-eval f u flg))
+           (with-foreign ((fp f :cfun))
+             (with-scalars ((fv :double))
+               (let ((rc (c-c-func-eval fp u flg fv)))
+                 (values (c-flag-error-p rc)
+                         (unless (c-flag-error-p rc) (list (cffi:mem-ref fv :double))))))))))
+
+(define-oracle-test c-func-derivs (:file "funcs-basic" :trials 4000)
+  (let* ((f (random-cfun)) (u (%fb-parameter (cfun-knots f))) (flg (random-side))
+         (der (rnd (+ (cfun-degree f) 3))))
+    (agree (list :cfun f :u u :flg flg :der der)
+           (list (batten::c-func-derivs f u flg der (make-real-vector (1+ der))))
+           (with-foreign ((fp f :cfun))
+             (with-foreign-out ((fd :real-vector (1+ der)))
+               (let ((rc (c-c-func-derivs fp u flg der fd)))
+                 (values (c-flag-error-p rc)
+                         (unless (c-flag-error-p rc) (list (from-foreign fd :real-vector (1+ der)))))))))))
