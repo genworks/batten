@@ -136,6 +136,177 @@ NLib: N_BezFuncMultiplyBezCrvMatrix."
             (setf (aref a i j) (aref a (- n i) (- m j)))))))
     a))
 
+;;; ------------------------------------------------- degree elevation, products
+
+(defun %bezier-elevation-rm (dm p tt rname)
+  "The storage of NL_RMATRIX DM, after filling it with the degree elevation
+matrix for degree P raised by TT when DM is the NULL matrix, as the C's
+N_BezGetDegreeElevationMatrix( p, t, dm, &S ) does."
+  (declare (type rmatrix dm) (type fixnum p tt))
+  (when (real-matrix-is-null dm)
+    (%check-mem-real-matrix dm (+ p tt) p +mt-full+ p rname)
+    (bez-get-degree-elevation-matrix p tt (rmatrix-rm dm)))
+  (rmatrix-rm dm))
+
+(defun %bezier-product-rm (pm p q rname)
+  "The storage of NL_RMATRIX PM, after filling it with the product matrix for
+degrees P and Q when PM is the NULL matrix, as the C's
+N_BezFuncMultiplyBezCrvMatrix( p, q, pm, &S ) does."
+  (declare (type rmatrix pm) (type fixnum p q))
+  (when (real-matrix-is-null pm)
+    (%check-mem-real-matrix pm (+ p q) p +mt-full+ p rname)
+    (bez-func-multiply-bez-crv-matrix p q (rmatrix-rm pm)))
+  (rmatrix-rm pm))
+
+(defun bez-elevate-degree (pw p tt dm f l qw)
+  "Elevate the degree-P Bezier curve with control points PW by TT degrees,
+writing new control points F..L into QW (a cpoint-array the caller
+allocates).  DM is the degree elevation matrix, an rmatrix: when it is the
+NULL matrix it is computed (and DM given storage).  Returns QW.
+NLib: N_BezElevateDegree."
+  (declare (type cpoint-array pw qw) (type fixnum p tt f l) (type rmatrix dm))
+  (let ((rm (%bezier-elevation-rm dm p tt 'bez-elevate-degree)))
+    (declare (type real-matrix rm))
+    (fast
+      (do ((i f (1+ i))) ((> i l))
+        (declare (type fixnum i))
+        (let ((a (if (> (- i tt) 0) (- i tt) 0))
+              (b (if (> i p) p i)))
+          (declare (type fixnum a b))
+          (setf (aref qw i 0) 0d0 (aref qw i 1) 0d0 (aref qw i 2) 0d0 (aref qw i 3) 0d0)
+          (do ((j a (1+ j))) ((> j b))
+            (declare (type fixnum j))
+            (%vector-blend-c-pt-row (aref rm i j) pw j qw i))))))
+  qw)
+
+(defun bez-func-degree-elevate (f p tt dm s e g)
+  "Elevate the degree-P Bezier function with control values F by TT degrees,
+writing new control values S..E into G (allocated by the caller).  DM is the
+degree elevation matrix, an rmatrix computed (and given storage) when it is
+the NULL matrix.  Signals :inp-err for S < 0, E > P+TT, TT < 0 or S > E and
+:deg-err when P+TT exceeds *dmax*.  Returns G.
+NLib: N_BezFuncDegreeElevate."
+  (declare (type real-vector f g) (type fixnum p tt s e) (type rmatrix dm))
+  (when (or (< s 0) (> e (+ p tt)))
+    (nurbs-error :inp-err 'bez-func-degree-elevate))
+  (when (or (< tt 0) (> s e))
+    (nurbs-error :inp-err 'bez-func-degree-elevate))
+  (when (> (+ p tt) (the fixnum *dmax*))
+    (nurbs-error :deg-err 'bez-func-degree-elevate))
+  (let ((a (%bezier-elevation-rm dm p tt 'bez-func-degree-elevate)))
+    (declare (type real-matrix a))
+    (fast
+      (do ((i s (1+ i))) ((> i e))
+        (declare (type fixnum i))
+        (setf (aref g i) 0d0)
+        (let ((jl (nl-max 0 (- i tt)))
+              (jh (nl-min p i)))
+          (declare (type fixnum jl jh))
+          (do ((j jl (1+ j))) ((> j jh))
+            (declare (type fixnum j))
+            (setf (aref g i) (+ (aref g i) (* (aref a i j) (aref f j)))))))))
+  g)
+
+(defun bez-func-multiply-bez-func (f p g q pm s e fg)
+  "The control values S..E of the product of the degree-P Bezier function F
+and the degree-Q Bezier function G, written into FG (allocated by the caller
+to hold up to FG[P+Q]).  PM is the product matrix, an rmatrix computed (and
+given storage) when it is the NULL matrix.  Signals :inp-err unless
+0 <= S <= E <= P+Q.  Returns FG.
+NLib: N_BezFuncMultiplyBezFunc."
+  (declare (type real-vector f g fg) (type fixnum p q s e) (type rmatrix pm))
+  (when (or (< s 0) (> e (+ p q)) (> s e))
+    (nurbs-error :inp-err 'bez-func-multiply-bez-func))
+  (let ((a (%bezier-product-rm pm p q 'bez-func-multiply-bez-func)))
+    (declare (type real-matrix a))
+    (fast
+      (do ((i s (1+ i))) ((> i e))
+        (declare (type fixnum i))
+        (setf (aref fg i) 0d0)
+        (let ((jl (nl-max 0 (- i q)))
+              (jh (nl-min p i)))
+          (declare (type fixnum jl jh))
+          (do ((j jl (1+ j))) ((> j jh))
+            (declare (type fixnum j))
+            (setf (aref fg i) (+ (aref fg i) (* (* (aref a i j) (aref f j)) (aref g (- i j))))))))))
+  fg)
+
+(defun bez-func-multiply-bez-crv (f p pw q pm s e qw)
+  "The control points S..E of the product of the degree-P Bezier function F
+and the degree-Q Bezier curve with control points PW, written into QW (a
+cpoint-array allocated by the caller to hold up to QW[P+Q]).  The function
+scales the curve's x, y, z only.  PM is the product matrix, an rmatrix
+computed (and given storage) when it is the NULL matrix.  Signals :inp-err
+unless 0 <= S <= E <= P+Q.  Returns QW.
+NLib: N_BezFuncMultiplyBezCrv."
+  (declare (type real-vector f) (type cpoint-array pw qw) (type fixnum p q s e) (type rmatrix pm))
+  (when (or (< s 0) (> e (+ p q)) (> s e))
+    (nurbs-error :inp-err 'bez-func-multiply-bez-crv))
+  (let ((a (%bezier-product-rm pm p q 'bez-func-multiply-bez-crv))
+        (tw (make-array 4 :element-type 'double-float :initial-element 0d0))
+        (pt (make-array 4 :element-type 'double-float :initial-element 0d0))
+        (acc (make-array 4 :element-type 'double-float :initial-element 0d0))
+        (czero (make-array 4 :element-type 'double-float :initial-element 0d0)))
+    (declare (type real-matrix a) (type cpoint tw pt acc czero) (dynamic-extent tw pt acc czero))
+    (fast
+      (do ((i s (1+ i))) ((> i e))
+        (declare (type fixnum i))
+        (copy-c-pt czero acc)
+        (let ((jl (nl-max 0 (- i q)))
+              (jh (nl-min p i)))
+          (declare (type fixnum jl jh))
+          (do ((j jl (1+ j))) ((> j jh))
+            (declare (type fixnum j))
+            (%row-c-pt pw (- i j) pt)
+            (scale-c-pt-xyz (aref f j) pt tw)
+            (vector-blend-c-pt (aref a i j) tw acc)))
+        (%c-pt-row acc qw i))))
+  qw)
+
+(defun bez-srf-elevate-degree (pw r tt dm dir f l roc qw)
+  "Elevate the degree R of a Bezier surface with control net PW by TT
+degrees in direction DIR (+udir+ or +vdir+), one row or column at a time:
+new control points F..L of column (u) or row (v) ROC are written into QW, a
+cpoint-net the caller allocates.  DM is the degree elevation matrix, an
+rmatrix computed (and given storage) when it is the NULL matrix.  Signals
+:cal-err for another DIR.  Returns QW.
+NLib: N_BezSrfElevateDegree."
+  (declare (type cpoint-net pw qw) (type fixnum r tt dir f l roc) (type rmatrix dm))
+  (let ((rm (%bezier-elevation-rm dm r tt 'bez-srf-elevate-degree))
+        (pt (make-array 4 :element-type 'double-float :initial-element 0d0))
+        (acc (make-array 4 :element-type 'double-float :initial-element 0d0))
+        (czero (make-array 4 :element-type 'double-float :initial-element 0d0)))
+    (declare (type real-matrix rm) (type cpoint pt acc czero) (dynamic-extent pt acc czero))
+    (cond
+      ((= dir +udir+)
+       (fast
+         (do ((i f (1+ i))) ((> i l))
+           (declare (type fixnum i))
+           (let ((a (if (> (- i tt) 0) (- i tt) 0))
+                 (b (if (> i r) r i)))
+             (declare (type fixnum a b))
+             (copy-c-pt czero acc)
+             (do ((k a (1+ k))) ((> k b))
+               (declare (type fixnum k))
+               (%net-c-pt pw k roc pt)
+               (vector-blend-c-pt (aref rm i k) pt acc))
+             (%c-pt-net acc qw i roc)))))
+      ((= dir +vdir+)
+       (fast
+         (do ((j f (1+ j))) ((> j l))
+           (declare (type fixnum j))
+           (let ((a (if (> (- j tt) 0) (- j tt) 0))
+                 (b (if (> j r) r j)))
+             (declare (type fixnum a b))
+             (copy-c-pt czero acc)
+             (do ((k a (1+ k))) ((> k b))
+               (declare (type fixnum k))
+               (%net-c-pt pw roc k pt)
+               (vector-blend-c-pt (aref rm j k) pt acc))
+             (%c-pt-net acc qw roc j)))))
+      (t (nurbs-error :cal-err 'bez-srf-elevate-degree))))
+  qw)
+
 ;;; ---------------------------------------------------------------- conics
 
 (defun bez-set-conic-weight (p0 p1 p2)
@@ -220,4 +391,73 @@ Returns QW.  NLib: N_BezSplit."
              (%bezier-combine-2-c-rows omu aw i u aw (1+ i) aw i))
            (%bezier-copy-c-row aw 0 qw k)
            (%bezier-copy-c-row aw (- p k) rw (- p k)))))))
+  qw)
+
+;;; ------------------------------------------------------- reparametrization
+
+(defun bez-reparam (pw p f q bin qw)
+  "Reparametrize the degree-P Bezier curve with control points PW by the
+degree-Q Bezier function with coefficients F (monotonic for the result to
+make sense), writing the P*Q+1 control points of the result into QW (a
+cpoint-array the caller allocates).  BIN is Pascal's triangle through row
+P*Q, an index-matrix, or NIL to compute it.  Signals :deg-err when P*Q
+exceeds *dmax*.  Returns QW.
+NLib: N_BezReparam."
+  (declare (type cpoint-array pw qw) (type fixnum p q) (type real-vector f)
+           (type (or null index-matrix) bin))
+  (let ((pq (* p q)))
+    (declare (type fixnum pq))
+    (when (> pq (the fixnum *dmax*))
+      (nurbs-error :deg-err 'bez-reparam))
+    (let ((bin (or bin (pascal-tri-row (make-array (list (1+ pq) (1+ pq)) :element-type 'fixnum
+                                                                           :initial-element 0)
+                                       pq)))
+          (uw (make-cpoint-net (1+ p) (1+ pq)))
+          (vw (make-cpoint-net (1+ p) (1+ pq)))
+          (uarray nil)
+          (a0 (make-array 4 :element-type 'double-float :initial-element 0d0))
+          (a1 (make-array 4 :element-type 'double-float :initial-element 0d0))
+          (aw (make-array 4 :element-type 'double-float :initial-element 0d0))
+          (acc (make-array 4 :element-type 'double-float :initial-element 0d0))
+          (czero (make-array 4 :element-type 'double-float :initial-element 0d0)))
+      (declare (type index-matrix bin) (type cpoint-net uw vw) (type cpoint a0 a1 aw acc czero)
+               (dynamic-extent a0 a1 aw acc czero))
+      (dotimes (i (1+ p))
+        (dotimes (k 4) (setf (aref uw i 0 k) (aref pw i k))))
+      (fast
+        (do ((s 1 (1+ s))) ((> s p))
+          (declare (type fixnum s))
+          (let ((qs (* q s))
+                (qs1 (* q (1- s)))
+                ;; the pass reads one net and writes the other
+                (src (if uarray vw uw))
+                (dst (if uarray uw vw)))
+            (declare (type fixnum qs qs1) (type cpoint-net src dst))
+            (do ((r 0 (1+ r))) ((> r qs))
+              (declare (type fixnum r))
+              (do ((i 0 (1+ i))) ((> i (- p s)))
+                (declare (type fixnum i))
+                (copy-c-pt czero acc)
+                (let ((jmin (nl-max 0 (- r q)))
+                      (jmax (nl-min r qs1)))
+                  (declare (type fixnum jmin jmax))
+                  (do ((j jmin (1+ j))) ((> j jmax))
+                    (declare (type fixnum j))
+                    (let* ((alf (aref f (- r j)))
+                           (oma (- 1d0 alf))
+                           (fac (* (float (aref bin qs1 j) 1d0) (float (aref bin q (- r j)) 1d0))))
+                      (declare (type double-float alf oma fac))
+                      (%net-c-pt src i j a0)
+                      (%net-c-pt src (1+ i) j a1)
+                      (combine-2-c-pts oma a0 alf a1 aw)
+                      (vector-blend-c-pt fac aw acc))))
+                (let ((fac (/ 1d0 (float (aref bin qs r) 1d0))))
+                  (declare (type double-float fac))
+                  (scale-c-pt fac acc acc))
+                (%c-pt-net acc dst i r))))
+          (setf uarray (not uarray))))
+      (let ((src (if uarray vw uw)))
+        (declare (type cpoint-net src))
+        (dotimes (r (1+ pq))
+          (dotimes (k 4) (setf (aref qw r k) (aref src 0 r k)))))))
   qw)
