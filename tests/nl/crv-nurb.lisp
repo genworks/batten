@@ -89,3 +89,27 @@ derivative at the start) or are collinear (a zero curvature there)."
                (let ((rc (c-crv-get-curvature-deriv cur u ufl kpp)))
                  (values (c-flag-error-p rc)
                          (list (cffi:mem-ref kpp :double)))))))))
+
+;;; ------------------------------------------------------------ level 1, group 4
+
+(define-oracle-test crv-reverse (:file "crv-nurb" :trials 3000)
+  (let* ((c (random-curve :max-extra (if (zerop (rnd 3)) 2 12)))
+         (in-place (zerop (rnd 2))))
+    (agree (list :curve c :in-place in-place)
+           (list (if in-place
+                     (let ((cc (batten::%make-curve (curve-degree c) (copy-seq (curve-knots c))
+                                                    (let ((a (make-cpoint-array (1+ (curve-n c))))
+                                                          (src (curve-cpoints c)))
+                                                      (dotimes (i (array-total-size a) a)
+                                                        (setf (row-major-aref a i) (row-major-aref src i)))))))
+                       (batten::crv-reverse cc cc))
+                     (batten::crv-reverse c nil)))
+           (with-stacks (s)
+             (with-foreign ((cur c :curve))
+               (if in-place
+                   (let ((rc (c-crv-reverse cur cur s)))
+                     (values (c-flag-error-p rc) (list (from-foreign cur :curve))))
+                   (with-foreign-out ((q :curve))
+                     (let ((rc (c-crv-reverse cur q s)))
+                       (values (c-flag-error-p rc)
+                               (unless (c-flag-error-p rc) (list (from-foreign q :curve))))))))))))
