@@ -400,3 +400,61 @@ NLib: N_CrvReparam."
     (declare (dynamic-extent i))
     (create-interval i ul ur)
     (crv-reparam-to-interval cur i)))
+
+;;; ------------------------------------------------------------- L3-g6
+
+(defun crv-eval-curvature (cur u ufl p tv cfl c nv)
+  "The curvature of curve CUR at parameter U (the osculating circle's radius
+is its reciprocal).  UFL +left+ means u is in [u_j, u_j+1) (right
+derivatives), +right+ u in (u_j, u_j+1] (left derivatives).  With CFL +yes+
+the point, unit tangent, center of the osculating circle and normal to its
+plane (the binormal) are written into P, TV, C and NV, from the Frenet
+frame; otherwise only P and TV are written, from the derivatives.  Signals as
+crv-derivs and crv-eval-frenet-frame do, :num-err when |C'|^3 or the
+curvature cannot be divided by, and :geo-err for a zero first derivative.
+Returns the curvature.
+NLib: N_CrvEvalCurvature."
+  (declare (type curve cur) (type double-float u) (type fixnum ufl cfl)
+           (type point p tv c nv))
+  (let ((d (make-point-array 3))
+        (d0 (make-point)) (d1 (make-point)) (d2 (make-point))
+        (a (make-point)) (b (make-point))
+        (num 0d0) (den 0d0) (kap 0d0) (rad 0d0))
+    (declare (type point-array d) (type point d0 d1 d2 a b)
+             (type double-float num den kap rad)
+             (dynamic-extent d d0 d1 d2 a b))
+    ;; derivatives
+    (crv-derivs cur u ufl 2 d)
+    (%row-pt d 0 d0)
+    (%row-pt d 1 d1)
+    (%row-pt d 2 d2)
+    ;; curvature
+    (vector-cross d1 d2 a)
+    (setf num (vector-magnitude a))
+    (setf den (vector-magnitude d1))
+    (setf den (* (* den den) den))
+    (when (float-op-is-bad num den +division+)
+      (nurbs-error :num-err 'crv-eval-curvature))
+    (setf kap (/ num den))
+    ;; osculating circle
+    (cond ((= cfl +yes+)
+           (when (float-op-is-bad 1d0 kap +division+)
+             (nurbs-error :num-err 'crv-eval-curvature))
+           (setf rad (/ 1d0 kap))
+           ;; the C hands its B as the Frenet normal and N as the binormal
+           (crv-eval-frenet-frame cur u ufl p tv b nv)
+           (vector-pt-along-vector d0 rad b c))
+          (t
+           (copy-pt d0 p)
+           (vector-normalize d1 tv)))
+    kap))
+
+(defun crv-get-b-box-max-diag-dist (cur)
+  "The length of the diagonal of the min-max box of curve CUR's control
+polygon.
+NLib: N_CrvGetBBoxMaxDiagDist."
+  (declare (type curve cur))
+  (let ((box (make-real-vector 6)))
+    (declare (dynamic-extent box))
+    (crv-get-b-box cur box)
+    (b-box-get-diagonal box)))
