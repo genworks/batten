@@ -1745,3 +1745,88 @@ NLib: N_SrfElevateDegree."
                   (dotimes (j (1+ qq))
                     (setf (aref vq (+ kind j)) (aref vp b)))))))
         sur-q))))
+
+;;; ------------------------------------------------------------- L5-g0
+
+(defun make-srfs-compatible (sur k uorv)
+  "Make the surfaces SUR[0..K] (a simple-vector of surfaces, changed in place:
+its entries are replaced) compatible in direction UORV (+udir+, +vdir+ or
++uvdir+): all made rational if one is; the parameter domains made equal in
+the directions asked for (to sur[0]'s where they already agree, else to
+[0,1]); the degrees raised to the highest in both directions, whatever UORV;
+and the knot vectors in UORV merged (knots within 1e-8 moved together, in
+place) and inserted.  Returns SUR.  Signals what srf-elevate-degree,
+get-compatible-knot-array and srf-insert-knots signal.
+NLib: N_MakeSrfsCompatible."
+  (declare (type simple-vector sur) (type fixnum k uorv))
+  ;; make the surface definitions compatible
+  (make-srfs-rat-compatible sur k)
+  ;; scale the knot vectors if necessary
+  (multiple-value-bind (us ue vs ve) (srf-get-parameter-bounds (svref sur 0))
+    (declare (type double-float us ue vs ve))
+    (let ((iu 0) (iv 0))
+      (declare (type fixnum iu iv))
+      (do ((i 1 (1+ i))) ((> i k))
+        (declare (type fixnum i))
+        (multiple-value-bind (d1 d2 d3 d4) (srf-get-parameter-bounds (svref sur i))
+          (declare (type double-float d1 d2 d3 d4))
+          (when (or (/= us d1) (/= ue d2))
+            (setf iu 1))
+          (when (or (/= vs d3) (/= ve d4))
+            (setf iv 1))))
+      (when (and (= iu 1) (= uorv +vdir+))
+        (setf iu 0))
+      (when (and (= iv 1) (= uorv +udir+))
+        (setf iv 0))
+      (cond ((and (= iu 1) (= iv 0))
+             (dotimes (i (1+ k))
+               (srf-reparam (svref sur i) 0d0 1d0 vs ve)))
+            ((and (= iu 0) (= iv 1))
+             (dotimes (i (1+ k))
+               (srf-reparam (svref sur i) us ue 0d0 1d0)))
+            ((and (= iu 1) (= iv 1))
+             (let ((unit-square (make-real-vector 4)))
+               (declare (dynamic-extent unit-square))
+               (setf (aref unit-square 1) 1d0
+                     (aref unit-square 3) 1d0)
+               (dotimes (i (1+ k))
+                 (srf-reparam-to-interval (svref sur i) unit-square +uvdir+)))))))
+  ;; the highest degrees
+  (let ((ph (surface-degree-u (svref sur 0)))
+        (qh (surface-degree-v (svref sur 0))))
+    (declare (type fixnum ph qh))
+    (do ((i 1 (1+ i))) ((> i k))
+      (declare (type fixnum i))
+      (let ((p (surface-degree-u (svref sur i)))
+            (q (surface-degree-v (svref sur i))))
+        (declare (type fixnum p q))
+        (when (> p ph) (setf ph p))
+        (when (> q qh) (setf qh q))))
+    ;; elevate the degrees
+    (dotimes (i (1+ k))
+      (let ((tu (- ph (surface-degree-u (svref sur i))))
+            (tv (- qh (surface-degree-v (svref sur i)))))
+        (declare (type fixnum tu tv))
+        (when (> tu 0)
+          (setf (svref sur i) (srf-elevate-degree (svref sur i) tu +udir+)))
+        (when (> tv 0)
+          (setf (svref sur i) (srf-elevate-degree (svref sur i) tv +vdir+))))))
+  ;; merge the knot vectors (the surfaces' own: moved knots move in them too)
+  (let ((knu (make-array (1+ k)))
+        (knv (make-array (1+ k)))
+        (kux nil) (kvx nil))
+    (declare (type simple-vector knu knv))
+    (dotimes (i (1+ k))
+      (setf (svref knu i) (surface-knots-u (svref sur i))
+            (svref knv i) (surface-knots-v (svref sur i))))
+    (when (/= uorv +vdir+)
+      (setf kux (get-compatible-knot-array knu k)))
+    (when (/= uorv +udir+)
+      (setf kvx (get-compatible-knot-array knv k)))
+    ;; refine the surfaces
+    (dotimes (i (1+ k))
+      (when (and (/= uorv +vdir+) (> (length (the real-vector (svref kux i))) 0))
+        (setf (svref sur i) (srf-insert-knots (svref sur i) (svref kux i) +udir+)))
+      (when (and (/= uorv +udir+) (> (length (the real-vector (svref kvx i))) 0))
+        (setf (svref sur i) (srf-insert-knots (svref sur i) (svref kvx i) +vdir+)))))
+  sur)

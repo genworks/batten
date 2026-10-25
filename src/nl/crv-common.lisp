@@ -9,6 +9,14 @@
 
 ;;; ------------------------------------------------------------ level 2, group 5
 
+(declaim (inline %crv-common-sqrt))
+(defun %crv-common-sqrt (x)
+  "C sqrt of X, known non-negative or NaN (a NaN goes through as the C's)."
+  (declare (type double-float x))
+  (if (>= x 0d0)
+      (sqrt (the (double-float 0d0) x))
+      (- x x)))
+
 (defun %crv-common-row-weight (p w pw i)
   "N_Weight( P, w, &Pw[i] ): write point P with weight W into row I of
 cpoint-array PW."
@@ -174,7 +182,8 @@ NLib: N_CreateQuarticArcTol."
         (setf disc (- (* b b) (* (* 4d0 a) cc)))
         (when (< disc 0d0)
           (nurbs-error :num-err 'create-quartic-arc-tol))
-        (setf disc (sqrt (the (double-float 0d0) disc))
+        ;; a NaN sweep makes DISC NaN: the C goes on to its :num-err below
+        (setf disc (%crv-common-sqrt disc)
               v1 (/ (+ (- b) disc) (* 2d0 a))
               v2 (/ (- (- b) disc) (* 2d0 a)))
         (cond ((and (>= v1 0d0) (<= v1 1d0)) (setf a v1))
@@ -431,3 +440,93 @@ NLib: N_CreateCircArcTol."
         ((= ctp +quartic+) (create-quartic-arc-tol c x y r as ae at))
         ((= ctp +quintic+) (create-quintic-arc-tol c x y r as ae at))
         (t (nurbs-error :cal-err 'create-circ-arc-tol))))
+
+;;; ------------------------------------------------------------- L5-g0
+
+(defun create-circ-arc (c x y r as ae ctp)
+  "A fresh NURBS circle or circular arc of center C, axes X and Y, radius R,
+from angle AS to angle AE in degrees, of the kind CTP names: create-circ-arc-tol
+with the angle tolerance 0.01 degrees.
+NLib: N_CreateCircArc."
+  (declare (type point c x y) (type double-float r as ae) (type fixnum ctp))
+  (create-circ-arc-tol c x y r as ae 0.01d0 ctp))
+
+(defun create-elliptical-arc-ang-type-tol (c x y r1 r2 as ae at atp ctp)
+  "A fresh NURBS ellipse or elliptical arc of center C, axes X and Y
+(normalized here, on copies), major radius R1 along X and minor radius R2
+along Y, from angle AS to angle AE in degrees (ATP 0: angles of the point on
+the circle of radius R1, projected to the ellipse; otherwise angles of the
+point on the ellipse), with angle tolerance AT and conic kind CTP: the circle
+of radius R1 is made by create-circ-arc-tol and its control points are scaled
+toward the X axis by R2/R1.  Signals :geo-err for a zero axis, :inp-err when a
+control point cannot be projected onto the X axis, and what
+create-circ-arc-tol signals.
+NLib: N_CreateEllipticalArcAngTypeTol."
+  (declare (type point c x y) (type double-float r1 r2 as ae at) (type fixnum atp ctp))
+  (let ((xx (make-point)) (yy (make-point))
+        (lx (%make-lineseg (make-point) (make-point) +unbounded+))
+        (p (make-point)) (q (make-point))
+        (apnt (make-real-vector 2))
+        (fac 0d0) (omf 0d0) (angle 0d0) (alf 0d0) (bet 0d0) (e 0d0)
+        (tmp-angle 0d0) (ap 0d0))
+    (declare (dynamic-extent xx yy lx p q apnt)
+             (type double-float fac omf angle alf bet e tmp-angle ap))
+    (copy-pt x xx)
+    (copy-pt y yy)
+    (vector-normalize-ref xx)
+    (vector-normalize-ref yy)
+    (create-line-start-dir-vector lx c xx +unbounded+)
+    ;; (the C also sets fac = r1/r2, omf = 1 - fac here, unused)
+    ;; start and end angles
+    (do () ((not (<= ae as)))
+      (setf ae (+ 360d0 ae)))
+    (do () ((not (>= (- ae as) 360.1d0)))
+      (setf ae (- ae 360d0)))
+    (when (> (- ae as) 360d0)
+      (setf ae (+ as 360d0)))
+    (dotimes (i 2)
+      (setf angle (/ (* +pi+ (if (= i 0) as ae)) 180d0))
+      (cond ((= atp 0)
+             ;; point on circle at angle, projected to the ellipse
+             (setf alf (* r1 (cos angle))
+                   bet (* r2 (sin angle))))
+            (t
+             ;; point on the ellipse at angle
+             (setf e (tan angle))
+             (setf alf (/ (* r1 r2) (%crv-common-sqrt (+ (* r2 r2) (* (* (* r1 r1) e) e)))))
+             (when (< (cos angle) 0d0)
+               (setf alf (- alf)))
+             (setf bet (- (* r1 r1) (* alf alf)))
+             (if (< bet 1d-12)
+                 (setf bet 0d0)
+                 (setf bet (* (/ r2 r1) (%crv-common-sqrt bet))))
+             (when (< (sin angle) 0d0)
+               (setf bet (- bet)))))
+      ;; polar angle of the vector
+      (setf tmp-angle (atan (/ bet r2) (/ alf r1)))
+      (setf ap (/ (* 180d0 tmp-angle) +pi+))
+      ;; angle snapping up to NL_PTOL degrees
+      (when (<= (abs ap) (the double-float *ptol*))
+        (setf ap 0d0))
+      (when (< ap 0d0)
+        (setf ap (+ 360d0 ap)))
+      (setf (aref apnt i) ap))
+    ;; the circle or circular arc
+    (let* ((cur (create-circ-arc-tol c xx yy r1 (aref apnt 0) (aref apnt 1) at ctp))
+           (pw (curve-cpoints cur))
+           (cw (make-cpoint))
+           (w 0d0))
+      (declare (dynamic-extent cw) (type cpoint-array pw) (type double-float w))
+      ;; the affine map to the ellipse's control points
+      (setf fac (/ r2 r1)
+            omf (- 1d0 fac))
+      (dotimes (i (array-dimension pw 0))
+        (%row-c-pt pw i cw)
+        (c-pt-to-pt-euclid cw p)
+        (setf w (c-pt-get-w cw))
+        (when (= (the fixnum (values (project-pt-line lx p q))) +false+)
+          (nurbs-error :inp-err 'create-elliptical-arc-ang-type-tol))
+        (combine-2-pts fac p omf q p)
+        (weight p w cw)
+        (%c-pt-row cw pw i))
+      cur)))
