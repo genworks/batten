@@ -416,3 +416,18 @@ NLib: N_CreateConicArc."
                               (aref u 5) 0.50d0 (aref u 6) 0.50d0
                               (aref u 7) 0.75d0 (aref u 8) 0.75d0)))))))))))
       (%make-curve 2 u pw))))
+
+;;; ------------------------------------------------------------- L4-g0
+
+(defun create-circ-arc-tol (c x y r as ae at ctp)
+  "A fresh NURBS circle or circular arc of center C, axes X and Y, radius R,
+from angle AS to angle AE in degrees with angle tolerance AT, of the kind CTP
+names: +quadratic+ (create-quadratic-arc-tol), +quartic+
+(create-quartic-arc-tol) or +quintic+ (create-quintic-arc-tol).  Signals
+:cal-err for any other CTP.
+NLib: N_CreateCircArcTol."
+  (declare (type point c x y) (type double-float r as ae at) (type fixnum ctp))
+  (cond ((= ctp +quadratic+) (create-quadratic-arc-tol c x y r as ae at))
+        ((= ctp +quartic+) (create-quartic-arc-tol c x y r as ae at))
+        ((= ctp +quintic+) (create-quintic-arc-tol c x y r as ae at))
+        (t (nurbs-error :cal-err 'create-circ-arc-tol))))

@@ -121,3 +121,21 @@ points, or P at an end; planar a third of the time."
                    (values (c-flag-error-p rc)
                            (unless (c-flag-error-p rc)
                              (list (from-foreign cur :curve)))))))))))
+
+;;; ------------------------------------------------------------- L4-g0
+
+(define-oracle-test create-circ-arc-tol (:file "crv-common" :trials 4000)
+  (destructuring-bind (c x y r as ae at) (%cc-arc-input)
+    ;; mostly the three kinds; now and then cubic or garbage (:cal-err)
+    (let ((ctp (case (rnd 20) (0 +cubic+) (1 (- (rnd 10) 3)) (t (elt (list +quadratic+ +quartic+ +quintic+) (rnd 3))))))
+      (agree (list :c c :x x :y y :r r :as as :ae ae :at at :ctp ctp)
+             (let ((xc (copy-seq x)) (yc (copy-seq y)))
+               (list (batten::create-circ-arc-tol c xc yc r as ae at ctp)
+                     (equalp xc x) (equalp yc y)))
+             (with-stacks (s)
+               (with-foreign ((fc c :point) (fx x :point) (fy y :point))
+                 (with-foreign-out ((cur :curve))
+                   (let ((rc (c-create-circ-arc-tol fc fx fy r as ae at ctp cur s)))
+                     (values (c-flag-error-p rc)
+                             (unless (c-flag-error-p rc)
+                               (list (from-foreign cur :curve) t t)))))))))))

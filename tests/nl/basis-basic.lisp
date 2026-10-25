@@ -368,3 +368,38 @@ left unsorted (NLib's [B168] case of slightly out-of-order knots); with ENDS
                                  (push (from-foreign (cffi:mem-aref kp :pointer r) :knots) ks)
                                  (push (from-foreign (cffi:mem-aref kna :pointer r) :knots) xs))
                                (list (nreverse ks) (nreverse xs))))))))))))
+
+;;; ------------------------------------------------------------- L4-g0
+
+(define-oracle-test get-compatible-knot-array (:file "basis-basic" :trials 3000)
+  (let* ((k (rnd 4))
+         (lo (if (zerop (rnd 3)) 0d0 (rnd-range -5d0 5d0)))
+         (hi (+ lo 0.5d0 (rnd 5d0)))
+         ;; perturbations below, around or above the fixed 1e-8 tolerance
+         (eps (case (rnd 5) (0 0d0) (1 1d-9) (2 4.5d-9) (3 1d-8) (t 3d-8)))
+         (ends (case (rnd 6) ((0 1) 4.5d-9) (2 1d-9) (3 2d-8) (t nil)))
+         (knt (let (l (prev nil))
+                (dotimes (r (1+ k) (coerce (nreverse l) 'simple-vector))
+                  (setf prev (%compatible-knots (1+ (rnd 5)) lo hi prev))
+                  (push (%jiggle-knots prev eps ends) l)))))
+    (when (and (plusp k) (zerop (rnd 15)))
+      (setf (svref knt (rnd (1+ k))) (%compatible-knots (1+ (rnd 5)) lo (+ hi 1d0))))
+    (agree (list :knt knt :k k)
+           (let* ((kc (map 'simple-vector #'copy-seq knt))
+                  (kx (batten::get-compatible-knot-array kc k)))
+             (list (coerce kc 'list) (coerce kx 'list)))
+           (with-stacks (sk)
+             (cffi:with-foreign-objects ((kp :pointer (1+ k)) (kxp :pointer))
+               (with-foreign ((dummy (make-real-vector 1) :real-vector))
+                 (declare (ignore dummy))
+                 (dotimes (r (1+ k))
+                   (setf (cffi:mem-aref kp :pointer r) (to-foreign (svref knt r) :knots)))
+                 (setf (cffi:mem-ref kxp :pointer) (cffi:null-pointer))
+                 (let ((failed (c-flag-error-p (c-get-compatible-knot-array kp k kxp sk))))
+                   (values failed
+                           (unless failed
+                             (let ((kna (cffi:mem-ref kxp :pointer)) (ks nil) (xs nil))
+                               (dotimes (r (1+ k))
+                                 (push (from-foreign (cffi:mem-aref kp :pointer r) :knots) ks)
+                                 (push (from-foreign (cffi:mem-aref kna :pointer r) :knots) xs))
+                               (list (nreverse ks) (nreverse xs))))))))))))

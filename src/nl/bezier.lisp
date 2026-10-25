@@ -589,3 +589,17 @@ EPS the tolerance actually achieved and LEN the accumulated sum.  Signals
 NLib: N_BezCalcArcLength."
   (declare (type cpoint-array pw) (type fixnum p) (type double-float eps len))
   (bezier--st-bez-calc-arc-length pw p eps len 0))
+
+;;; ------------------------------------------------------------- L4-g0
+
+(defun bez-calc-length (pw p tol)
+  "The arc length of the degree-P Bezier curve with control points PW, to
+tolerance TOL: BEZ-CALC-ARC-LENGTH with tolerance 2*TOL from a zero sum,
+halved.  Signals :quit when subdivision needs more than *recurselim* levels.
+NLib: N_BezCalcLength."
+  (declare (type cpoint-array pw) (type fixnum p) (type double-float tol))
+  (let ((eps (* 2.0d0 tol)))
+    (declare (type double-float eps))
+    (multiple-value-bind (e total) (bez-calc-arc-length pw p eps 0.0d0)
+      (declare (ignore e) (type double-float total))
+      (* 0.5d0 total))))

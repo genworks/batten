@@ -813,3 +813,15 @@ NLib: N_GetCompatibleKnotVectorToTol."
                 (incf (aref ki r)))))))
       (dotimes (r (1+ k) kna)
         (setf (svref kna r) (subseq (the real-vector (svref kna r)) 0 (1+ (aref kmx r))))))))
+
+;;; ------------------------------------------------------------- L4-g0
+
+(defun get-compatible-knot-array (knt k)
+  "The knots to insert into each of the knot vectors KNT[0..K] (a
+simple-vector of real-vectors) to make them compatible, knots closer than
+1e-8 counting as one: GET-COMPATIBLE-KNOT-VECTOR-TO-TOL with that tolerance.
+KNT may be changed in place.  Returns a fresh simple-vector of K+1
+real-vectors.
+NLib: N_GetCompatibleKnotArray."
+  (declare (type simple-vector knt) (type fixnum k))
+  (get-compatible-knot-vector-to-tol knt k 1.0d-08))
