@@ -1463,3 +1463,42 @@ is within the fractional tolerance XTOL or F falls to FTOL or below.  Returns
                   ((or (<= fu fv) (= v x) (= v w))
                    (setf v u fv fu))))))
     (values x fx)))
+
+;;; ------------------------------------------------------------------- L2-g3
+
+(defun real-matrix-lst-sq-solve (rma rhs sol)
+  "The least squares solution of RMA x = RHS, RMA having m+1 rows and n+1
+columns, m > n (its storage read as a full matrix), through the normal
+equations RMA^T RMA x = RMA^T RHS, solved by LU decomposition with partial
+pivoting.  SOL, a real-vector of at least n+1 allocated by the caller,
+receives x.  Signals :ind-err unless m > n, and the errors of the transpose,
+product, decomposition and solver.  Returns SOL.
+NLib: N_RealMatrixLstSqSolve."
+  (declare (type rmatrix rma) (type real-vector rhs sol))
+  (let ((m (rmatrix-n rma))
+        (n (rmatrix-m rma))
+        (rm (rmatrix-rm rma)))
+    (declare (type fixnum m n))
+    (when (<= m n)
+      (nurbs-error :ind-err 'real-matrix-lst-sq-solve))
+    ;; the transpose of RMA times RMA: the square (n+1)x(n+1) system
+    (let ((rmt (make-rmatrix))
+          (rmta (make-rmatrix)))
+      (real-matrix-transpose rma rmt)
+      (real-matrix-multiply rmt rma rmta)
+      ;; the transpose times RHS: the new right hand side
+      (let ((rm rm))
+        (declare (type real-matrix rm))
+        (fast
+          (do ((ii 0 (1+ ii))) ((> ii n))
+            (declare (type fixnum ii))
+            (setf (aref sol ii) 0d0)
+            (do ((kk 0 (1+ kk))) ((> kk m))
+              (declare (type fixnum kk))
+              (setf (aref sol ii) (+ (aref sol ii) (* (aref rm kk ii) (aref rhs kk))))))))
+      ;; decompose, then forward/backward substitution
+      (let ((ind (make-index-vector (1+ n))))
+        (declare (type index-vector ind))
+        (real-matrix-lu-decompose-pivot rmta ind)
+        (real-matrix-for-back-pivot rmta ind sol))))
+  sol)

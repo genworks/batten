@@ -756,3 +756,24 @@ that N_RealMatrixTranspose never writes: storage the C leaves uninitialized."
                                         bmtp bbw)
                                        (from-foreign arp :real-matrix (array-dimension ar 0)
                                                      (array-dimension ar 1)))))))))))))
+
+;;; ------------------------------------------------------------- L2-g3
+
+(define-oracle-test real-matrix-lst-sq-solve (:file "math" :trials 3000)
+  (let* ((n (rnd 6))
+         ;; m > n, now and then m <= n (:ind-err)
+         (m (if (zerop (rnd 20)) (rnd (1+ n)) (+ n 1 (rnd 8))))
+         (rma (%random-rmatrix (1+ m) (1+ n) batten::+mt-full+ :scale 10d0))
+         (a (batten::rmatrix-rm rma))
+         (rhs (random-real-vector (1+ m))))
+    ;; now and then rank deficient: a zero or a repeated column
+    (case (rnd 16)
+      (0 (let ((j (rnd (1+ n)))) (dotimes (i (1+ m)) (setf (aref a i j) 0d0))))
+      (1 (let ((j (rnd (1+ n))) (k (rnd (1+ n))))
+           (dotimes (i (1+ m)) (setf (aref a i j) (aref a i k))))))
+    (agree (list :m m :n n :a a :rhs rhs)
+           (list (batten::real-matrix-lst-sq-solve rma rhs (make-real-vector (1+ n))))
+           (with-foreign ((rp rma :rmatrix) (bp rhs :real-vector)
+                          (sp (make-real-vector (1+ n)) :real-vector))
+             (let ((err (c-flag-error-p (c-real-matrix-lst-sq-solve rp bp sp))))
+               (values err (unless err (list (from-foreign sp :real-vector (1+ n))))))))))
