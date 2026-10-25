@@ -65,3 +65,35 @@
                  (values (c-flag-error-p (c-get-closest-pt-on-srf sp pp u0 v0 top toc u v q d))
                          (list (cffi:mem-ref u :double) (cffi:mem-ref v :double)
                                (from-foreign q :point) (from-foreign d :point-net 3 3)))))))))
+
+;;; ------------------------------------------------------------- L4-g1
+
+(define-oracle-test approx-srf-with-quad-srf (:file "srf-geom" :trials 400)
+  (let* ((s (random-surface :max-degree 3 :max-extra 4 :two-d (zerop (rnd 8))))
+         (s (progn (when (zerop (rnd 8)) (%close-surface s +udir+))
+                   (when (zerop (rnd 8)) (%close-surface s +vdir+))
+                   s))
+         (tfl (if (zerop (rnd 2)) +relative+ +absolute+))
+         (tol (if (= tfl +relative+)
+                  (case (rnd 4) (0 0.2d0) (1 0.05d0) (2 0.02d0) (t 0.01d0))
+                  (case (rnd 4) (0 50d0) (1 20d0) (2 5d0) (t 2d0))))
+         (rfl (case (rnd 7) (0 0) ((1 2) +points+) ((3 4) +parameters+) (t +both+))))
+    (agree (list :surface s :tol tol :tfl tfl :rfl rfl)
+           (multiple-value-list (batten::approx-srf-with-quad-srf s tol tfl rfl))
+           (with-foreign ((sp s :surface))
+             (with-stacks (sg)
+               (with-scalars ((p :pointer) (u :pointer) (v :pointer) (n :long) (m :long))
+                 (let ((failed (c-flag-error-p (c-approx-srf-with-quad-srf sp tol tfl rfl p u v n m sg))))
+                   (values failed
+                           (unless failed
+                             (let ((n (cffi:mem-ref n :long)) (m (cffi:mem-ref m :long))
+                                   (pp (cffi:mem-ref p :pointer))
+                                   (up (cffi:mem-ref u :pointer))
+                                   (vp (cffi:mem-ref v :pointer)))
+                               (list (if (cffi:null-pointer-p pp) nil
+                                         (from-foreign pp :point-net (1+ n) (1+ m)))
+                                     (if (cffi:null-pointer-p up) nil
+                                         (from-foreign up :real-vector (1+ n)))
+                                     (if (cffi:null-pointer-p vp) nil
+                                         (from-foreign vp :real-vector (1+ m)))
+                                     n m)))))))))))

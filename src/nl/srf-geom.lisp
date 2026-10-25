@@ -262,3 +262,146 @@ NLib: N_GetClosestPtOnSrf."
         (incf k))
       (when (>= k itlim) (con-err))
       (values u v))))
+
+;;; ------------------------------------------------------------- L4-g1
+
+(declaim (inline %srf-geom-grow))
+(defun %srf-geom-grow (a need)
+  "A real-vector holding A's elements with room for index NEED: A itself when
+it is long enough, else a copy twice as long (or longer)."
+  (declare (type real-vector a) (type fixnum need))
+  (if (< need (length a))
+      a
+      (let ((b (make-real-vector (max (* 2 (length a)) (1+ need)))))
+        (replace b a)
+        b)))
+
+(defun approx-srf-with-quad-srf (sur tol tfl rfl)
+  "A piecewise quadrilateral approximation of surface SUR: its parameter
+rectangle is split in half, in u or v as srf-is-flat-cheap advises, until
+every patch is flat to within TOL (TFL +absolute+; +relative+ scales TOL by
+the diagonal of SUR's bounding box).  Returns (values P U V N M): the grid of
+surface points P[0..N][0..M] (a point-net, when RFL is +points+ or +both+,
+else nil), the grid parameters U[0..N] and V[0..M] (when RFL is +parameters+
+or +both+, else nil) and the highest indexes N and M.  Signals what
+srf-extract-patch, srf-is-flat-cheap and srf-eval-pt signal.  (The C's
+growing work arrays, sized by function-static counts, only hold the stack
+and the grid; their sizes do not affect the result.)
+NLib: N_ApproxSrfWithQuadSrf."
+  (declare (type surface sur) (type double-float tol) (type fixnum tfl rfl))
+  (let* ((us (surface-knots-u sur))
+         (vs (surface-knots-v sur))
+         (rs (1- (length us)))
+         (ss (1- (length vs)))
+         (s-ul (make-real-vector 41))
+         (s-ur (make-real-vector 41))
+         (s-vb (make-real-vector 41))
+         (s-vt (make-real-vector 41))
+         (uu (make-real-vector 101))
+         (vv (make-real-vector 101))
+         (ts 0) (tu 1) (tv 1)
+         (pts nil) (uo nil) (vo nil))
+    (declare (type real-vector us vs s-ul s-ur s-vb s-vt uu vv) (type fixnum rs ss ts tu tv))
+    ;; adjust the tolerance
+    (when (= tfl +relative+)
+      (setf tol (* (srf-max-diag-dist-b-box sur) tol)))
+    ;; initialize
+    (setf (aref s-ul 0) (aref us 0)
+          (aref s-ur 0) (aref us rs)
+          (aref s-vb 0) (aref vs 0)
+          (aref s-vt 0) (aref vs ss))
+    (setf (aref uu 0) (aref us 0)
+          (aref uu 1) (aref us rs)
+          (aref vv 0) (aref vs 0)
+          (aref vv 1) (aref vs ss))
+    ;; subdivide the surface
+    (do () ((< ts 0))
+      (let ((ul (aref s-ul ts))
+            (ur (aref s-ur ts))
+            (vb (aref s-vb ts))
+            (vt (aref s-vt ts)))
+        (declare (type double-float ul ur vb vt))
+        (decf ts)
+        ;; extract the patch and check its flatness
+        (multiple-value-bind (flt dir) (srf-is-flat-cheap (srf-extract-patch sur ul ur vb vt) tol)
+          (declare (type fixnum flt dir))
+          (when (= flt +no+)
+            ;; room for the new rectangles and the new grid value
+            (setf s-ul (%srf-geom-grow s-ul (+ ts 2))
+                  s-ur (%srf-geom-grow s-ur (+ ts 2))
+                  s-vb (%srf-geom-grow s-vb (+ ts 2))
+                  s-vt (%srf-geom-grow s-vt (+ ts 2)))
+            (if (= dir +udir+)
+                (setf vv (%srf-geom-grow vv (1+ tv)))
+                (setf uu (%srf-geom-grow uu (1+ tu))))
+            ;; subdivision points, and the new rectangles on the stack
+            (if (= dir +udir+)
+                (let ((vm (* 0.5d0 (+ vb vt)))
+                      (first 0)
+                      (last tv))
+                  (declare (type double-float vm) (type fixnum first last))
+                  (do () ((> first last))
+                    (let ((mid (truncate (+ first last) 2)))
+                      (declare (type fixnum mid))
+                      (when (< (abs (- (aref vv mid) vm)) *ptol*)
+                        (return))
+                      (if (< vm (aref vv mid))
+                          (setf last (1- mid))
+                          (setf first (1+ mid)))))
+                  (when (> first last)
+                    (do ((j tv (1- j))) ((< j (1+ last)))
+                      (declare (type fixnum j))
+                      (setf (aref vv (1+ j)) (aref vv j)))
+                    (setf (aref vv (1+ last)) vm)
+                    (incf tv))
+                  (setf (aref s-ul (+ ts 1)) ul
+                        (aref s-ur (+ ts 1)) ur
+                        (aref s-vb (+ ts 1)) vb
+                        (aref s-vt (+ ts 1)) vm
+                        (aref s-ul (+ ts 2)) ul
+                        (aref s-ur (+ ts 2)) ur
+                        (aref s-vb (+ ts 2)) vm
+                        (aref s-vt (+ ts 2)) vt))
+                (let ((um (* 0.5d0 (+ ul ur)))
+                      (first 0)
+                      (last tu))
+                  (declare (type double-float um) (type fixnum first last))
+                  (do () ((> first last))
+                    (let ((mid (truncate (+ first last) 2)))
+                      (declare (type fixnum mid))
+                      (when (< (abs (- (aref uu mid) um)) *ptol*)
+                        (return))
+                      (if (< um (aref uu mid))
+                          (setf last (1- mid))
+                          (setf first (1+ mid)))))
+                  (when (> first last)
+                    (do ((i tu (1- i))) ((< i (1+ last)))
+                      (declare (type fixnum i))
+                      (setf (aref uu (1+ i)) (aref uu i)))
+                    (setf (aref uu (1+ last)) um)
+                    (incf tu))
+                  (setf (aref s-ul (+ ts 1)) ul
+                        (aref s-ur (+ ts 1)) um
+                        (aref s-vb (+ ts 1)) vb
+                        (aref s-vt (+ ts 1)) vt
+                        (aref s-ul (+ ts 2)) um
+                        (aref s-ur (+ ts 2)) ur
+                        (aref s-vb (+ ts 2)) vb
+                        (aref s-vt (+ ts 2)) vt)))
+            (incf ts 2)))))
+    ;; the output
+    (when (or (= rfl +points+) (= rfl +both+))
+      (let ((q (make-point-net (1+ tu) (1+ tv)))
+            (s (make-point)))
+        (declare (type point-net q) (dynamic-extent s))
+        (dotimes (i (1+ tu))
+          (dotimes (j (1+ tv))
+            (srf-eval-pt sur (aref uu i) (aref vv j) +left+ +left+ s)
+            (%pt-net s q i j)))
+        (setf pts q)))
+    (when (or (= rfl +parameters+) (= rfl +both+))
+      (setf uo (make-real-vector (1+ tu))
+            vo (make-real-vector (1+ tv)))
+      (replace uo uu :end2 (1+ tu))
+      (replace vo vv :end2 (1+ tv)))
+    (values pts uo vo tu tv)))
