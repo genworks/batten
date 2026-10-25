@@ -378,3 +378,230 @@ NLib: N_ApproxCrvWithPolyline."
                 (when want-pars
                   (subseq (the real-vector parms) 0 (1+ nn)))
                 nn)))))
+
+;;; ------------------------------------------------------------- L6-g0
+
+(defun crv-geom--st-bezlen (pw p ls eps len tl tr ul ur fin)
+  "Add up the length of the degree-P Bezier curve PW, subdividing at the
+middle until a piece's control polygon and chord differ by at most EPS, to
+LEN (the sums of polygon and chord, twice the lengths) until the total would
+exceed LS: then FIN becomes +yes+ and UL, UR the piece's local parameters in
+[TL, TR].  EPS, LEN, UL, UR and FIN are the C's in-out cells: returns their
+new values (values eps len ul ur fin).
+NLib: ST_bezlen (NL_CrvGeom.cpp)."
+  (declare (type cpoint-array pw) (type fixnum p fin)
+           (type double-float ls eps len tl tr ul ur))
+  (when (= fin +no+)
+    (let ((a (make-cpoint)) (b (make-cpoint)))
+      (declare (dynamic-extent a b))
+      ;; upper and lower bounds
+      (let* ((ub (dist-c-polygon pw p))
+             (lb (dist-cpt-cpt (%row-c-pt pw 0 a) (%row-c-pt pw p b)))
+             (del (abs (- ub lb))))
+        (declare (type double-float ub lb del))
+        ;; total length or recurse
+        (if (<= del eps)
+            (if (> (+ (+ len ub) lb) ls)
+                (setf fin +yes+
+                      ul tl
+                      ur tr)
+                (setf len (+ len (+ ub lb))
+                      eps del))
+            (let ((qw (make-cpoint-array (1+ p)))
+                  (rw (make-cpoint-array (1+ p))))
+              (bez-split pw p 0.5d0 qw rw)
+              (let ((epl (/ eps 2.0d0))
+                    (tm (* 0.5d0 (+ tl tr))))
+                (declare (type double-float epl tm))
+                (multiple-value-setq (epl len ul ur fin)
+                  (crv-geom--st-bezlen qw p ls epl len tl tm ul ur fin))
+                (when (= fin +no+)
+                  (let ((epr (- eps epl)))
+                    (declare (type double-float epr))
+                    (multiple-value-setq (epr len ul ur fin)
+                      (crv-geom--st-bezlen rw p ls epr len tm tr ul ur fin))
+                    (setf eps (+ epl epr))))))))))
+  (values eps len ul ur fin))
+
+(defun crv-percentage-along-pt (cur per atl ctl flg len p)
+  "The point of curve CUR at fraction PER (in [0, 1], else :inp-err) of its
+arc length from the start, to tolerance ATL, absolute (FLG +absolute+) or
+relative to the control polygon's extent (+relative+; another FLG signals
+:cal-err).  LEN is the curve's length if known, or negative to have it
+computed.  CTL is crv-get-type's tolerance: a degree-1 line is interpolated
+in its parameter, a circular arc solved exactly (its parameter found by
+crv-closest-pt); otherwise the curve (reversed when PER > 0.5) is decomposed
+into Bezier pieces, measured up to the one holding the point, which is
+subdivided and then bisected.  Writes the point into P and returns
+(values len up): the length and the point's parameter.  Signals what
+crv-arc-length, crv-get-type, crv-closest-pt, bez-calc-length,
+crv-extract-crv-seg and crv-eval signal.
+NLib: N_CrvPercentageAlongPt."
+  (declare (type curve cur) (type double-float per atl ctl len)
+           (type fixnum flg) (type point p))
+  ;; check input
+  (when (or (< per 0d0) (> per 1d0))
+    (nurbs-error :inp-err 'crv-percentage-along-pt))
+  ;; adjust the tolerance
+  (let ((ltol (cond ((= flg +relative+) (* (crv-get-b-box-max-diag-dist cur) atl))
+                    ((= flg +absolute+) atl)
+                    (t (nurbs-error :cal-err 'crv-percentage-along-pt))))
+        (u (curve-knots cur))
+        (m (curve-m cur))
+        (up 0d0))
+    (declare (type double-float ltol up) (type real-vector u) (type fixnum m))
+    ;; the total length if not passed in
+    (when (< len 0d0)
+      (setf len (crv-arc-length cur (aref u 0) (aref u m) atl flg)))
+    ;; special cases
+    (let ((aa (make-point)) (bb (make-point)) (xx (make-point)) (yy (make-point)))
+      (declare (dynamic-extent aa bb xx yy))
+      (multiple-value-bind (d al typ) (crv-get-type cur ctl aa bb xx yy)
+        (declare (type double-float d al) (type fixnum typ))
+        (when (and (= typ +nline+) (= (curve-degree cur) 1))
+          (setf up (+ (aref u 0) (* per (- (aref u m) (aref u 0)))))
+          (crv-eval cur up +left+ p)
+          (return-from crv-percentage-along-pt (values len up)))
+        (when (= typ +ncircle+)
+          ;; the C goes on only when N_CrvClosestPt returns NL_CON_ERR, which
+          ;; a flag (0 or 1) never equals
+          (let* ((ll (* (* (/ al 180.0d0) +pi+) d))
+                 (lp (* per ll))
+                 (al (/ lp d))
+                 (ul (* d (cos al)))
+                 (ur (* d (sin al)))
+                 (um 0d0)
+                 (tol (nl-min *mtol* ltol)))
+            (declare (type double-float ll lp al ul ur um tol))
+            (translate-sum-2-pts aa ul xx ur yy p)
+            (setf um (+ (aref u 0) (* (/ lp ll) (- (aref u m) (aref u 0)))))
+            (setf up (crv-closest-pt cur p um tol tol aa))
+            (return-from crv-percentage-along-pt (values len up))))))
+    ;; reverse the curve if necessary
+    (let* ((rev (> per 0.5d0))
+           (per (if rev (- 1.0d0 per) per))
+           (cura (if rev (crv-reverse cur) cur))
+           (pw (curve-cpoints cura))
+           (p* (curve-degree cura))
+           (u (curve-knots cura))
+           (m (curve-m cura))
+           (nsp (basis-get-span-count u p*))
+           (eps (/ ltol (float nsp 1d0)))
+           (ll 0d0)
+           (bw (make-cpoint-array (1+ p*)))
+           (nw (make-cpoint-array (1+ p*)))
+           (alfs (make-real-vector (1+ p*)))
+           (omas (make-real-vector (1+ p*)))
+           (a p*) (b (1+ p*)) (r -1)
+           (lp (* per len)))
+      (declare (type double-float per eps ll lp) (type cpoint-array pw bw nw)
+               (type real-vector u alfs omas) (type fixnum p* m nsp a b r))
+      (dotimes (i (1+ p*))
+        (%copy-c-pt-row pw i bw i))
+      ;; decompose the curve and measure each Bezier piece
+      (do () ((not (< b m)))
+        (let ((i b))
+          (declare (type fixnum i))
+          (do () ((not (and (< b m) (= (aref u b) (aref u (1+ b))))))
+            (incf b))
+          (let ((mlt (+ (- b i) 1)))
+            (declare (type fixnum mlt))
+            (setf r (- p* mlt))
+            (when (> r 0)
+              (let ((num (- (aref u b) (aref u a))))
+                (declare (type double-float num))
+                (do ((k p* (1- k))) ((<= k mlt))
+                  (declare (type fixnum k))
+                  (setf (aref alfs (- k mlt 1)) (/ num (- (aref u (+ a k)) (aref u a))))
+                  (setf (aref omas (- k mlt 1)) (- 1.0d0 (aref alfs (- k mlt 1))))))
+              (do ((j 1 (1+ j))) ((> j r))
+                (declare (type fixnum j))
+                (let ((save (- r j)) (s (+ mlt j)))
+                  (declare (type fixnum save s))
+                  (do ((k p* (1- k))) ((< k s))
+                    (declare (type fixnum k))
+                    (%combine-2-c-pt-rows (aref alfs (- k s)) bw k (aref omas (- k s)) bw (1- k) bw k))
+                  (%copy-c-pt-row bw p* nw save))))))
+        ;; the length of the Bezier segment
+        (let ((lbz (bez-calc-length bw p* eps)))
+          (declare (type double-float lbz))
+          (if (< (+ ll lbz) lp)
+              (incf ll lbz)
+              (return)))
+        ;; initialize for the next pass
+        (when (< b m)
+          (dotimes (i r)
+            (%copy-c-pt-row nw i bw i))
+          (do ((i r (1+ i))) ((> i p*))
+            (declare (type fixnum i))
+            (%copy-c-pt-row pw (+ (- b p*) i) bw i))
+          (setf a b)
+          (incf b)))
+      ;; the length of the leftover piece
+      (let* ((ld (- lp ll))
+             (ls (* 2.0d0 ld))
+             (epl (* 2.0d0 ltol))
+             (lr 0d0) (ul 1.0d0) (ur 1.0d0) (fin +no+))
+        (declare (type double-float ld ls epl lr ul ur) (type fixnum fin))
+        (multiple-value-setq (epl lr ul ur fin)
+          (crv-geom--st-bezlen bw p* ls epl lr 0.0d0 1.0d0 ul ur fin))
+        (setf lr (* 0.5d0 lr))
+        ;; extract the remaining piece
+        (setf ul (+ (aref u a) (* ul (- (aref u b) (aref u a))))
+              ur (+ (aref u a) (* ur (- (aref u b) (aref u a)))))
+        (let ((us ul) (um 0d0))
+          (declare (type double-float us um))
+          (setf ld (- ld lr))
+          (setf up ul)
+          (when (> ld ltol)
+            (let ((curb (crv-extract-crv-seg cura ul ur)))
+              (do () (nil)
+                (setf um (* 0.5d0 (+ ul ur)))
+                (let ((l (crv-arc-length curb us um ltol flg)))
+                  (declare (type double-float l))
+                  (cond ((< (abs (- l ld)) ltol) (return))
+                        ((< l ld) (setf ul um))
+                        ((> l ld) (setf ur um)))))
+              (setf up um)))))
+      (when rev
+        (setf up (- (+ (aref u m) (aref u 0)) up)))
+      (crv-eval cur up +left+ p)
+      (values len up))))
+
+(defun crv-project-pts (cur p k tol)
+  "Project the points P[0..K] (a point-array, meant to lie on curve CUR, in
+the curve's direction) onto the polyline approximating CUR to the relative
+tolerance TOL, each onto the first leg from the previous point's leg on
+whose segment it projects.  Returns (values tt u): TT a point-array of the
+K+1 projections and U a real-vector of their parameters, interpolated
+linearly along the leg.  Signals :num-err when a point projects onto no leg,
+and what approx-crv-with-polyline and project-pt-line-param signal.
+NLib: N_CrvProjectPts."
+  (declare (type curve cur) (type point-array p) (type fixnum k) (type double-float tol))
+  ;; decompose the curve
+  (multiple-value-bind (q tt m) (approx-crv-with-polyline cur tol +relative+ +both+)
+    (declare (type point-array q) (type real-vector tt) (type fixnum m))
+    (let ((ul (make-real-vector (1+ k)))
+          (tl (make-point-array (1+ k)))
+          (js 0)
+          (pi* (make-point)) (q0 (make-point)) (q1 (make-point)) (r (make-point)))
+      (declare (type real-vector ul) (type point-array tl) (type fixnum js)
+               (dynamic-extent pi* q0 q1 r))
+      ;; project the points and find their parameters
+      (dotimes (i (1+ k))
+        (setf (aref ul i) +bigd+)
+        (%row-pt p i pi*)
+        (do ((j js (1+ j))) ((>= j m))
+          (declare (type fixnum j))
+          (%row-pt q j q0)
+          (%row-pt q (1+ j) q1)
+          (let ((alf (project-pt-line-param pi* q0 q1 r)))
+            (declare (type double-float alf))
+            (when (and (>= alf 0d0) (<= alf 1d0))
+              (setf (aref ul i) (+ (aref tt j) (* alf (- (aref tt (1+ j)) (aref tt j)))))
+              (%pt-row r tl i)
+              (setf js j)
+              (return))))
+        (when (= (aref ul i) +bigd+)
+          (nurbs-error :num-err 'crv-project-pts)))
+      (values tl ul))))

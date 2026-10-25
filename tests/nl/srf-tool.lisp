@@ -356,3 +356,22 @@ domains (exactly) and drawing interior knots from a shared pool."
                                (let ((out nil))
                                  (dotimes (i (1+ k) (nreverse out))
                                    (push (from-foreign (cffi:mem-aref sp :pointer i) :surface) out)))))))))))))
+
+(define-oracle-test make-srfs-compatible-uv (:file "srf-tool" :trials 800)
+  (multiple-value-bind (surfaces k) (%msc-surfaces)
+    (agree (list :surfaces surfaces :k k)
+           (let ((sc (map 'simple-vector #'%copy-surface-deep surfaces)))
+             (coerce (batten::make-srfs-compatible-uv sc k) 'list))
+           (with-stacks (s)
+             (cffi:with-foreign-objects ((sp :pointer (1+ k)))
+               ;; TO-FOREIGN inside WITH-FOREIGN: the copies are freed with it
+               (with-foreign ((dummy (make-real-vector 1) :real-vector))
+                 (declare (ignore dummy))
+                 (dotimes (i (1+ k))
+                   (setf (cffi:mem-aref sp :pointer i) (to-foreign (svref surfaces i) :surface)))
+                 (let ((failed (c-flag-error-p (c-make-srfs-compatible-uv sp k s))))
+                   (values failed
+                           (unless failed
+                             (let ((out nil))
+                               (dotimes (i (1+ k) (nreverse out))
+                                 (push (from-foreign (cffi:mem-aref sp :pointer i) :surface) out))))))))))))

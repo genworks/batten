@@ -2399,3 +2399,100 @@ NLib: N_FitCrvPtsNormals."
         (vector-cross mv ni tv)
         (%pt-row tv tdir i)))
     (fit-crv-first-deriv pts tdir kk p +tangent+ +centripetal+)))
+
+;;; ------------------------------------------------------------- L6-g0
+
+(defun fit-arc-to-pts (p n tol etp arc cit)
+  "The least-squares circle or circular arc to the 2D points P[0..N] (a
+point-array; N at least 1, else :inp-err), or the least-squares line segment
+when the points are collinear -- the maximum (ETP +maximum+) or average
+(+average+; another ETP signals :cal-err) distance from the line below TOL --
+or when the line's average error is below the circle's.  ARC +no+ gives the
+full circle, +yes+ the arc spanning the points (leaving out the largest gap
+in their angles); CIT is create-circ-arc's kind (+quadratic+, +quartic+ or
++quintic+).  As in line-fit-pts, the z of 2D points is set to +no-z+ in P.
+Returns (values cur cut era erm): the fresh curve, its type +nline+ or
++ncircle+, and the average and maximum absolute errors.  Signals what
+line-fit-pts, create-circ-from-2d-pts, project-pt-line-param,
+vector-directed-angle and create-circ-arc signal.
+NLib: N_FitArcToPts."
+  (declare (type point-array p) (type fixnum n etp arc cit) (type double-float tol))
+  ;; check input
+  (when (< n 1)
+    (nurbs-error :inp-err 'fit-arc-to-pts))
+  (let ((cc (make-point)) (vv (make-point)) (dd (make-point))
+        (a (make-point)) (b (make-point)) (pi* (make-point))
+        (xx (make-point)) (yy (make-point))
+        (pli +no+) (lfi +no+) (cfi +no+)
+        (cea 0d0) (cem 0d0) (cx 0d0) (cy 0d0) (rr 0d0))
+    (declare (dynamic-extent cc vv dd a b pi* xx yy)
+             (type fixnum pli lfi cfi) (type double-float cea cem cx cy rr))
+    ;; fit a line first and check whether the points are collinear
+    (multiple-value-bind (lea lem) (line-fit-pts p n cc vv)
+      (declare (type double-float lea lem))
+      (cond ((= etp +maximum+) (when (< lem tol) (setf pli +yes+)))
+            ((= etp +average+) (when (< lea tol) (setf pli +yes+)))
+            (t (nurbs-error :cal-err 'fit-arc-to-pts)))
+      ;; if the points are not collinear, attempt to fit a circle
+      (if (= pli +no+)
+          (multiple-value-bind (cx1 cy1 rr1 cea1 cem1 cfl) (create-circ-from-2d-pts p n tol etp)
+            (declare (type double-float cx1 cy1 rr1 cea1 cem1) (type fixnum cfl))
+            (setf cx cx1 cy cy1 rr rr1 cea cea1 cem cem1)
+            (if (= cfl +true+)
+                (if (< lea cea)
+                    (setf lfi +yes+)
+                    (setf cfi +yes+))
+                (setf lfi +yes+)))
+          (setf lfi +yes+))
+      ;; the line: the points are collinear, or its average error is smaller
+      (when (= lfi +yes+)
+        (vector-sum cc vv dd)
+        (let ((tmin +bigd+) (tmax -1.0d0) (imin 0) (imax 0))
+          (declare (type double-float tmin tmax) (type fixnum imin imax))
+          (dotimes (i (1+ n))
+            (let ((tt (project-pt-line-param (%row-pt p i pi*) cc dd a)))
+              (declare (type double-float tt))
+              (when (< tt tmin)
+                (setf tmin tt
+                      imin i))
+              (when (> tt tmax)
+                (setf tmax tt
+                      imax i))))
+          (project-pt-line-param (%row-pt p imin pi*) cc dd a)
+          (project-pt-line-param (%row-pt p imax pi*) cc dd b)
+          (vector-diff b a vv)
+          (return-from fit-arc-to-pts
+            (values (crv-line-from-pt-and-vector a vv) +nline+ lea lem))))
+      ;; the circle: its average error is smaller
+      (when (= cfi +yes+)
+        (vector-create 1.0d0 0.0d0 0.0d0 xx)
+        (vector-create 0.0d0 1.0d0 0.0d0 yy)
+        (vector-create cx cy 0.0d0 cc)
+        (let ((as 0d0) (ae 0d0))
+          (declare (type double-float as ae))
+          (if (= arc +no+)
+              (setf as 0.0d0
+                    ae 360.0d0)
+              (let ((alf (make-real-vector (+ n 2)))
+                    (gap -1.0d0)
+                    (ig 0))
+                (declare (type real-vector alf) (type double-float gap) (type fixnum ig))
+                ;; the sweep angles
+                (dotimes (i (1+ n))
+                  (vector-diff (%row-pt p i pi*) cc vv)
+                  (setf (aref alf i) (vector-directed-angle xx vv)))
+                ;; sort them
+                (shell-sort-real alf n)
+                (setf (aref alf (1+ n)) (+ 360.0d0 (aref alf 0)))
+                ;; the largest gap
+                (dotimes (i (1+ n))
+                  (let ((dal (abs (- (aref alf (1+ i)) (aref alf i)))))
+                    (declare (type double-float dal))
+                    (when (> dal gap)
+                      (setf gap dal
+                            ig i))))
+                (setf as (aref alf (1+ ig))
+                      ae (aref alf ig))
+                (when (> as 360.0d0) (decf as 360.0d0))
+                (when (> ae 360.0d0) (decf ae 360.0d0))))
+          (values (create-circ-arc cc xx yy rr as ae cit) +ncircle+ cea cem))))))
