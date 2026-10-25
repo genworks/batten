@@ -37,6 +37,18 @@
                (fboundp s))
       (import s :batten-tests))))
 
+;;; NLib's constants (+udir+, +epoint+, +mt-banded+ ...) are written unqualified
+;;; in tests, like the exported +left+ and +true+.
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (do-symbols (s :batten)
+    (let ((name (symbol-name s)))
+      (when (and (eq (symbol-package s) (find-package :batten))
+                 (> (length name) 2)
+                 (char= #\+ (char name 0) (char name (1- (length name))))
+                 (constantp s)
+                 (null (find-symbol name :batten-tests)))
+        (import s :batten-tests)))))
+
 (defvar *tests* (make-hash-table :test 'equal) "name -> (file trials function)")
 (defvar *tally* nil "The tally of the test now running.")
 (defvar *verbose* nil)
@@ -86,17 +98,21 @@
                    (surface-knots-v s) (surface-cpoints s)))
     (cfun (list (cfun-degree s) (cfun-knots s) (cfun-vals s)))
     (sfun (list (sfun-degree-u s) (sfun-degree-v s) (sfun-knots-u s) (sfun-knots-v s) (sfun-vals s)))
+    (batten::rmatrix (list (batten::rmatrix-n s) (batten::rmatrix-m s) (batten::rmatrix-rm s)
+                           (batten::rmatrix-mtp s) (batten::rmatrix-bw s)))
     (batten::lineseg (list (batten::lineseg-p s) (batten::lineseg-v s) (batten::lineseg-bounded s)))
     (batten::plane (list (batten::plane-p s) (batten::plane-n s)))))
 
 (defmacro agree (case lisp-form c-form)
   "Run LISP-FORM (a list of results; may signal NURBS-ERROR) and C-FORM
 ((values error-p results)) and record their agreement in the running tally.
-CASE describes the input, kept for the first mismatch."
+CASE describes the input, kept for the first mismatch.  Both forms run with
+floating-point traps masked, as C runs (batten::with-c-float-environment)."
   `(let ((lisp-results nil) (lisp-failed nil))
-     (handler-case (setf lisp-results ,lisp-form)
-       (nurbs-error () (setf lisp-failed t)))
-     (multiple-value-bind (c-failed c-results) ,c-form
+     (batten::with-c-float-environment
+       (handler-case (setf lisp-results ,lisp-form)
+         (nurbs-error () (setf lisp-failed t))))
+     (multiple-value-bind (c-failed c-results) (batten::with-c-float-environment ,c-form)
        (record-agreement lisp-failed lisp-results c-failed c-results (lambda () ,case)))))
 
 (defun record-agreement (lisp-failed lisp-results c-failed c-results case-thunk)

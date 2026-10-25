@@ -49,6 +49,7 @@
 (cffi:defcstruct nl-minmaxbox (xl :double) (xr :double) (yb :double) (yt :double) (zn :double) (zf :double))
 (cffi:defcstruct nl-lineseg (p (:struct nl-point)) (v (:struct nl-point)) (bounded :short))
 (cffi:defcstruct nl-plane (p (:struct nl-point)) (n (:struct nl-point)))
+(cffi:defcstruct nl-rmatrix (n :long) (m :long) (rm :pointer) (mtp :int) (bw :long))
 
 ;;; NL_STACKS is opaque here: 352 bytes in SMLib 10, allocated generously.
 (defconstant +stacks-bytes+ 1024)
@@ -64,10 +65,12 @@ is freed afterwards, so read results out inside BODY."
 
 (defmacro with-scalars (bindings &body body)
   "BINDINGS: ((var type) ...), each a fresh foreign cell (zeroed) for a C scalar
-output argument; read with (cffi:mem-ref var type)."
+output argument; read with (cffi:mem-ref var type).  TYPE :pointer gives a cell
+for an output pointer (NL_REAL **, NL_POINT ** ...), initially NULL."
   `(cffi:with-foreign-objects ,(mapcar (lambda (b) (list (first b) (second b))) bindings)
      ,@(mapcar (lambda (b) `(setf (cffi:mem-ref ,(first b) ,(second b)) ,(ecase (second b)
                                                                             ((:double) 0d0)
-                                                                            ((:long :short :int :unsigned-long) 0))))
+                                                                            ((:long :short :int :unsigned-long) 0)
+                                                                            ((:pointer) '(cffi:null-pointer)))))
                bindings)
      ,@body))

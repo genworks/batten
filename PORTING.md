@@ -63,6 +63,9 @@ Your own helpers, which are not NLib routines, start with `%`.
 | `NL_CFUN`, `NL_SFUN` | `cfun`, `sfun` (degree(s), knots, `vals`) |
 | `NL_INTERVAL`, `NL_RECTANGLE`, `NL_MINMAXBOX` | `real-vector` of 2, 4, 6 in C field order |
 | `NL_LINESEG`, `NL_PLANE` | `lineseg`, `plane` structures |
+| `NL_RMATRIX` | `rmatrix` structure (n, m, rm, mtp, bw); `(make-rmatrix)` is the NULL matrix; `+mt-full+` ... `+mt-banded+` |
+| `NL_REAL ***` | `real-3d-array`, `(* * *)` |
+| `NL_INTEGER **` | `index-matrix`, a fixnum `(* *)` |
 
 `NL_NOZ` and `NL_NOW` stay inside the coordinate arrays as `+no-z+` and
 `+no-w+`, exactly where the C has them.  NLib's globals are `*mtol*`, `*ptol*`,
@@ -80,7 +83,8 @@ Arguments in C order, with these changes:
   NLib error constant's name.  Callers that `NL_OUT` on a callee's error just
   let the condition propagate.  **Where a C caller ignores a callee's error, or
   inspects it and carries on, the Lisp caller catches `nurbs-error` and carries
-  on the same way** (see `srf-eval-pt-normal-at-pole`).
+  on the same way** (see `srf-eval-pt-normal-at-pole`).  Where the C leaves
+  through `NL_QUIT` with no error code set, signal `(nurbs-error :quit 'routine)`.
 - **`NL_STACKS *`** arguments disappear; allocate Lisp arrays instead.
 - **Scalar outputs** (`NL_REAL *`, `NL_INDEX *`, `NL_FLAG *` holding one value)
   are returned as values, after the C return value if that is not an error
@@ -123,6 +127,28 @@ Same bits means same operations:
   same libm on Linux.
 - Do not "simplify" or merge computations, even when they look redundant; two
   NLib routines computing the same quantity differently must stay different.
+- Floating-point traps are masked, as in C (`with-c-float-environment`): a
+  division by zero gives an infinity, an invalid operation a NaN.  Port the C's
+  own guards (`float-op-is-bad` ...) and nothing more; the test harness runs
+  both sides in this environment.
+
+## Shared helpers
+
+Use these rather than writing private copies (`src/nl/math.lisp`):
+
+- Rows and net entries: C hands `Pw[i]` or `Pw[i][j]` straight to
+  `N_CopyCPt`, `N_Combine2CPts` and the like.  `%row-c-pt`, `%c-pt-row`,
+  `%row-pt`, `%pt-row`, `%net-c-pt`, `%c-pt-net`, `%net-pt`, `%pt-net` move one
+  row or entry to or from a scratch point; `%copy-c-pt-row`, `%copy-pt-row`,
+  `%copy-c-pt-net`, `%combine-2-c-pt-rows` and `%vector-blend-c-pt-row` do the
+  NLib operation on rows directly, with NLib's arithmetic.
+- `%check-mem-real-matrix`: `N_CheckMemRealMatrix` for an optional
+  caller-allocated `NL_RMATRIX` output.
+- `knot-vector-is-end-param`, `knot-vector-is-param-out-of-bounds`
+  (`basis-basic.lisp`); `crv-decompose-bez` (`crv-tool.lisp`).
+
+Look in the lower-level files for what is already ported before writing a
+helper: `git grep -n "(defun NAME"` in your worktree.
 
 ## Style
 
@@ -160,9 +186,13 @@ exactly its Lisp name** in `tests/nl/<stem>.lisp`.  The core tests
   `tests/oracle-bindings.lisp`, each with its C signature as a comment).
   Structs C passes by value are passed by pointer.
 - `with-foreign`, `with-foreign-out`, `from-foreign` move objects across
-  (`tests/marshal.lisp` lists the types); `with-scalars` gives cells for scalar
-  outputs; `with-stacks` gives an `NL_STACKS` for C routines that take one --
-  read results back inside it.
+  (`tests/marshal.lisp` lists the types, `:rmatrix`, `:cnet`, `:index-matrix`
+  and `:real-3d` among them); `with-scalars` gives cells for scalar outputs,
+  and `:pointer` cells for pointer outputs (`NL_REAL **`, `NL_CURVE ***` ...);
+  `with-stacks` gives an `NL_STACKS` for C routines that take one -- read
+  results back inside it.
+- NLib's constants (`+udir+`, `+epoint+`, `+mt-banded+` ...) are visible in
+  tests unqualified; other Batten internals are `batten::name`.
 - Inputs: `random-curve`, `random-surface`, `random-cfun`, `random-sfun`,
   `random-points`, `random-parameter` ... (`tests/random.lisp`).  Cover the
   branches the C has: degrees, rational and not, 2D, parameters at knots and

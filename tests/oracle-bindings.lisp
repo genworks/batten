@@ -27,6 +27,10 @@
 (cffi:defcfun ("shim_N_KnotVectorIsParamOutOfBounds" c-knot-vector-is-param-out-of-bounds) :short
   (knt :pointer) (u :double) (rname :pointer))
 
+;; NL_FLAG N_KnotVectorIsEndParam(NL_KNOTVECTOR * knt, NL_PARAMETER u, const TCHAR * rname)
+(cffi:defcfun ("shim_N_KnotVectorIsEndParam" c-knot-vector-is-end-param) :short
+  (knt :pointer) (u :double) (rname :pointer))
+
 ;; NL_FLAG N_KnotVectorIsValid(NL_KNOTVECTOR *knt, NL_DEGREE p, NL_STRING rname)
 (cffi:defcfun ("shim_N_KnotVectorIsValid" c-knot-vector-is-valid) :short
   (knt :pointer) (p :short) (rname :pointer))
@@ -270,6 +274,10 @@
 ;; NL_CURVE * N_AllocCrvAndArrays(NL_INDEX n, NL_DEGREE p, NL_INDEX m, NL_STACKS *S)
 (cffi:defcfun ("shim_N_AllocCrvAndArrays" c-alloc-crv-and-arrays) :pointer
   (n :long) (p :short) (m :long) (s :pointer))
+
+;; NL_CURVE ** N_Alloc1dArrayCrvs(NL_INDEX n, NL_DEGREE p, NL_INDEX m, NL_INDEX k, NL_STACKS *S)
+(cffi:defcfun ("shim_N_Alloc1dArrayCrvs" c-alloc-1d-array-crvs) :pointer
+  (n :long) (p :short) (m :long) (k :long) (s :pointer))
 
 ;; NL_CURVE ** N_AllocArrayCrvPtrs(NL_INDEX k, NL_STACKS *S)
 (cffi:defcfun ("shim_N_AllocArrayCrvPtrs" c-alloc-array-crv-ptrs) :pointer
@@ -591,6 +599,10 @@
 (cffi:defcfun ("shim_N_CrvProjectPts" c-crv-project-pts) :short
   (cur :pointer) (p :pointer) (k :long) (tol :double) (t* :pointer) (u :pointer) (sg :pointer))
 
+;; NL_FLAG N_CrvEvalCurvature(NL_CURVE *cur, NL_PARAMETER u, NL_FLAG ufl, NL_REAL *kap, NL_POINT *P, NL_VECTOR *T, NL_FLAG cfl, NL_POINT *C, NL_VECTOR *N)
+(cffi:defcfun ("shim_N_CrvEvalCurvature" c-crv-eval-curvature) :short
+  (cur :pointer) (u :double) (ufl :short) (kap :pointer) (p :pointer) (t* :pointer) (cfl :short) (c :pointer) (n :pointer))
+
 ;; NL_FLAG N_CrvEval(NL_CURVE *cur, NL_PARAMETER u, NL_FLAG flg, NL_POINT *C)
 (cffi:defcfun ("shim_N_CrvEval" c-crv-eval) :short
   (cur :pointer) (u :double) (flg :short) (c :pointer))
@@ -606,6 +618,10 @@
 ;; NL_FLAG N_CrvEvalTangent(NL_CURVE *cur, NL_PARAMETER u, NL_FLAG flg, NL_POINT *P, NL_VECTOR *T)
 (cffi:defcfun ("shim_N_CrvEvalTangent" c-crv-eval-tangent) :short
   (cur :pointer) (u :double) (flg :short) (p :pointer) (t* :pointer))
+
+;; NL_FLAG N_CrvEvalFrenetFrame(NL_CURVE *cur, NL_PARAMETER u, NL_FLAG flg, NL_POINT *P, NL_VECTOR *T, NL_VECTOR *N, NL_VECTOR *B)
+(cffi:defcfun ("shim_N_CrvEvalFrenetFrame" c-crv-eval-frenet-frame) :short
+  (cur :pointer) (u :double) (flg :short) (p :pointer) (t* :pointer) (n :pointer) (b :pointer))
 
 ;; NL_VOID N_CrvTransform(NL_CURVE *cur, NL_RMATRIX *rma)
 (cffi:defcfun ("shim_N_CrvTransform" c-crv-transform) :void
@@ -639,6 +655,10 @@
 (cffi:defcfun ("shim_N_CrvReparam" c-crv-reparam) :void
   (cur :pointer) (ul :double) (ur :double))
 
+;; NL_FLAG N_CrvGetType(NL_CURVE * cur, NL_REAL tol, NL_POINT * AA, NL_VECTOR * BB, NL_VECTOR * XX, NL_VECTOR * YY, NL_REAL * r, NL_REAL * al, NL_FLAG * typ)
+(cffi:defcfun ("shim_N_CrvGetType" c-crv-get-type) :short
+  (cur :pointer) (tol :double) (aa :pointer) (bb :pointer) (xx :pointer) (yy :pointer) (r :pointer) (al :pointer) (typ :pointer))
+
 ;; NL_FLAG N_CrvGetCurvatureDeriv(NL_CURVE *cur, NL_PARAMETER u, NL_FLAG ufl, NL_REAL *kpp)
 (cffi:defcfun ("shim_N_CrvGetCurvatureDeriv" c-crv-get-curvature-deriv) :short
   (cur :pointer) (u :double) (ufl :short) (kpp :pointer))
@@ -650,6 +670,10 @@
 ;; NL_FLAG N_CrvInsertKnot(NL_CURVE *curP, NL_PARAMETER u, NL_INDEX r, NL_CURVE *curQ, NL_STACKS *SP, NL_STACKS *SQ)
 (cffi:defcfun ("shim_N_CrvInsertKnot" c-crv-insert-knot) :short
   (cur-p :pointer) (u :double) (r :long) (cur-q :pointer) (sp :pointer) (sq :pointer))
+
+;; NL_FLAG N_CrvDecomposeBez(NL_CURVE * curP, NL_CURVE *** curQ, NL_INDEX * k, NL_STACKS * SQ)
+(cffi:defcfun ("shim_N_CrvDecomposeBez" c-crv-decompose-bez) :short
+  (cur-p :pointer) (cur-q :pointer) (k :pointer) (sq :pointer))
 
 ;; NL_FLAG N_CrvDecomposeContinuity(NL_CURVE * curP, NL_CURVE *** curQ, NL_INDEX * k, NL_STACKS * SQ)
 (cffi:defcfun ("shim_N_CrvDecomposeContinuity" c-crv-decompose-continuity) :short
@@ -965,6 +989,10 @@
 
 ;; NL_VOID N_VectorCross(NL_VECTOR a, NL_VECTOR b, NL_VECTOR *c)
 (cffi:defcfun ("shim_N_VectorCross" c-vector-cross) :void
+  (a :pointer) (b :pointer) (c :pointer))
+
+;; NL_VOID N_VectorCrossRef(NL_VECTOR *a, NL_VECTOR *b, NL_VECTOR *c)
+(cffi:defcfun ("shim_N_VectorCrossRef" c-vector-cross-ref) :void
   (a :pointer) (b :pointer) (c :pointer))
 
 ;; NL_VOID N_VectorScale(NL_VECTOR a, NL_REAL alpha, NL_VECTOR *b)

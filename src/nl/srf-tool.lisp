@@ -43,13 +43,6 @@
       (setf (aref cn ci cj 0) (aref a 0) (aref cn ci cj 1) (aref a 1)
             (aref cn ci cj 2) (aref a 2) (aref cn ci cj 3) (aref a 3)))))
 
-(defun %knot-vector-is-end-param (knots u rname)
-  "Signal :par-err in routine RNAME when U <= U[0] or U >= U[m].
-NLib: N_KnotVectorIsEndParam (not in the manifest; a private copy)."
-  (declare (type real-vector knots) (type double-float u))
-  (when (or (<= u (aref knots 0)) (>= u (aref knots (1- (length knots)))))
-    (nurbs-error :par-err rname)))
-
 ;;; -------------------------------------------------------- Bezier decomposition
 
 (defun srf-decompose-to-bez (sur-p)
@@ -209,12 +202,12 @@ same surface)."
     (when (< xr 0)
       (nurbs-error :inp-err 'srf-insert-knots))
     (cond ((= dir +udir+)
-           (%knot-vector-is-end-param up (aref x 0) 'srf-insert-knots)
-           (%knot-vector-is-end-param up (aref x xr) 'srf-insert-knots)
+           (knot-vector-is-end-param up (aref x 0) 'srf-insert-knots)
+           (knot-vector-is-end-param up (aref x xr) 'srf-insert-knots)
            (setf ni (+ n xr 1) mi m ri (+ r xr 1) si s))
           ((= dir +vdir+)
-           (%knot-vector-is-end-param vp (aref x 0) 'srf-insert-knots)
-           (%knot-vector-is-end-param vp (aref x xr) 'srf-insert-knots)
+           (knot-vector-is-end-param vp (aref x 0) 'srf-insert-knots)
+           (knot-vector-is-end-param vp (aref x xr) 'srf-insert-knots)
            (setf ni n mi (+ m xr 1) ri r si (+ s xr 1)))
           (t (nurbs-error :cal-err 'srf-insert-knots)))
     (let* ((uq (make-real-vector (1+ ri)))

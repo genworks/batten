@@ -20,12 +20,32 @@
 (deftype point-net () '(simple-array double-float (* * 3)))   ; NL_POINT**, NL_ENET
 (deftype cpoint-net () '(simple-array double-float (* * 4)))  ; NL_CPOINT**, NL_CNET
 (deftype index-vector () '(simple-array fixnum (*)))         ; NL_INDEX[]
+(deftype index-matrix () '(simple-array fixnum (* *)))       ; NL_INTEGER**, NL_INDEX**
+(deftype real-3d-array () '(simple-array double-float (* * *))) ; NL_REAL***
 (deftype index () '(integer 0 #.(1- array-dimension-limit)))
 
 (defmacro fast (&body body)
   "BODY compiled for speed with safety off.  Used inside routines whose
 arguments are already declared or checked, as NLib's C trusts its inputs."
   `(locally (declare (optimize (speed 3) (safety 0) (debug 0))) ,@body))
+
+(defmacro with-c-float-environment (&body body)
+  "Run BODY with floating-point traps masked, as C runs: a division by zero
+gives an infinity and an invalid operation a NaN instead of signaling, so a
+ported routine computes the same bits as its C source on every input,
+including the ones where NLib computes an infinity and tests for it
+afterwards.  Batten's routines assume this environment; the exported API
+establishes it."
+  #+sbcl `(sb-int:with-float-traps-masked (:overflow :invalid :divide-by-zero :inexact :underflow)
+            ,@body)
+  #+ccl (let ((mode (gensym)))
+          `(let ((,mode (ccl:get-fpu-mode)))
+             (unwind-protect
+                  (progn (ccl:set-fpu-mode :overflow nil :underflow nil :division-by-zero nil
+                                           :invalid nil :inexact nil)
+                         ,@body)
+               (apply #'ccl:set-fpu-mode ,mode))))
+  #-(or sbcl ccl) `(progn ,@body))
 
 ;;; ---------------------------------------------- constants not in constants.lisp
 
@@ -101,6 +121,9 @@ the NLib error constant's name as a keyword: NL_PAR_ERR is :par-err, NL_NUM_ERR
 is :num-err, NL_GEO_ERR is :geo-err, and so on."))
 
 (defun nurbs-error (code routine)
+  "Signal NURBS-ERROR.  CODE is the NLib error constant's name as a keyword;
+where the C returns NL_YES from an NL_QUIT without setting an error code, the
+code is :quit."
   (error 'nurbs-error :code code :routine routine))
 
 ;;; --------------------------------------------------------- points and arrays
@@ -182,6 +205,29 @@ is :num-err, NL_GEO_ERR is :geo-err, and so on."))
 (defstruct (plane (:constructor %make-plane (p n)))
   (p (make-point) :type point)
   (n (make-point) :type point))
+
+;;; ------------------------------------------------------------ real matrices
+
+;;; NL_MATRIXTYPE, an enum in NL_DataStruct.h.
+(defconstant +mt-full+ 0)
+(defconstant +mt-lowerleft+ 1)
+(defconstant +mt-upperright+ 2)
+(defconstant +mt-banded+ 3)
+
+;;; NL_RMATRIX: highest row and column indexes N and M, the element storage RM
+;;; (a real-matrix, or nil for C's NULL), the matrix type MTP and the
+;;; bandwidth BW.  As in C, N and M are recorded apart from RM's dimensions: a
+;;; matrix may be defined smaller than its storage.  A banded matrix stores
+;;; rows of BW elements, the diagonal in column BW/2.  (make-rmatrix) is
+;;; N_InitRealMatrix's NULL matrix.  An optional caller-allocated NL_RMATRIX
+;;; output is an rmatrix argument; a NULL one is given storage as
+;;; N_CheckMemRealMatrix does (%check-mem-real-matrix in nl/math.lisp).
+(defstruct (rmatrix (:constructor make-rmatrix (&optional (n -1) (m -1) rm (mtp +mt-full+) (bw 0))))
+  (n -1 :type fixnum)
+  (m -1 :type fixnum)
+  (rm nil :type (or null real-matrix))
+  (mtp +mt-full+ :type fixnum)
+  (bw 0 :type fixnum))
 
 ;;; ------------------------------------------------------ convenient construction
 

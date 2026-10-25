@@ -67,6 +67,23 @@ now and then, else 1."
                            (push (from-foreign (cffi:mem-aref arr :pointer i) :curve) curves))
                          (values nil (list kk (nreverse curves))))))))))))
 
+(define-oracle-test crv-decompose-bez (:file "crv-tool" :trials 3000)
+  (let ((c (if (zerop (rnd 2)) (%crv-tool-curve :full (+ 2 (rnd 4))) (random-curve))))
+    (agree (list :curve c)
+           (multiple-value-bind (curves k) (batten::crv-decompose-bez c)
+             (list k (coerce curves 'list)))
+           (with-foreign ((cp c :curve))
+             (with-stacks (sq)
+               (with-scalars ((k :long) (cq :pointer))
+                 (if (c-flag-error-p (c-crv-decompose-bez cp cq k sq))
+                     (values t nil)
+                     (let ((kk (cffi:mem-ref k :long))
+                           (arr (cffi:mem-ref cq :pointer))
+                           (curves nil))
+                       (dotimes (i (1+ kk))
+                         (push (from-foreign (cffi:mem-aref arr :pointer i) :curve) curves))
+                       (values nil (list kk (nreverse curves)))))))))))
+
 (defun %crv-tool-knot-runs (knots p)
   "The interior knot runs of KNOTS (degree P) as a list of (value last-index
 multiplicity)."

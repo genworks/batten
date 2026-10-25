@@ -41,14 +41,98 @@
   (declare (type cpoint-array a) (type index i) (type cpoint cp))
   (set-cpoint cp (aref a i 0) (aref a i 1) (aref a i 2) (aref a i 3)))
 
-(defun %crv-tool-knot-vector-is-end-param (knots u rname)
-  "Signal :par-err in RNAME when U is on or outside the ends of KNOTS.
-N_KnotVectorIsEndParam (NL_BasisBasic.cpp), which has no Lisp port yet."
-  (declare (type real-vector knots) (type double-float u))
-  (when (or (<= u (aref knots 0)) (>= u (aref knots (1- (length knots)))))
-    (nurbs-error :par-err rname)))
-
 ;;; ------------------------------------------------------- decomposition
+
+(defun %next-bez-cpoints (nqw)
+  "NQW, the next Bezier segment's control points, checked: where the C would
+write through its still-NULL pointer (an unclamped single-span curve) and
+crash, signal instead."
+  (if (typep nqw 'cpoint-array)
+      nqw
+      (nurbs-error :cal-err 'crv-decompose-bez)))
+
+(defun crv-decompose-bez (cur)
+  "The Bezier segments of curve CUR, extracted without knot refinement: one
+degree-p curve with knots (a ... a b ... b) per non-zero span.  Returns
+(values curves k): CURVES a simple-vector of the k+1 fresh segments.
+NLib: N_CrvDecomposeBez."
+  (declare (type curve cur))
+  (let* ((p (curve-degree cur))
+         (pw (curve-cpoints cur))
+         (up (curve-knots cur))
+         (m (curve-m cur))
+         (nsp (basis-get-span-count up p))
+         (cura (make-array nsp)))
+    (declare (type fixnum p m nsp) (type cpoint-array pw) (type real-vector up)
+             (type simple-vector cura))
+    (dotimes (i nsp)
+      (setf (svref cura i) (%make-curve p (make-real-vector (+ p p 2)) (make-cpoint-array (1+ p)))))
+    (fast
+      (let ((alfs (make-array (1+ p) :element-type 'double-float :initial-element 0d0))
+            (omas (make-array (1+ p) :element-type 'double-float :initial-element 0d0))
+            (is p)
+            (ie (1+ p))
+            (iq -1)
+            (nqw nil))
+        (declare (dynamic-extent alfs omas) (type fixnum is ie iq))
+        ;; skip over first knot over-multiplicity (bad data correction)
+        (do () ((not (and (< ie m) (= (aref up (1- ie)) (aref up ie)))))
+          (incf is)
+          (incf ie))
+        (let ((qw (curve-cpoints (svref cura 0))))
+          (declare (type cpoint-array qw))
+          (dotimes (i (1+ p))
+            (%copy-c-pt-row pw (- (+ i is) p) qw i)))
+        (do () ((not (< ie m)))
+          (incf iq)
+          (when (>= iq nsp)
+            ;; NL_QUIT: the C fails without setting an error code
+            (nurbs-error :quit 'crv-decompose-bez))
+          (let ((qw (curve-cpoints (svref cura iq)))
+                (uq (curve-knots (svref cura iq))))
+            (declare (type cpoint-array qw) (type real-vector uq))
+            (when (< iq (1- nsp))
+              (setf nqw (curve-cpoints (svref cura (1+ iq)))))
+            (let ((i ie))
+              (declare (type fixnum i))
+              (do () ((not (and (< ie m) (= (aref up ie) (aref up (1+ ie))))))
+                (incf ie))
+              (let* ((mlt (+ (- ie i) 1))
+                     (r (- p mlt)))
+                (declare (type fixnum mlt r))
+                ;; insert the knot on the rhs only
+                (when (< mlt p)
+                  (let ((num (- (aref up ie) (aref up is))))
+                    (declare (type double-float num))
+                    (do ((i p (1- i))) ((<= i mlt))
+                      (declare (type fixnum i))
+                      (setf (aref alfs (- i mlt 1)) (/ num (- (aref up (+ is i)) (aref up is))))
+                      (setf (aref omas (- i mlt 1)) (- 1d0 (aref alfs (- i mlt 1))))))
+                  (do ((i 1 (1+ i))) ((> i r))
+                    (declare (type fixnum i))
+                    (let ((s (+ mlt i))
+                          (save (- r i)))
+                      (declare (type fixnum s save))
+                      (do ((j p (1- j))) ((< j s))
+                        (declare (type fixnum j))
+                        (%combine-2-c-pt-rows (aref alfs (- j s)) qw j
+                                              (aref omas (- j s)) qw (1- j)
+                                              qw j))
+                      (when (< ie m)
+                        (%copy-c-pt-row qw p (%next-bez-cpoints nqw) save)))))
+                ;; the Bezier segment's knot vector
+                (dotimes (i (1+ p))
+                  (setf (aref uq i) (aref up is)
+                        (aref uq (+ i p 1)) (aref up ie)))
+                ;; the next segment's remaining control points
+                (when (< ie m)
+                  (when (< r 0) (setf r 0))
+                  (do ((i r (1+ i))) ((> i p))
+                    (declare (type fixnum i))
+                    (%copy-c-pt-row pw (+ (- ie p) i) (%next-bez-cpoints nqw) i)))
+                (setf is ie
+                      ie (1+ ie)))))))
+      (values cura (1- nsp)))))
 
 (defun crv-decompose-continuity (curp)
   "Split curve CURP at its interior knots of multiplicity at least its degree,
@@ -125,8 +209,8 @@ NLib: N_CrvRefine."
     (declare (type fixnum n p m r) (type cpoint-array pw) (type real-vector up x))
     (when (< r 0)
       (nurbs-error :inp-err 'crv-refine))
-    (%crv-tool-knot-vector-is-end-param up (aref x 0) 'crv-refine)
-    (%crv-tool-knot-vector-is-end-param up (aref x r) 'crv-refine)
+    (knot-vector-is-end-param up (aref x 0) 'crv-refine)
+    (knot-vector-is-end-param up (aref x r) 'crv-refine)
     (let* ((qw (make-cpoint-array (+ n r 2)))
            (uq (make-real-vector (+ m r 2)))
            (a (basis-find-span up p (aref x 0) +left+))

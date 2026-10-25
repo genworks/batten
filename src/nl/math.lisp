@@ -95,6 +95,117 @@ when its NLIBCHKBYPASS is set.  NLib's default, and this one, is to check.")
   (let ((c (gensym)))
     `(let ((,c ,pt)) (setf (aref ,c 0) ,x (aref ,c 1) ,y (aref ,c 2) ,z) ,c)))
 
+;;; ------------------------------------------------- rows of arrays and nets
+
+;;; C passes Pw[i] (a row of a cpoint array) or Pw[i][j] (an entry of a net)
+;;; straight to N_CopyCPt, N_Combine2CPts and the like.  In Batten those take
+;;; cpoints, so a port moves the row into a scratch cpoint, calls the routine
+;;; and moves the result back: a copy changes no bits, so the arithmetic stays
+;;; NLib's.  Use these rather than private copies of them.
+
+(declaim (inline %row-c-pt %c-pt-row %row-pt %pt-row %net-c-pt %c-pt-net %net-pt %pt-net
+                 %copy-c-pt-row %copy-pt-row %copy-c-pt-net))
+
+(defun %row-c-pt (arr i cp)
+  "Copy row I of cpoint-array ARR into cpoint CP; return CP."
+  (declare (type cpoint-array arr) (type index i) (type cpoint cp))
+  (fast (set-cpoint cp (aref arr i 0) (aref arr i 1) (aref arr i 2) (aref arr i 3))))
+
+(defun %c-pt-row (cp arr i)
+  "Copy cpoint CP into row I of cpoint-array ARR; return ARR."
+  (declare (type cpoint-array arr) (type index i) (type cpoint cp))
+  (fast (setf (aref arr i 0) (aref cp 0) (aref arr i 1) (aref cp 1)
+              (aref arr i 2) (aref cp 2) (aref arr i 3) (aref cp 3)))
+  arr)
+
+(defun %row-pt (arr i p)
+  "Copy row I of point-array ARR into point P; return P."
+  (declare (type point-array arr) (type index i) (type point p))
+  (fast (set-point p (aref arr i 0) (aref arr i 1) (aref arr i 2))))
+
+(defun %pt-row (p arr i)
+  "Copy point P into row I of point-array ARR; return ARR."
+  (declare (type point-array arr) (type index i) (type point p))
+  (fast (setf (aref arr i 0) (aref p 0) (aref arr i 1) (aref p 1) (aref arr i 2) (aref p 2)))
+  arr)
+
+(defun %net-c-pt (net i j cp)
+  "Copy entry I,J of cpoint-net NET into cpoint CP; return CP."
+  (declare (type cpoint-net net) (type index i j) (type cpoint cp))
+  (fast (set-cpoint cp (aref net i j 0) (aref net i j 1) (aref net i j 2) (aref net i j 3))))
+
+(defun %c-pt-net (cp net i j)
+  "Copy cpoint CP into entry I,J of cpoint-net NET; return NET."
+  (declare (type cpoint-net net) (type index i j) (type cpoint cp))
+  (fast (setf (aref net i j 0) (aref cp 0) (aref net i j 1) (aref cp 1)
+              (aref net i j 2) (aref cp 2) (aref net i j 3) (aref cp 3)))
+  net)
+
+(defun %net-pt (net i j p)
+  "Copy entry I,J of point-net NET into point P; return P."
+  (declare (type point-net net) (type index i j) (type point p))
+  (fast (set-point p (aref net i j 0) (aref net i j 1) (aref net i j 2))))
+
+(defun %pt-net (p net i j)
+  "Copy point P into entry I,J of point-net NET; return NET."
+  (declare (type point-net net) (type index i j) (type point p))
+  (fast (setf (aref net i j 0) (aref p 0) (aref net i j 1) (aref p 1) (aref net i j 2) (aref p 2)))
+  net)
+
+(defun %copy-c-pt-row (src i dst j)
+  "N_CopyCPt( src[i], &dst[j] ) on rows of cpoint-arrays; return DST."
+  (declare (type cpoint-array src dst) (type index i j))
+  (fast (let ((a (aref src i 0)) (b (aref src i 1)) (c (aref src i 2)) (d (aref src i 3)))
+          (setf (aref dst j 0) a (aref dst j 1) b (aref dst j 2) c (aref dst j 3) d)))
+  dst)
+
+(defun %copy-pt-row (src i dst j)
+  "N_CopyPt( src[i], &dst[j] ) on rows of point-arrays; return DST."
+  (declare (type point-array src dst) (type index i j))
+  (fast (let ((a (aref src i 0)) (b (aref src i 1)) (c (aref src i 2)))
+          (setf (aref dst j 0) a (aref dst j 1) b (aref dst j 2) c)))
+  dst)
+
+(defun %copy-c-pt-net (src i j dst k l)
+  "N_CopyCPt( src[i][j], &dst[k][l] ) on entries of cpoint-nets; return DST."
+  (declare (type cpoint-net src dst) (type index i j k l))
+  (fast (let ((a (aref src i j 0)) (b (aref src i j 1)) (c (aref src i j 2)) (d (aref src i j 3)))
+          (setf (aref dst k l 0) a (aref dst k l 1) b (aref dst k l 2) c (aref dst k l 3) d)))
+  dst)
+
+(declaim (inline %combine-2-c-pt-rows %vector-blend-c-pt-row))
+
+(defun %combine-2-c-pt-rows (alpha a ai beta b bi c ci)
+  "N_Combine2CPts( alpha, a[ai], beta, b[bi], &c[ci] ) on rows of
+cpoint-arrays: row CI of C = ALPHA * row AI of A + BETA * row BI of B,
+honoring +no-z+ and +no-w+ as N_Combine2CPts does.  Reads before writing."
+  (declare (type double-float alpha beta) (type cpoint-array a b c) (type fixnum ai bi ci))
+  (let ((ax (aref a ai 0)) (ay (aref a ai 1)) (az (aref a ai 2)) (aw (aref a ai 3))
+        (bx (aref b bi 0)) (by (aref b bi 1)) (bz (aref b bi 2)) (bw (aref b bi 3)))
+    (declare (type double-float ax ay az aw bx by bz bw))
+    (setf (aref c ci 0) (+ (* alpha ax) (* beta bx))
+          (aref c ci 1) (+ (* alpha ay) (* beta by))
+          (aref c ci 2) (cond ((and (/= az +no-z+) (/= bz +no-z+)) (+ (* alpha az) (* beta bz)))
+                              ((/= az +no-z+) (* alpha az))
+                              ((/= bz +no-z+) (* beta bz))
+                              (t +no-z+))
+          (aref c ci 3) (if (and (/= aw +no-w+) (/= bw +no-w+)) (+ (* alpha aw) (* beta bw)) +no-w+))
+    c))
+
+(defun %vector-blend-c-pt-row (alpha a ai b bi)
+  "N_VectorBlendCPt( alpha, a[ai], &b[bi] ) on rows of cpoint-arrays: row BI
+of B = row BI of B + ALPHA * row AI of A, honoring +no-z+ and +no-w+ of A as
+N_VectorBlendCPt does."
+  (declare (type double-float alpha) (type cpoint-array a b) (type fixnum ai bi))
+  (let ((ax (aref a ai 0)) (ay (aref a ai 1)) (az (aref a ai 2)) (aw (aref a ai 3))
+        (bx (aref b bi 0)) (by (aref b bi 1)) (bz (aref b bi 2)) (bw (aref b bi 3)))
+    (declare (type double-float ax ay az aw bx by bz bw))
+    (setf (aref b bi 0) (+ bx (* alpha ax))
+          (aref b bi 1) (+ by (* alpha ay))
+          (aref b bi 2) (if (/= az +no-z+) (+ bz (* alpha az)) +no-z+)
+          (aref b bi 3) (if (/= aw +no-w+) (+ bw (* alpha aw)) +no-w+))
+    b))
+
 (declaim (inline copy-c-pt c-pt-get-w c-pt-from-wx-wy-wz c-pt-to-wx-wy-wz pt-to-c-pt weight
                  combine-2-c-pts sum-2-c-pts diff-2-c-pts scale-c-pt combine-4-c-pts
                  translate-c-pt translate-sum-2-c-pts vector-blend-c-pt))
@@ -468,24 +579,7 @@ NLib: N_PascalTriRow."
 
 ;;; -------------------------------------------------------------- real matrices
 
-;;; NL_MATRIXTYPE, an enum in NL_DataStruct.h.
-(defconstant +mt-full+ 0)
-(defconstant +mt-lowerleft+ 1)
-(defconstant +mt-upperright+ 2)
-(defconstant +mt-banded+ 3)
-
-;;; NL_RMATRIX: highest row and column indexes N and M, the element storage RM
-;;; (a real-matrix, or nil for C's NULL), the matrix type MTP and the
-;;; bandwidth BW.  As in C, N and M are recorded apart from RM's dimensions: a
-;;; matrix may be defined smaller than its storage.  A banded matrix stores
-;;; rows of BW elements, the diagonal in column BW/2.  (make-rmatrix) is
-;;; N_InitRealMatrix's NULL matrix.
-(defstruct (rmatrix (:constructor make-rmatrix (&optional (n -1) (m -1) rm (mtp +mt-full+) (bw 0))))
-  (n -1 :type fixnum)
-  (m -1 :type fixnum)
-  (rm nil :type (or null real-matrix))
-  (mtp +mt-full+ :type fixnum)
-  (bw 0 :type fixnum))
+;;; NL_RMATRIX is the rmatrix structure in types.lisp.
 
 (defun create-real-matrix (rma n m rm mtp bw)
   "Set every member of RMA: highest indexes N and M, storage RM, type MTP and

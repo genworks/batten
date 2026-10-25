@@ -7,143 +7,9 @@
 
 (in-package :batten)
 
-;;; ------------------------------------------------- control point rows (L0-g7)
-
-;;; NLib applies N_CopyCPt, N_Combine2CPts and N_VectorBlendCPt to elements of
-;;; NL_CPOINT arrays; here those arrays are cpoint-arrays, so these do the same
-;;; arithmetic on rows.  Each reads every input coordinate before writing.
-
-(declaim (inline %copy-c-pt-row %combine-2-c-pt-rows %vector-blend-c-pt-row))
-
-(defun %copy-c-pt-row (a ai b bi)
-  "Row BI of B = row AI of A, as N_CopyCPt."
-  (declare (type cpoint-array a b) (type fixnum ai bi))
-  (let ((x (aref a ai 0)) (y (aref a ai 1)) (z (aref a ai 2)) (w (aref a ai 3)))
-    (setf (aref b bi 0) x (aref b bi 1) y (aref b bi 2) z (aref b bi 3) w)
-    b))
-
-(defun %combine-2-c-pt-rows (alpha a ai beta b bi c ci)
-  "Row CI of C = ALPHA * row AI of A + BETA * row BI of B, honoring +no-z+ and
-+no-w+ as N_Combine2CPts does."
-  (declare (type double-float alpha beta) (type cpoint-array a b c) (type fixnum ai bi ci))
-  (let ((ax (aref a ai 0)) (ay (aref a ai 1)) (az (aref a ai 2)) (aw (aref a ai 3))
-        (bx (aref b bi 0)) (by (aref b bi 1)) (bz (aref b bi 2)) (bw (aref b bi 3)))
-    (declare (type double-float ax ay az aw bx by bz bw))
-    (setf (aref c ci 0) (+ (* alpha ax) (* beta bx))
-          (aref c ci 1) (+ (* alpha ay) (* beta by))
-          (aref c ci 2) (cond ((and (/= az +no-z+) (/= bz +no-z+)) (+ (* alpha az) (* beta bz)))
-                              ((/= az +no-z+) (* alpha az))
-                              ((/= bz +no-z+) (* beta bz))
-                              (t +no-z+))
-          (aref c ci 3) (if (and (/= aw +no-w+) (/= bw +no-w+)) (+ (* alpha aw) (* beta bw)) +no-w+))
-    c))
-
-(defun %vector-blend-c-pt-row (alpha a ai b bi)
-  "Row BI of B = row BI of B + ALPHA * row AI of A, honoring +no-z+ and +no-w+
-of A as N_VectorBlendCPt does."
-  (declare (type double-float alpha) (type cpoint-array a b) (type fixnum ai bi))
-  (let ((ax (aref a ai 0)) (ay (aref a ai 1)) (az (aref a ai 2)) (aw (aref a ai 3))
-        (bx (aref b bi 0)) (by (aref b bi 1)) (bz (aref b bi 2)) (bw (aref b bi 3)))
-    (declare (type double-float ax ay az aw bx by bz bw))
-    (setf (aref b bi 0) (+ bx (* alpha ax))
-          (aref b bi 1) (+ by (* alpha ay))
-          (aref b bi 2) (if (/= az +no-z+) (+ bz (* alpha az)) +no-z+)
-          (aref b bi 3) (if (/= aw +no-w+) (+ bw (* alpha aw)) +no-w+))
-    b))
-
-;;; --------------------------------------------- Bezier decomposition (L0-g7)
-
-(defun %next-bez-cpoints (nqw)
-  "NQW, the next Bezier segment's control points, checked: where the C would
-write through its still-NULL pointer (an unclamped single-span curve) and
-crash, signal instead."
-  (if (typep nqw 'cpoint-array)
-      nqw
-      (nurbs-error :cal-err '%crv-decompose-bez)))
-
-(defun %crv-decompose-bez (cur)
-  "A simple-vector of the Bezier segments of curve CUR, one degree-p curve
-with knots (a ... a b ... b) per non-zero span, extracted without knot
-refinement.  A port of N_CrvDecomposeBez (NL_CrvTool.cpp:811), which the
-manifest does not list (its definition line carries a comment between the name
-and the argument list); it belongs in crv-tool.lisp as crv-decompose-bez."
-  (declare (type curve cur))
-  (let* ((p (curve-degree cur))
-         (pw (curve-cpoints cur))
-         (up (curve-knots cur))
-         (m (curve-m cur))
-         (nsp (basis-get-span-count up p))
-         (cura (make-array nsp)))
-    (declare (type fixnum p m nsp) (type cpoint-array pw) (type real-vector up)
-             (type simple-vector cura))
-    (dotimes (i nsp)
-      (setf (svref cura i) (%make-curve p (make-real-vector (+ p p 2)) (make-cpoint-array (1+ p)))))
-    (fast
-      (let ((alfs (make-array (1+ p) :element-type 'double-float :initial-element 0d0))
-            (omas (make-array (1+ p) :element-type 'double-float :initial-element 0d0))
-            (is p)
-            (ie (1+ p))
-            (iq -1)
-            (nqw nil))
-        (declare (dynamic-extent alfs omas) (type fixnum is ie iq))
-        ;; skip over first knot over-multiplicity (bad data correction)
-        (do () ((not (and (< ie m) (= (aref up (1- ie)) (aref up ie)))))
-          (incf is)
-          (incf ie))
-        (let ((qw (curve-cpoints (svref cura 0))))
-          (declare (type cpoint-array qw))
-          (dotimes (i (1+ p))
-            (%copy-c-pt-row pw (- (+ i is) p) qw i)))
-        (do () ((not (< ie m)))
-          (incf iq)
-          (when (>= iq nsp)
-            ;; NL_QUIT: the C fails without setting an error code
-            (nurbs-error :cal-err '%crv-decompose-bez))
-          (let ((qw (curve-cpoints (svref cura iq)))
-                (uq (curve-knots (svref cura iq))))
-            (declare (type cpoint-array qw) (type real-vector uq))
-            (when (< iq (1- nsp))
-              (setf nqw (curve-cpoints (svref cura (1+ iq)))))
-            (let ((i ie))
-              (declare (type fixnum i))
-              (do () ((not (and (< ie m) (= (aref up ie) (aref up (1+ ie))))))
-                (incf ie))
-              (let* ((mlt (+ (- ie i) 1))
-                     (r (- p mlt)))
-                (declare (type fixnum mlt r))
-                ;; insert the knot on the rhs only
-                (when (< mlt p)
-                  (let ((num (- (aref up ie) (aref up is))))
-                    (declare (type double-float num))
-                    (do ((i p (1- i))) ((<= i mlt))
-                      (declare (type fixnum i))
-                      (setf (aref alfs (- i mlt 1)) (/ num (- (aref up (+ is i)) (aref up is))))
-                      (setf (aref omas (- i mlt 1)) (- 1d0 (aref alfs (- i mlt 1))))))
-                  (do ((i 1 (1+ i))) ((> i r))
-                    (declare (type fixnum i))
-                    (let ((s (+ mlt i))
-                          (save (- r i)))
-                      (declare (type fixnum s save))
-                      (do ((j p (1- j))) ((< j s))
-                        (declare (type fixnum j))
-                        (%combine-2-c-pt-rows (aref alfs (- j s)) qw j
-                                              (aref omas (- j s)) qw (1- j)
-                                              qw j))
-                      (when (< ie m)
-                        (%copy-c-pt-row qw p (%next-bez-cpoints nqw) save)))))
-                ;; the Bezier segment's knot vector
-                (dotimes (i (1+ p))
-                  (setf (aref uq i) (aref up is)
-                        (aref uq (+ i p 1)) (aref up ie)))
-                ;; the next segment's remaining control points
-                (when (< ie m)
-                  (when (< r 0) (setf r 0))
-                  (do ((i r (1+ i))) ((> i p))
-                    (declare (type fixnum i))
-                    (%copy-c-pt-row pw (+ (- ie p) i) (%next-bez-cpoints nqw) i)))
-                (setf is ie
-                      ie (1+ ie)))))))
-      cura)))
+;;; Control point rows: %copy-c-pt-row, %combine-2-c-pt-rows and
+;;; %vector-blend-c-pt-row in math.lisp.  Bezier decomposition:
+;;; crv-decompose-bez in crv-tool.lisp.
 
 ;;; ------------------------------------------------------------------ routines
 
@@ -174,7 +40,7 @@ NLib: N_CrvDerivsAtKnot."
 from sampling each Bezier segment at its nodes.  NLib: N_CrvGetMax2ndDeriv."
   (declare (type curve cur))
   (let* ((p (curve-degree cur))
-         (bez (%crv-decompose-bez cur))
+         (bez (crv-decompose-bez cur))
          (k (1- (length bez)))
          (cd (make-point-array 3))
          (c2 (make-point))

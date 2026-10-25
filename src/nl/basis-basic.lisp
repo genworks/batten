@@ -17,6 +17,14 @@ NLib: N_KnotVectorIsParamOutOfBounds."
   (when (or (< u (aref knots 0)) (> u (aref knots (1- (length knots)))))
     (nurbs-error :par-err rname)))
 
+(declaim (inline knot-vector-is-end-param))
+(defun knot-vector-is-end-param (knots u rname)
+  "Signal :par-err in routine RNAME when U is on or outside the ends of the
+domain: u <= U[0] or u >= U[m].  NLib: N_KnotVectorIsEndParam."
+  (declare (type real-vector knots) (type double-float u))
+  (when (or (<= u (aref knots 0)) (>= u (aref knots (1- (length knots)))))
+    (nurbs-error :par-err rname)))
+
 (declaim (inline basis-find-span))
 (defun basis-find-span (knots p u flg)
   "The knot span containing parameter U: the index i with U[i] < u <= U[i+1]

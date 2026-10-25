@@ -58,6 +58,19 @@
              (values (c-flag-error-p (c-knot-vector-is-param-out-of-bounds kp u (cffi:null-pointer)))
                      (list t))))))
 
+(define-oracle-test knot-vector-is-end-param (:file "basis-basic" :trials 2000)
+  (let* ((k (curve-knots (random-curve)))
+         (span (- (aref k (1- (length k))) (aref k 0)))
+         (u (case (rnd 4)
+              (0 (aref k 0))
+              (1 (aref k (1- (length k))))
+              (t (+ (aref k 0) (* span (rnd-range -0.2d0 1.2d0)))))))
+    (agree (list k u)
+           (progn (batten::knot-vector-is-end-param k u 'test) (list t))
+           (with-foreign ((kp k :knots))
+             (values (c-flag-error-p (c-knot-vector-is-end-param kp u (cffi:null-pointer)))
+                     (list t))))))
+
 ;;; ------------------------------------------------------------- L0-g2
 
 (defun %spoil-knots (k p)
