@@ -372,3 +372,58 @@ NLib: N_SrfEvalPtPtDerivNormalFast."
   "Point, unit first derivatives and unit normal of SUR at (U, V) into P, SU,
 SV and N.  NLib: N_SrfEvalPtPtDerivNormal."
   (srf-eval-pt-pt-deriv-normal-fast sur u v ufl vfl p su sv n (make-point-net 2 2)))
+
+(defun srf-min-max-weight-pos-vectors (sur)
+  "The smallest and largest control point weights of SUR (both +no-w+ when it
+is not rational) and the smallest and largest magnitudes of its Euclidean
+control points, as (values wmin wmax pmin pmax).
+NLib: N_SrfMinMaxWeightPosVectors."
+  (declare (type surface sur))
+  (let* ((pw (surface-cpoints sur))
+         (n (surface-n sur)) (m (surface-m sur))
+         (wmin 0d0) (wmax 0d0) (pmin 0d0) (pmax 0d0)
+         (cw (make-cpoint)) (p (make-point)))
+    (declare (type cpoint-net pw) (type fixnum n m)
+             (type double-float wmin wmax pmin pmax) (dynamic-extent cw p))
+    (flet ((magnitude (i j)
+             (setf (aref cw 0) (aref pw i j 0) (aref cw 1) (aref pw i j 1)
+                   (aref cw 2) (aref pw i j 2) (aref cw 3) (aref pw i j 3))
+             (c-pt-to-pt-euclid cw p)
+             (vector-magnitude p)))
+      (declare (inline magnitude))
+      (if (is-srf-rat sur)
+          (progn
+            (setf wmin (aref pw 0 0 3) wmax (aref pw 0 0 3))
+            (dotimes (i (1+ n))
+              (dotimes (j (1+ m))
+                (let ((w (aref pw i j 3)))
+                  (declare (type double-float w))
+                  (when (< w wmin) (setf wmin w))
+                  (when (> w wmax) (setf wmax w))))))
+          (setf wmin +no-w+ wmax +no-w+))
+      (let ((mag (magnitude 0 0)))
+        (declare (type double-float mag))
+        (setf pmin mag pmax mag))
+      (dotimes (i (1+ n))
+        (dotimes (j (1+ m))
+          (let ((mag (magnitude i j)))
+            (declare (type double-float mag))
+            (when (< mag pmin) (setf pmin mag))
+            (when (> mag pmax) (setf pmax mag)))))
+      (values wmin wmax pmin pmax))))
+
+(defun srf-translate (sur tv)
+  "Translate surface SUR in place by vector TV.  Returns SUR.
+NLib: N_SrfTranslate."
+  (declare (type surface sur) (type point tv))
+  (let ((pw (surface-cpoints sur))
+        (cw (make-cpoint)))
+    (declare (type cpoint-net pw) (dynamic-extent cw))
+    (dotimes (i (1+ (surface-n sur)))
+      (dotimes (j (1+ (surface-m sur)))
+        (setf (aref cw 0) (aref pw i j 0) (aref cw 1) (aref pw i j 1)
+              (aref cw 2) (aref pw i j 2) (aref cw 3) (aref pw i j 3))
+        (translate-c-pt cw tv cw)
+        (setf (aref pw i j 0) (aref cw 0) (aref pw i j 1) (aref cw 1)
+              (aref pw i j 2) (aref cw 2) (aref pw i j 3) (aref cw 3))))
+    sur))
