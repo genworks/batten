@@ -33,6 +33,47 @@
                                (setf (aref out i j) (from-foreign (cffi:mem-aref row :pointer j) :surface)))))
                          (values nil (list out k l)))))))))))
 
+(defun %srf-tool-dir ()
+  "+udir+ or +vdir+, and now and then a bad direction."
+  (case (rnd 41) (0 3) (t (if (zerop (rnd 2)) batten::+udir+ batten::+vdir+))))
+
+(defun %srf-tool-param (knots)
+  "A parameter of KNOTS: usually inside, often an interior knot, now and then
+an end of the domain."
+  (let* ((lo (aref knots 0)) (hi (aref knots (1- (length knots))))
+         (inside (remove-if (lambda (x) (or (= x lo) (= x hi))) (coerce knots 'list))))
+    (case (rnd 12)
+      (0 lo)
+      (1 hi)
+      ((2 3 4 5) (if inside (nth (rnd (length inside)) inside) (rnd-range lo hi)))
+      (t (rnd-range lo hi)))))
+
+(define-oracle-test srf-split (:file "srf-tool" :trials 4000)
+  (let* ((s (%srf-tool-surface))
+         (dir (%srf-tool-dir))
+         (tt (%srf-tool-param (if (= dir batten::+vdir+) (surface-knots-v s) (surface-knots-u s)))))
+    (agree (list :surface s :t tt :dir dir)
+           (multiple-value-list (batten::srf-split s tt dir))
+           (with-foreign ((sp s :surface))
+             (with-foreign-out ((sl :surface) (sr :surface))
+               (with-stacks (sg)
+                 (if (c-flag-error-p (c-srf-split sp tt dir sl sr sg))
+                     (values t nil)
+                     (values nil (list (from-foreign sl :surface) (from-foreign sr :surface))))))))))
+
+(define-oracle-test srf-extract-iso-crv (:file "srf-tool" :trials 4000)
+  (let* ((s (%srf-tool-surface))
+         (dir (%srf-tool-dir))
+         (tt (%srf-tool-param (if (= dir batten::+udir+) (surface-knots-v s) (surface-knots-u s)))))
+    (agree (list :surface s :t tt :dir dir)
+           (list (batten::srf-extract-iso-crv s tt dir))
+           (with-foreign ((sp s :surface))
+             (with-foreign-out ((cur :curve))
+               (with-stacks (sc)
+                 (if (c-flag-error-p (c-srf-extract-iso-crv sp tt dir cur sc))
+                     (values t nil)
+                     (values nil (list (from-foreign cur :curve))))))))))
+
 (defun %random-insert-knots (knots p)
   "Knots to insert into KNOTS (degree P): sorted, strictly inside the domain,
 some existing interior knots and some repeated, every resulting multiplicity
