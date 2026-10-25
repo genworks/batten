@@ -18,3 +18,31 @@
                  (with-foreign-out ((sur :surface))
                    (let ((failed (c-flag-error-p (c-create-srf-corner-pts a b c d sur sg))))
                      (values failed (unless failed (list (from-foreign sur :surface))))))))))))
+
+;;; ------------------------------------------------------------- L2-g3
+
+(define-oracle-test create-srf-extrude-crv (:file "srf-common" :trials 3000)
+  (let* ((c (random-curve))
+         (w (case (rnd 20)
+              (0 (make-point 0d0 0d0 0d0))
+              (1 (make-point 0d0 0d0 (rnd-range 0.1d0 3d0)))
+              (t (random-point 5d0))))
+         (d (case (rnd 10) (0 0d0) (1 (- (rnd 10d0))) (t (rnd 50d0))))
+         (dir (case (rnd 30) (0 7) (t (if (zerop (rnd 2)) +udir+ +vdir+)))))
+    (agree (list :curve c :w w :d d :dir dir)
+           (let ((cc (%make-curve (curve-degree c) (copy-seq (curve-knots c))
+                                  (let* ((a (curve-cpoints c))
+                                         (b (make-array (array-dimensions a) :element-type 'double-float)))
+                                    (dotimes (i (array-total-size a) b)
+                                      (setf (row-major-aref b i) (row-major-aref a i))))))
+                 (ww (copy-seq w)))
+             (let ((s (batten::create-srf-extrude-crv cc ww d dir)))
+               ;; W is the C's by-value argument: it must come back unchanged
+               (list s cc ww)))
+           (with-foreign ((cur c :curve) (wp w :point))
+             (with-stacks (sg)
+               (with-foreign-out ((sur :surface))
+                 (let ((failed (c-flag-error-p (c-create-srf-extrude-crv cur wp d dir sur sg))))
+                   (values failed (unless failed
+                                    (list (from-foreign sur :surface) (from-foreign cur :curve)
+                                          (from-foreign wp :point)))))))))))

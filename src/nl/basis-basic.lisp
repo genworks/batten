@@ -568,3 +568,124 @@ NLib: N_BasisReparam."
               (declare (type fixnum i))
               (setf (aref knots i) ur))))))
     knots))
+
+;;; ------------------------------------------------------------------- L2-g3
+
+(defun basis-find-all-span-maxima (knots i p tol mins maxs)
+  "The local minima and maxima of the Ith B-spline basis function of degree P
+on KNOTS over each of its knot spans: MINS[k] and MAXS[k] (real-vectors of at
+least P+1, allocated by the caller) receive the minimum and maximum over
+[U[i+k], U[i+k+1]].  The global maximum is found first, to tolerance TOL.
+Returns the parameter where the global maximum is attained.  Signals :ind-err
+for I outside 0..n, :con-err when the maximum's span is not found, and the
+errors of BASIS-FIND-GLOBAL-MAX and BASIS-I-EVAL.
+NLib: N_BasisFindAllSpanMaxima."
+  (declare (type real-vector knots mins maxs) (type fixnum i p) (type double-float tol))
+  (let ((m (1- (length knots))))
+    (declare (type fixnum m))
+    (when (or (< i 0) (> i (- m p 1)))
+      (nurbs-error :ind-err 'basis-find-all-span-maxima))
+    ;; linear as special case
+    (when (= p 1)
+      (setf (aref mins 0) 0d0
+            (aref mins 1) 0d0
+            (aref maxs 0) 1d0
+            (aref maxs 1) 1d0)
+      (return-from basis-find-all-span-maxima (aref knots (1+ i))))
+    ;; p-fold inner multiple knot
+    (let ((s 1))
+      (declare (type fixnum s))
+      (do ((k (1+ i) (1+ k))) ((>= k (+ i p)))
+        (declare (type fixnum k))
+        (when (= (aref knots k) (aref knots (1+ k)))
+          (incf s)))
+      (when (= s p)
+        (do ((k 0 (1+ k))) ((> k p))
+          (declare (type fixnum k))
+          (setf (aref maxs k) 1d0))
+        (do ((k 1 (1+ k))) ((>= k p))
+          (declare (type fixnum k))
+          (setf (aref mins k) 1d0))
+        (setf (aref mins 0) (if (= (aref knots i) (aref knots (1+ i))) 1d0 0d0))
+        (setf (aref mins p) (if (= (aref knots (+ i p)) (aref knots (+ i p 1))) 1d0 0d0))
+        (return-from basis-find-all-span-maxima (aref knots (1+ i)))))
+    ;; global maximum
+    (multiple-value-bind (nm u) (basis-find-global-max knots i p tol)
+      (declare (type double-float nm u))
+      ;; span index of the global maximum
+      (let ((spn -1))
+        (declare (type fixnum spn))
+        (do ((k i (1+ k))) ((> k (+ i p)))
+          (declare (type fixnum k))
+          (when (and (>= u (aref knots k)) (< u (aref knots (1+ k))))
+            (setf spn k)
+            (return)))
+        (when (= spn -1)
+          (nurbs-error :con-err 'basis-find-all-span-maxima))
+        ;; local extrema
+        (dotimes (k (- spn i))
+          (setf (aref mins k) (basis-i-eval knots i p (aref knots (+ i k)) +left+))
+          (setf (aref maxs k) (basis-i-eval knots i p (aref knots (+ i k 1)) +left+)))
+        (setf (aref maxs (- spn i)) nm)
+        (let ((nl (basis-i-eval knots i p (aref knots spn) +left+))
+              (nr (basis-i-eval knots i p (aref knots (1+ spn)) +left+)))
+          (declare (type double-float nl nr))
+          (setf (aref mins (- spn i)) (if (< nl nr) nl nr)))
+        (do ((k (1+ (- spn i)) (1+ k))) ((> k p))
+          (declare (type fixnum k))
+          (setf (aref mins k) (basis-i-eval knots i p (aref knots (+ i k 1)) +left+))
+          (setf (aref maxs k) (basis-i-eval knots i p (aref knots (+ i k)) +left+)))
+        u))))
+
+(defun make-knots-compatible (knr kns p q)
+  "The knots to insert into the degree-P knot vector KNR and the degree-Q knot
+vector KNS to give them the same distinct knots.  When their ends differ (by
+more than *ptol*), the one with the shorter domain is first rescaled in place
+onto the other's domain (BASIS-REPARAM), so the input knots may change.
+Returns (values kxr kxs): fresh real-vectors of the knots to insert into KNR
+and into KNS (the C's caller-allocated kxr and kxs, sized by the knot index the
+C records), either possibly empty.  NLib: N_MakeKnotsCompatible."
+  (declare (type real-vector knr kns) (type fixnum p q))
+  (let* ((r knr) (s kns)
+         (mr (1- (length r))) (ms (1- (length s)))
+         (ptol *ptol*))
+    (declare (type real-vector r s) (type fixnum mr ms) (type double-float ptol))
+    ;; scale
+    (when (or (> (abs (- (aref r 0) (aref s 0))) ptol)
+              (> (abs (- (aref r mr) (aref s ms))) ptol))
+      (let ((iv (make-real-vector 2)))
+        (if (> (- (aref r mr) (aref r 0)) (- (aref s ms) (aref s 0)))
+            (progn
+              (create-interval iv (aref r 0) (aref r mr))
+              (basis-reparam kns q iv))
+            (progn
+              (create-interval iv (aref s 0) (aref s ms))
+              (basis-reparam knr p iv)))))
+    (let* ((nr (- mr p 1))
+           (ns (- ms q 1))
+           (xr (make-real-vector (+ mr ms 2)))
+           (xs (make-real-vector (+ mr ms 2)))
+           (mxr -1) (mxs -1)
+           (i (1+ p))
+           (j (1+ q)))
+      (declare (type fixnum nr ns mxr mxs i j) (type real-vector xr xs))
+      ;; find the knots to insert
+      (do () ((not (or (<= i nr) (<= j ns))))
+        (when (< (abs (- (aref r i) (aref s j))) ptol)
+          (do () ((not (and (<= i nr) (= (aref r i) (aref r (1+ i))))))
+            (incf i))
+          (do () ((not (and (<= j ns) (= (aref s j) (aref s (1+ j))))))
+            (incf j))
+          (incf i)
+          (incf j))
+        (when (< (aref r i) (aref s j))
+          (do () ((not (and (<= i nr) (= (aref r i) (aref r (1+ i))))))
+            (incf i))
+          (setf (aref xs (incf mxs)) (aref r i))
+          (incf i))
+        (when (> (aref r i) (aref s j))
+          (do () ((not (and (<= j ns) (= (aref s j) (aref s (1+ j))))))
+            (incf j))
+          (setf (aref xr (incf mxr)) (aref s j))
+          (incf j)))
+      (values (subseq xr 0 (1+ mxr)) (subseq xs 0 (1+ mxs))))))

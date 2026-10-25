@@ -227,3 +227,84 @@ then outside the domain) for knot vector K of degree P."
            (with-foreign ((kp k :knots) (ip iv :interval))
              (c-basis-reparam kp p ip)
              (values nil (list (from-foreign kp :knots)))))))
+
+;;; ------------------------------------------------------------- L2-g3
+
+(defun %p-fold-knots (k p)
+  "A copy of knot vector K (degree P) with, now and then, an interior knot
+repeated to multiplicity P (when K has room), so that some basis function has
+a P-fold inner knot.  Second value: the index of the basis function whose
+inner knots are that P-fold knot, or nil."
+  (let* ((k (copy-seq k)) (m (1- (length k))) (room (- m p p 1)) (at nil))
+    (when (and (>= room p) (zerop (rnd 3)))
+      (let ((i (+ p 1 (rnd (- room p -1)))))
+        (dotimes (c p)
+          (setf (aref k (+ i c)) (aref k i)))
+        (setf at (1- i))))
+    (values k at)))
+
+(define-oracle-test basis-find-all-span-maxima (:file "basis-basic" :trials 3000)
+  (let* ((c (random-curve)) (p (curve-degree c))
+         (n (- (length (curve-knots c)) p 2)))
+    (multiple-value-bind (k at) (%p-fold-knots (curve-knots c) p)
+      (let ((i (if (and at (zerop (rnd 2)))
+                   at
+                   (case (rnd 40) (0 -1) (1 (1+ n)) (t (rnd (1+ n))))))
+            (tol (case (rnd 4) (0 1d-6) (1 1d-10) (2 1d-12) (t 1d-8))))
+        (agree (list k i p tol)
+               (let ((mn (make-real-vector (1+ p))) (mx (make-real-vector (1+ p))))
+                 (let ((u (batten::basis-find-all-span-maxima k i p tol mn mx)))
+                   (list u mn mx)))
+               (with-foreign ((kp k :knots))
+                 (with-foreign-out ((mn :real-vector (1+ p)) (mx :real-vector (1+ p)))
+                   (with-scalars ((u :double))
+                     (values (c-flag-error-p (c-basis-find-all-span-maxima kp i p tol mn mx u))
+                             (list (cffi:mem-ref u :double)
+                                   (from-foreign mn :real-vector (1+ p))
+                                   (from-foreign mx :real-vector (1+ p))))))))))))
+
+(defun %compatible-knots (p lo hi &optional other)
+  "A random clamped degree-P knot vector on [LO, HI], interior knots repeated
+now and then (multiplicity at most P); when OTHER (a knot vector on the same
+domain) is given, some of its interior knots are reused."
+  (let* ((oint (when other
+                 (remove-if (lambda (x) (or (<= x lo) (>= x hi))) (coerce other 'list))))
+         (int nil))
+    (dotimes (c (rnd 10))
+      (push (cond ((and oint (zerop (rnd 2))) (nth (rnd (length oint)) oint))
+                  ((and int (zerop (rnd 5))) (first int))
+                  (t (+ lo (* (- hi lo) (+ 0.02d0 (rnd 0.96d0))))))
+            int))
+    (setf int (sort int #'<))
+    (let ((kept nil))
+      (dolist (x int)
+        (when (< (count x kept :test #'=) p) (push x kept)))
+      (coerce (append (make-list (1+ p) :initial-element lo)
+                      (nreverse kept)
+                      (make-list (1+ p) :initial-element hi))
+              'real-vector))))
+
+(define-oracle-test make-knots-compatible (:file "basis-basic" :trials 3000)
+  (let* ((p (1+ (rnd 5))) (q (1+ (rnd 5)))
+         (lo (if (zerop (rnd 3)) 0d0 (rnd-range -5d0 5d0)))
+         (hi (+ lo 0.5d0 (rnd 5d0)))
+         (knr (%compatible-knots p lo hi))
+         (kns (case (rnd 4)
+                ;; another domain: one is rescaled
+                (0 (let ((l2 (rnd-range -5d0 5d0))) (%compatible-knots q l2 (+ l2 0.5d0 (rnd 5d0)))))
+                ;; ends a hair apart, within *ptol*
+                (1 (let ((k (%compatible-knots q lo hi knr))
+                         (e (* 0.25d-12 (rnd 1d0))))
+                     (dotimes (j (1+ q)) (setf (aref k (- (length k) 1 j)) (+ hi e)))
+                     k))
+                (t (%compatible-knots q lo hi knr)))))
+    (agree (list knr p kns q)
+           (let ((r (copy-seq knr)) (s (copy-seq kns)))
+             (multiple-value-bind (xr xs) (batten::make-knots-compatible r s p q)
+               (list r s xr xs)))
+           (let ((cap (+ (length knr) (length kns) 2)))
+             (with-foreign ((rp knr :knots) (sp kns :knots)
+                            (xrp (make-real-vector cap) :knots) (xsp (make-real-vector cap) :knots))
+               (c-make-knots-compatible rp sp p q xrp xsp)
+               (values nil (list (from-foreign rp :knots) (from-foreign sp :knots)
+                                 (from-foreign xrp :knots) (from-foreign xsp :knots))))))))
