@@ -539,3 +539,34 @@ NLib: N_CrvIsPlanar."
           (when (> (abs (dist-signed-pt-plane a b c dd q)) tol)
             (return-from crv-is-planar +false+))))
       +true+)))
+
+;;; ------------------------------------------------------------ level 7, group 2
+
+(defun crvs-are-coincident (cur-p cur-q tol)
+  "True when curves CUR-P and CUR-Q coincide: after making them compatible
+(CRVS-MAKE-COMPATIBLE, which changes both in place), every pair of control
+points lies closer than TOL in homogeneous space (DIST-CPT-CPT-HOMO).  False
+as well when they cannot be made compatible.
+NLib: N_CrvsAreCoincident."
+  (declare (type curve cur-p cur-q) (type double-float tol))
+  (let ((cur (vector cur-p cur-q)))
+    (declare (type simple-vector cur))
+    ;; the C returns NL_FALSE when the curves cannot be made compatible
+    (handler-case (crvs-make-compatible cur 1)
+      (nurbs-error () (return-from crvs-are-coincident nil)))
+    (let* ((pw (curve-cpoints (svref cur 0)))
+           (qw (curve-cpoints (svref cur 1)))
+           (n (curve-n (svref cur 1)))
+           (dwmax -1.0d0)
+           (a (make-cpoint))
+           (b (make-cpoint)))
+      (declare (type cpoint-array pw qw) (type fixnum n) (type double-float dwmax)
+               (dynamic-extent a b))
+      (dotimes (i (1+ n))
+        (%row-c-pt pw i a)
+        (%row-c-pt qw i b)
+        (let ((dw (dist-cpt-cpt-homo a b)))
+          (declare (type double-float dw))
+          (when (> dw dwmax)
+            (setf dwmax dw))))
+      (< dwmax tol))))
