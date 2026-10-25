@@ -252,6 +252,18 @@ KNOTS has fewer than M+1 knots.  NLib: N_KnotsCheck."
         ((= (length knots) (1+ m)) knots)
         (t (subseq knots 0 (1+ m)))))
 
+(defun knots-copy (kna knb)
+  "Copy the knots of knot vector KNA into KNB and return KNB: a fresh knot
+vector when KNB is NIL, else KNB itself cut down to the length of KNA (as
+KNOTS-CHECK).  Signals :sto-err when KNB is shorter than KNA.
+NLib: N_KnotsCopy."
+  (declare (type real-vector kna) (type (or null real-vector) knb))
+  (let* ((ma (1- (length kna)))
+         (ub (knots-check knb ma 'knots-copy)))
+    (declare (type fixnum ma) (type real-vector ub))
+    (fast (dotimes (i (1+ ma)) (setf (aref ub i) (aref kna i))))
+    ub))
+
 ;;; ---------------------------------------------------------- spans and nodes
 
 (defun basis-find-span-and-mult (knots p u flg)
@@ -457,3 +469,102 @@ of the domain, +right+ from the left except at its start.  Signals :par-err,
                                   saved temp)))))))
               (setf (aref nd k) (aref ndl 0))))
           nd)))))
+
+(defun basis-find-global-max (knots i p tol)
+  "The global maximum of the Ith B-spline basis function of degree P on
+KNOTS, found by bracketing and Newton iteration to tolerance TOL.  Returns
+(values max u), U the parameter of the maximum.  Signals :ind-err for I
+outside 0..n, :num-err for a bad Newton division and :con-err when the
+iteration does not converge.  NLib: N_BasisFindGlobalMax."
+  (declare (type real-vector knots) (type fixnum i p) (type double-float tol))
+  (let* ((itl 20)
+         (nok 10)
+         (m (1- (length knots)))
+         (conv nil)
+         (nd (make-array 3 :element-type 'double-float :initial-element 0d0))
+         (u0 0d0))
+    (declare (type fixnum itl nok m) (type double-float u0) (dynamic-extent nd))
+    (when (or (< i 0) (> i (- m p 1)))
+      (nurbs-error :ind-err 'basis-find-global-max))
+    ;; linear as special case
+    (when (= p 1)
+      (return-from basis-find-global-max (values 1d0 (aref knots (1+ i)))))
+    ;; p-fold inner multiple knot
+    (let ((s 1))
+      (declare (type fixnum s))
+      (do ((k (1+ i) (1+ k))) ((>= k (+ i p)))
+        (declare (type fixnum k))
+        (when (= (aref knots k) (aref knots (1+ k)))
+          (incf s)))
+      (when (= s p)
+        (return-from basis-find-global-max (values 1d0 (aref knots (1+ i))))))
+    ;; guess parameter
+    (let* ((nos (* p nok))
+           (uend (aref knots (+ i p 1)))
+           (du (/ (- uend (aref knots i)) (float nos 1d0)))
+           (ur (aref knots i))
+           (ul (aref knots i))
+           (it 0))
+      (declare (type fixnum nos it) (type double-float uend du ur ul))
+      (do () ((not (< ur uend)))
+        (setf ul ur
+              ur (+ ur du))
+        (when (> ur uend) (setf ur uend))
+        (basis-i-derivs knots i p ur +left+ 1 nd)
+        (when (< (aref nd 1) 0d0) (return)))
+      ;; Newton iterations till convergence
+      (do () ((not (< it itl)))
+        (setf u0 (* 0.5d0 (+ ul ur)))
+        (let ((k 0))
+          (declare (type fixnum k))
+          (do () ((not (< k itl)))
+            (basis-i-derivs knots i p u0 +left+ 2 nd)
+            (when (and (< (abs (aref nd 1)) tol) (> (aref nd 0) tol))
+              (setf conv t)
+              (return))
+            (when (float-op-is-bad (aref nd 1) (aref nd 2) +division+)
+              (nurbs-error :num-err 'basis-find-global-max))
+            (setf u0 (- u0 (/ (aref nd 1) (aref nd 2))))
+            (when (or (<= u0 (aref knots i)) (>= u0 uend))
+              (return))
+            (incf k)))
+        (when conv (return))
+        ;; no convergence: refine [ul,ur] for a better guess
+        (setf du (/ (- ur ul) (float nok 1d0))
+              ur ul)
+        (do ((k 1 (1+ k))) ((> k nok))
+          (declare (type fixnum k))
+          (setf ul ur
+                ur (+ ur du))
+          (basis-i-derivs knots i p ur +left+ 1 nd)
+          (when (< (aref nd 1) 0d0) (return)))
+        (incf it))
+      (when (>= it itl)
+        (nurbs-error :con-err 'basis-find-global-max))
+      (values (aref nd 0) u0))))
+
+(defun basis-reparam (knots p interval)
+  "Map the degree-P knot vector KNOTS in place onto INTERVAL [a, b] (a
+real-vector of 2): end knots set to a and b, interior knots scaled linearly.
+Left alone when its ends already are a and b.  Returns KNOTS.
+NLib: N_BasisReparam."
+  (declare (type real-vector knots interval) (type fixnum p))
+  (let ((m (1- (length knots))))
+    (declare (type fixnum m))
+    (multiple-value-bind (ul ur) (interval-get-data interval)
+      (declare (type double-float ul ur))
+      (when (or (/= (aref knots 0) ul) (/= (aref knots m) ur))
+        (let* ((u0 (aref knots 0))
+               (fac (/ (- ur ul) (- (aref knots m) (aref knots 0)))))
+          (declare (type double-float u0 fac))
+          (fast
+            (do ((i 0 (1+ i))) ((> i p))
+              (declare (type fixnum i))
+              (setf (aref knots i) ul))
+            (do ((i (1+ p) (1+ i))) ((> i (- m p 1)))
+              (declare (type fixnum i))
+              (setf (aref knots i) (+ ul (* fac (- (aref knots i) u0)))))
+            (do ((i (- m p) (1+ i))) ((> i m))
+              (declare (type fixnum i))
+              (setf (aref knots i) ur))))))
+    knots))
