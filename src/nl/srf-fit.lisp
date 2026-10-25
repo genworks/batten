@@ -2176,3 +2176,159 @@ NLib: N_FitSrfApproxTol."
           (when (< iu pr) (incf iu))
           (when (< iv qr) (incf iv))))
       (srf-compress sur))))
+
+;;; ------------------------------------------------ interpolation with boundaries
+
+(defun fit-srf-interp-boundary (pnet k l bnd-u bnd-v u v)
+  "The surface interpolating the grid of points PNET[0..K][0..L] (a
+point-net) whose four boundaries are the curves BND-U (a sequence of two: v =
+vmin and v = vmax) and BND-V (two: u = umin and u = umax), each pair
+non-rational and compatible (:inp-err otherwise).  U[0..K] and V[0..L] are the
+parameters of the points (rescaled to the boundaries' domains when their ends
+differ), or NIL to have them blended from the projections of the boundary rows
+and columns onto the boundary curves.  The rows are interpolated in the
+v-direction first (degree of BND-V, knots offered by BND-V's), the columns of
+the compatible control points then in the u-direction, with
+fit-crv-knots-and-tangents; whatever the projections, the fits and the
+compatibility routine signal is passed on.  Returns a fresh surface.
+NLib: N_FitSrfInterpBoundary."
+  (declare (type point-net pnet) (type fixnum k l) (type sequence bnd-u bnd-v)
+           (type (or null real-vector) u v))
+  (let* ((bu (vector (elt bnd-u 0) (elt bnd-u 1)))
+         (bv (vector (elt bnd-v 0) (elt bnd-v 1)))
+         (per 0.8d0)
+         (pdt 0.001d0))
+    (declare (type simple-vector bu bv) (type double-float per pdt))
+    ;; check incoming data
+    (when (is-crv-rat (svref bu 0)) (nurbs-error :inp-err 'fit-srf-interp-boundary))
+    (when (is-crv-rat (svref bu 1)) (nurbs-error :inp-err 'fit-srf-interp-boundary))
+    (when (is-crv-rat (svref bv 0)) (nurbs-error :inp-err 'fit-srf-interp-boundary))
+    (when (is-crv-rat (svref bv 1)) (nurbs-error :inp-err 'fit-srf-interp-boundary))
+    (unless (crvs-are-combatible bu 1) (nurbs-error :inp-err 'fit-srf-interp-boundary))
+    (unless (crvs-are-combatible bv 1) (nurbs-error :inp-err 'fit-srf-interp-boundary))
+    (let* ((kbu (curve-knots (svref bu 0)))
+           (kbv (curve-knots (svref bv 0)))
+           (r (1- (length kbu)))
+           (s (1- (length kbv)))
+           (p (curve-degree (svref bu 0)))
+           (q (curve-degree (svref bv 0)))
+           (qa (make-point-array (1+ (nl-max k l))))
+           (pt (make-point))
+           (ui (make-real-vector 0)) (vi (make-real-vector 0))
+           (ub (make-real-vector 0)) (ut (make-real-vector 0))
+           (vl (make-real-vector 0)) (vr (make-real-vector 0)))
+      (declare (type real-vector kbu kbv ui vi ub ut vl vr) (type fixnum r s p q)
+               (type point-array qa) (type point pt))
+      ;; adjust the parameters if needed
+      (if u
+          (let ((u u))
+            (declare (type real-vector u))
+            (if (or (/= (aref u 0) (aref kbu 0)) (/= (aref u k) (aref kbu r)))
+                (let ((fac (/ (- (aref kbu r) (aref kbu 0)) (- (aref u k) (aref u 0)))))
+                  (declare (type double-float fac))
+                  (setf ui (make-real-vector (1+ k)))
+                  (do ((i 1 (1+ i))) ((>= i k))
+                    (declare (type fixnum i))
+                    (setf (aref ui i) (+ (aref kbu 0) (* fac (- (aref u i) (aref u 0))))))
+                  (setf (aref ui 0) (aref kbu 0)
+                        (aref ui k) (aref kbu r)))
+                (setf ui u)))
+          (progn
+            (setf ui (make-real-vector (1+ k)))
+            (dotimes (i (1+ k))
+              (%pt-row (%net-pt pnet i 0 pt) qa i))
+            (setf ub (nth-value 1 (crv-project-pts (svref bu 0) qa k pdt)))
+            (dotimes (i (1+ k))
+              (%pt-row (%net-pt pnet i l pt) qa i))
+            (setf ut (nth-value 1 (crv-project-pts (svref bu 1) qa k pdt)))))
+      (if v
+          (let ((v v))
+            (declare (type real-vector v))
+            (if (or (/= (aref v 0) (aref kbv 0)) (/= (aref v l) (aref kbv s)))
+                (let ((fac (/ (- (aref kbv s) (aref kbv 0)) (- (aref v l) (aref v 0)))))
+                  (declare (type double-float fac))
+                  (setf vi (make-real-vector (1+ l)))
+                  (do ((j 1 (1+ j))) ((>= j l))
+                    (declare (type fixnum j))
+                    (setf (aref vi j) (+ (aref kbv 0) (* fac (- (aref v j) (aref v 0))))))
+                  (setf (aref vi 0) (aref kbv 0)
+                        (aref vi l) (aref kbv s)))
+                (setf vi v)))
+          (progn
+            (setf vi (make-real-vector (1+ l)))
+            (dotimes (j (1+ l))
+              (%pt-row (%net-pt pnet 0 j pt) qa j))
+            (setf vl (nth-value 1 (crv-project-pts (svref bv 0) qa l pdt)))
+            (dotimes (j (1+ l))
+              (%pt-row (%net-pt pnet k j pt) qa j))
+            (setf vr (nth-value 1 (crv-project-pts (svref bv 1) qa l pdt)))))
+      ;; interpolate in the v-direction first
+      (let ((knv (knots-copy kbv nil))
+            (cur-v (make-array (1+ k)))
+            (row (make-point-array (1+ l))))
+        (declare (type real-vector knv) (type simple-vector cur-v) (type point-array row))
+        (setf (svref cur-v 0) (crv-copy (svref bv 0)))
+        (setf (svref cur-v k) (crv-copy (svref bv 1)))
+        (let ((fac (/ 1d0 (float k 1d0))))
+          (declare (type double-float fac))
+          (do ((i 1 (1+ i))) ((>= i k))
+            (declare (type fixnum i))
+            (let* ((alf (* (float i 1d0) fac))
+                   (oma (- 1d0 alf)))
+              (declare (type double-float alf oma))
+              (unless v
+                (dotimes (j (1+ l))
+                  (setf (aref vi j) (+ (* oma (aref vl j)) (* alf (aref vr j))))))
+              ;; the row P[i]
+              (dotimes (j (1+ l))
+                (%pt-row (%net-pt pnet i j pt) row j))
+              (multiple-value-bind (cur kn)
+                  (fit-crv-knots-and-tangents row l vi nil nil +tangent+ knv per q)
+                (setf (svref cur-v i) cur
+                      knv kn)))))
+        ;; make the curves compatible
+        (crvs-make-compatible cur-v k)
+        (let* ((vi* (curve-knots (svref cur-v 0)))
+               (mi (curve-n (svref cur-v 0)))
+               (knu (knots-copy kbu nil))
+               (cur-u (make-array (1+ mi)))
+               (c (make-cpoint)))
+          (declare (type real-vector vi* knu) (type fixnum mi) (type simple-vector cur-u)
+                   (type cpoint c))
+          ;; now interpolate in the u-direction
+          (setf (svref cur-u 0) (crv-copy (svref bu 0)))
+          (setf (svref cur-u mi) (crv-copy (svref bu 1)))
+          (let ((fac (/ 1d0 (float mi 1d0))))
+            (declare (type double-float fac))
+            (do ((j 1 (1+ j))) ((>= j mi))
+              (declare (type fixnum j))
+              (let* ((alf (* (float j 1d0) fac))
+                     (oma (- 1d0 alf)))
+                (declare (type double-float alf oma))
+                (dotimes (i (1+ k))
+                  (%row-c-pt (curve-cpoints (svref cur-v i)) j c)
+                  (%pt-row (c-pt-to-pt-euclid c pt) qa i))
+                (unless u
+                  (dotimes (i (1+ k))
+                    (setf (aref ui i) (+ (* oma (aref ub i)) (* alf (aref ut i))))))
+                (multiple-value-bind (cur kn)
+                    (fit-crv-knots-and-tangents qa k ui nil nil +tangent+ knu per p)
+                  (setf (svref cur-u j) cur
+                        knu kn)))))
+          ;; make the curves compatible
+          (crvs-make-compatible cur-u mi)
+          (let* ((ui* (curve-knots (svref cur-u 0)))
+                 (ni (curve-n (svref cur-u 0)))
+                 (sw (make-cpoint-net (1+ ni) (1+ mi)))
+                 (us (make-real-vector (length ui*)))
+                 (vs (make-real-vector (length vi*))))
+            (declare (type real-vector ui* us vs) (type fixnum ni) (type cpoint-net sw))
+            ;; the output surface
+            (dotimes (j (1+ mi))
+              (let ((cw (curve-cpoints (svref cur-u j))))
+                (declare (type cpoint-array cw))
+                (dotimes (i (1+ (curve-n (svref cur-u j))))
+                  (%c-pt-net (%row-c-pt cw i c) sw i j))))
+            (replace us ui*)
+            (replace vs vi*)
+            (%make-surface p q us vs sw)))))))
