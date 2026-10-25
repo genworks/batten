@@ -32,7 +32,8 @@ OUT=$(cd "$OUT" && pwd)
 # NLib cannot be linked alone: its headers pull in the kernel's smos_ utilities
 # and inline members of Sm classes.  The oracle is the whole kernel, with only
 # the NL_ files compiled as described above.
-cp "$SMLIB_SRC"/src/*.cpp "$OUT/src/"
+# -p keeps the sources' times, so unchanged objects are not rebuilt
+cp -p "$SMLIB_SRC"/src/*.cpp "$OUT/src/"
 
 sed -i 's|^// NL_PRIVATE NL_REAL eps = 1.0e-03;|NL_PRIVATE NL_REAL eps = 1.0e-03;|' "$OUT/src/NL_SrfTool.cpp"
 sed -i 's|vdr, BD, &usp, &vsp );|vdr, *(NL_BASISDERIVATIVES *) BD, \&usp, \&vsp );|' "$OUT/src/NL_SrfAdv.cpp"
@@ -54,6 +55,9 @@ cat > "$OUT/src/oracle-short-names.h" <<'EOF'
 EOF
 
 FLAGS="-std=c++17 -O2 -fPIC -w -DNDEBUG -DNOMINMAX -I$SMLIB_SRC/inc"
+# at most JOBS compiles at once: one per file at once (180) squeezes the
+# other containers on a shared host into swap
+JOBS=${JOBS:-8}
 pids=()
 for f in "$OUT"/src/*.cpp; do
   b=$(basename "$f" .cpp)
@@ -66,12 +70,12 @@ for f in "$OUT"/src/*.cpp; do
   esac
   # objects already built from an unchanged copy are kept
   if [ ! -f "$OUT/obj/$b.o" ] || [ "$f" -nt "$OUT/obj/$b.o" ] || [ "$0" -nt "$OUT/obj/$b.o" ]; then
+    while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n || fail=1; done
     g++ $FLAGS $extra -c "$f" -o "$OUT/obj/$b.o" 2> "$OUT/obj/$b.err" &
-    pids+=($!)
   fi
 done
-fail=0
-for p in "${pids[@]}"; do wait "$p" || fail=1; done
+fail=${fail:-0}
+while [ "$(jobs -rp | wc -l)" -gt 0 ]; do wait -n || fail=1; done
 if [ $fail -ne 0 ]; then
   for e in "$OUT"/obj/*.err; do [ -s "$e" ] && { echo "== $e"; grep -m5 error "$e"; }; done
   exit 1

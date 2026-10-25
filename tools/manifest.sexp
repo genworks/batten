@@ -1037,4 +1037,10 @@
    :callees ("N_ErrSet" "N_GetMaxIndexRealMatrix"))
  (:c "N_ErrGetType" :lisp "err-get-type" :file "NL_Util.cpp" :line 8857 :lines 4 :wave 0 :status :vanish :root t
    :callees ())
+ (:c "N_CalcCircArcDerivs" :lisp "calc-circ-arc-derivs" :file "NL_Geom.cpp" :line 9131 :lines 32 :wave 0 :status :done
+   :callees ("N_Combine2Pts" "N_TranslateSum2Pts"))
+ (:c "N_ScaleCPtWithPtAndVector" :lisp "scale-c-pt-with-pt-and-vector" :file "NL_Math.cpp" :line 1160 :lines 27 :wave 0 :status :done
+   :callees ())
+ (:c "N_SrfRatToNonRat" :lisp "srf-rat-to-non-rat" :file "NL_SrfBasic.cpp" :line 4920 :lines 13 :wave 0 :status :done
+   :callees ("N_CPtSetW" "N_SrfGetCPts"))
 )

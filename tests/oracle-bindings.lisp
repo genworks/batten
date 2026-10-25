@@ -2012,3 +2012,15 @@
 
 ;; NL_INTEGER N_ErrGetType()
 (cffi:defcfun ("shim_N_ErrGetType" c-err-get-type) :long)
+
+;; NL_VOID N_CalcCircArcDerivs(NL_POINT O, NL_VECTOR X, NL_VECTOR Y, NL_REAL R, NL_REAL ang, NL_INDEX k, NL_VECTOR *D)
+(cffi:defcfun ("shim_N_CalcCircArcDerivs" c-calc-circ-arc-derivs) :void
+  (o :pointer) (x :pointer) (y :pointer) (r :double) (ang :double) (k :long) (d :pointer))
+
+;; NL_VOID N_ScaleCPtWithPtAndVector(NL_CPOINT Pw, NL_POINT C, NL_VECTOR f, NL_CPOINT *Qw)
+(cffi:defcfun ("shim_N_ScaleCPtWithPtAndVector" c-scale-c-pt-with-pt-and-vector) :void
+  (pw :pointer) (c :pointer) (f :pointer) (qw :pointer))
+
+;; NL_VOID N_SrfRatToNonRat(NL_SURFACE *sur)
+(cffi:defcfun ("shim_N_SrfRatToNonRat" c-srf-rat-to-non-rat) :void
+  (sur :pointer))
