@@ -41,6 +41,72 @@
   (declare (type cpoint-array a) (type index i) (type cpoint cp))
   (set-cpoint cp (aref a i 0) (aref a i 1) (aref a i 2) (aref a i 3)))
 
+;;; ------------------------------------------------------- knot insertion
+
+(defun crv-insert-knot (cur-p u r)
+  "Curve CUR-P with the knot U, strictly inside the domain, inserted R times,
+as a fresh curve.  Signals :par-err when U is on or outside an end of the
+domain, when R is negative, or when U's multiplicity plus R exceeds the
+degree.  NLib: N_CrvInsertKnot (the C's in-place case, curP = curQ, computes
+the same curve)."
+  (declare (type curve cur-p) (type double-float u) (type fixnum r))
+  (let* ((n (curve-n cur-p))
+         (pw (curve-cpoints cur-p))
+         (p (curve-degree cur-p))
+         (m (curve-m cur-p))
+         (up (curve-knots cur-p)))
+    (declare (type fixnum n p m) (type cpoint-array pw) (type real-vector up))
+    ;; check parameter and get knot span
+    (knot-vector-is-end-param up u 'crv-insert-knot)
+    (multiple-value-bind (spn mlt) (basis-find-span-and-mult up p u +left+)
+      (declare (type fixnum spn mlt))
+      (when (or (> (+ mlt r) p) (< r 0))
+        (nurbs-error :par-err 'crv-insert-knot))
+      (let ((k (- spn p))
+            (qw (make-cpoint-array (+ n r 1)))
+            (uq (make-real-vector (+ m r 1)))
+            (rw (make-cpoint-array (1+ p))))
+        (declare (type fixnum k) (type cpoint-array qw rw) (type real-vector uq))
+        (fast
+          ;; auxiliary control points
+          (do ((i 0 (1+ i))) ((> i (- p mlt)))
+            (declare (type fixnum i))
+            (%copy-c-pt-row pw (+ k i) rw i))
+          ;; unaltered control points
+          (do ((i 0 (1+ i))) ((> i k))
+            (declare (type fixnum i))
+            (%copy-c-pt-row pw i qw i))
+          (do ((i (- spn mlt) (1+ i))) ((> i n))
+            (declare (type fixnum i))
+            (%copy-c-pt-row pw i qw (+ i r)))
+          ;; now insert the knot
+          (do ((i 1 (1+ i))) ((> i r))
+            (declare (type fixnum i))
+            (setf k (+ (- spn p) i))
+            (do ((j 0 (1+ j))) ((> j (- p i mlt)))
+              (declare (type fixnum j))
+              (let* ((alf (/ (- u (aref up (+ k j))) (- (aref up (+ spn j 1)) (aref up (+ k j)))))
+                     (oma (- 1d0 alf)))
+                (declare (type double-float alf oma))
+                (%combine-2-c-pt-rows alf rw (1+ j) oma rw j rw j)))
+            (%copy-c-pt-row rw 0 qw k)
+            (%copy-c-pt-row rw (- p i mlt) qw (- (+ spn r) i mlt)))
+          ;; load the remaining control points
+          (do ((i (1+ k) (1+ i))) ((>= i (- spn mlt)))
+            (declare (type fixnum i))
+            (%copy-c-pt-row rw (- i k) qw i))
+          ;; load the knot vector
+          (do ((i 0 (1+ i))) ((> i spn))
+            (declare (type fixnum i))
+            (setf (aref uq i) (aref up i)))
+          (do ((i 1 (1+ i))) ((> i r))
+            (declare (type fixnum i))
+            (setf (aref uq (+ i spn)) u))
+          (do ((i (1+ spn) (1+ i))) ((> i m))
+            (declare (type fixnum i))
+            (setf (aref uq (+ i r)) (aref up i))))
+        (%make-curve p uq qw)))))
+
 ;;; ------------------------------------------------------- decomposition
 
 (defun %next-bez-cpoints (nqw)
@@ -254,6 +320,87 @@ NLib: N_CrvRefine."
             (setf (aref uq k) (aref x j))
             (decf k))))
       (%make-curve p uq qw))))
+
+;;; ---------------------------------------------------------- segments
+
+(defun crv-extract-crv-seg (cur-p ul ur)
+  "The segment of curve CUR-P over [UL, UR], as a fresh clamped curve.
+Signals :inp-err when UR <= UL or the segment has no control points.
+NLib: N_CrvExtractCrvSeg (the C's in-place case, curP = curQ, computes the
+same curve)."
+  (declare (type curve cur-p) (type double-float ul ur))
+  (let* ((pw (curve-cpoints cur-p))
+         (p (curve-degree cur-p))
+         (m (curve-m cur-p))
+         (up (curve-knots cur-p)))
+    (declare (type fixnum p m) (type cpoint-array pw) (type real-vector up))
+    ;; check parameters
+    (when (<= ur ul)
+      (nurbs-error :inp-err 'crv-extract-crv-seg))
+    ;; find knot spans and set new indexes
+    (multiple-value-bind (spl mll) (basis-find-span-and-mult up p ul +left+)
+      (declare (type fixnum spl mll))
+      (multiple-value-bind (spr mlr) (basis-find-span-and-mult up p ur +left+)
+        (declare (type fixnum spr mlr))
+        (let ((is (- spl p)))
+          (declare (type fixnum is))
+          (when (= ur (aref up (- m p)))
+            (setf spr m
+                  mlr (1+ p)))
+          (let* ((ie (- spr mlr))
+                 (nn (- ie is))
+                 (mm (+ (- spr spl mlr) (* 2 p) 1)))
+            (declare (type fixnum ie nn mm))
+            (when (< nn 0)
+              (nurbs-error :inp-err 'crv-extract-crv-seg))
+            (let ((qw (make-cpoint-array (1+ nn)))
+                  (uq (make-real-vector (1+ mm))))
+              (declare (type cpoint-array qw) (type real-vector uq))
+              (fast
+                ;; initial control points
+                (do ((i is (1+ i))) ((> i ie))
+                  (declare (type fixnum i))
+                  (%copy-c-pt-row pw i qw (- i is)))
+                ;; insert the left knot
+                (let ((ll (- spl p)))
+                  (declare (type fixnum ll))
+                  (do ((i 1 (1+ i))) ((> i (- p mll)))
+                    (declare (type fixnum i))
+                    (do ((j 0 (1+ j))) ((> j (- p i mll)))
+                      (declare (type fixnum j))
+                      (let* ((left (aref up (+ ll i j)))
+                             (alf (/ (- ul left) (- (aref up (+ spl j 1)) left)))
+                             (oma (- 1d0 alf)))
+                        (declare (type double-float left alf oma))
+                        (%combine-2-c-pt-rows alf qw (1+ j) oma qw j qw j)))))
+                ;; insert the right knot
+                (let ((lr (- spr p))
+                      (lk (+ (- nn p) mlr)))
+                  (declare (type fixnum lr lk))
+                  (do ((i 1 (1+ i))) ((> i (- p mlr)))
+                    (declare (type fixnum i))
+                    (do ((j (- p i mlr) (1- j))) ((< j 0))
+                      (declare (type fixnum j))
+                      (let ((k (+ lk i j))
+                            (left (aref up (+ lr i j))))
+                        (declare (type fixnum k) (type double-float left))
+                        (when (< left ul)
+                          (setf left ul))
+                        (let* ((alf (/ (- ur left) (- (aref up (+ spr j 1)) left)))
+                               (oma (- 1d0 alf)))
+                          (declare (type double-float alf oma))
+                          (%combine-2-c-pt-rows alf qw k oma qw (1- k) qw k))))))
+                ;; load the knot vector
+                (let ((j -1))
+                  (declare (type fixnum j))
+                  (dotimes (i (1+ p))
+                    (setf (aref uq (incf j)) ul))
+                  (do ((i (1+ spl) (1+ i))) ((> i (- spr mlr)))
+                    (declare (type fixnum i))
+                    (setf (aref uq (incf j)) (aref up i)))
+                  (dotimes (i (1+ p))
+                    (setf (aref uq (incf j)) ur))))
+              (%make-curve p uq qw))))))))
 
 ;;; ------------------------------------------------------------ knot removal
 
