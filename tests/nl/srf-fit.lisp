@@ -90,6 +90,26 @@ lack z when TWO-D."
            (dotimes (i rows) (dotimes (j cols) (dotimes (c k) (setf (aref a i j c) (aref a 0 0 c))))))))
     a))
 
+(define-oracle-test fit-calc-srf-param-values (:file "srf-fit" :trials 6000)
+  (let* ((n (rnd 11)) (m (rnd 11))
+         (ptp (case (rnd 40) (0 3) (t (if (zerop (rnd 2)) +epoint+ +hpoint+))))
+         (par (case (rnd 40) (0 7) (t (1+ (rnd 3)))))
+         (a (if (= ptp +hpoint+)
+                (%random-grid (1+ n) (1+ m) :k 4 :rational (zerop (rnd 2)) :two-d (zerop (rnd 5)))
+                (%random-grid (1+ n) (1+ m))))
+         (u0 (random-real-vector (1+ n)))
+         (v0 (random-real-vector (1+ m))))
+    (agree (list :n n :m m :ptp ptp :par par :a a)
+           (let ((u (copy-seq u0)) (v (copy-seq v0)))
+             (batten::fit-calc-srf-param-values a n m ptp par u v)
+             (list u v))
+           (with-foreign ((ap a (if (= ptp +hpoint+) :cpoint-net :point-net))
+                          (up u0 :real-vector) (vp v0 :real-vector))
+             (if (c-flag-error-p (c-fit-calc-srf-param-values ap n m ptp par up vp))
+                 (values t nil)
+                 (values nil (list (from-foreign up :real-vector (1+ n))
+                                   (from-foreign vp :real-vector (1+ m)))))))))
+
 (defun %random-fit-sizes ()
   "Highest data indexes R, S, control point indexes N, M and degrees P, Q for
 a least-squares surface fit: valid mostly, now and then out of range."
@@ -169,3 +189,136 @@ a least-squares surface fit: valid mostly, now and then out of range."
                        (values nil (list (from-foreign sur :surface)
                                          (from-foreign ap (if (= ptp +hpoint+) :cpoint-net :point-net)
                                                        (1+ r) (1+ s))))))))))))
+
+;;; ------------------------------------------------ interpolation with given knots
+
+(define-oracle-test fit-srf-to-pts-knots (:file "srf-fit" :trials 5000)
+  (let* ((n (if (zerop (rnd 20)) 0 (1+ (rnd 10)))) (m (if (zerop (rnd 20)) 0 (1+ (rnd 10))))
+         ;; degrees at least 1 (the C writes outside its band matrix for 0),
+         ;; now and then above the point count; q = 0 is harmless
+         (p (if (zerop (rnd 15)) (+ n 1) (1+ (rnd (max 1 (min n 5))))))
+         (q (case (rnd 30) (0 0) (1 (+ m 1)) (t (1+ (rnd (max 1 (min m 5)))))))
+         (ptp (case (rnd 40) (0 3) (t (if (zerop (rnd 2)) +epoint+ +hpoint+))))
+         (a (if (= ptp +hpoint+)
+                (%random-grid (1+ n) (1+ m) :k 4 :rational (zerop (rnd 2)) :two-d (zerop (rnd 5)))
+                (%random-grid (1+ n) (1+ m))))
+         (ulo (if (zerop (rnd 2)) 0d0 (- (rnd 10d0) 5d0))) (uhi (+ ulo 0.5d0 (rnd 5d0)))
+         (vlo (if (zerop (rnd 2)) 0d0 (- (rnd 10d0) 5d0))) (vhi (+ vlo 0.5d0 (rnd 5d0)))
+         (u (%random-fit-params n ulo uhi))
+         (v (%random-fit-params m vlo vhi))
+         ;; averaged knots mostly (a solvable system), random knots now and then
+         (knu (if (and (<= p n) (plusp (rnd 6)))
+                  (batten::fit-crv-calc-knot-vector u n p (make-real-vector (+ n p 2)))
+                  (random-knots p (+ n 1) :lo ulo :hi uhi)))
+         (knv (if (and (<= q m) (plusp (rnd 6)))
+                  ;; degree 0 averages no parameters: 0/0 knots, as in the C
+                  (batten::with-c-float-environment
+                    (batten::fit-crv-calc-knot-vector v m q (make-real-vector (+ m q 2))))
+                  (random-knots q (+ m 1) :lo vlo :hi vhi))))
+    ;; now and then a knot vector of the wrong length
+    (when (zerop (rnd 30))
+      (setf knv (random-knots q (+ m 2) :lo vlo :hi vhi)))
+    (agree (list :n n :m m :ptp ptp :u u :v v :knu knu :knv knv :p p :q q :a a)
+           (list (batten::fit-srf-to-pts-knots a n m ptp u v knu knv p q))
+           (with-foreign ((ap a (if (= ptp +hpoint+) :cpoint-net :point-net))
+                          (up u :real-vector) (vp v :real-vector)
+                          (ku knu :knots) (kv knv :knots))
+             (with-stacks (sg)
+               (with-foreign-out ((sur :surface))
+                 (if (c-flag-error-p (c-fit-srf-to-pts-knots ap n m ptp up vp ku kv p q sur sg))
+                     (values t nil)
+                     (values nil (list (from-foreign sur :surface))))))))))
+
+;;; ------------------------------------------------ surface function interpolation
+
+(defun %increasing-params (count)
+  "COUNT+1 strictly increasing parameters, gaps at least 0.05."
+  (let ((u (make-real-vector (1+ count)))
+        (x (if (zerop (rnd 2)) 0d0 (- (rnd 10d0) 5d0))))
+    (dotimes (i (1+ count) u)
+      (setf (aref u i) x)
+      (setf x (+ x 0.05d0 (rnd (if (zerop (rnd 3)) 0.2d0 2d0)))))))
+
+(define-oracle-test fit-srf-func-interp (:file "srf-fit" :trials 5000)
+  (let* ((n (if (zerop (rnd 20)) 0 (1+ (rnd 10)))) (m (if (zerop (rnd 20)) 0 (1+ (rnd 10))))
+         ;; p >= 1 (the C writes outside its band matrix for 0); q = 0 is harmless
+         (p (if (zerop (rnd 15)) (+ n 1) (1+ (rnd (max 1 (min n 5))))))
+         (q (case (rnd 30) (0 0) (1 (+ m 1)) (t (1+ (rnd (max 1 (min m 5)))))))
+         (f (if (zerop (rnd 10))
+                (make-real-matrix (1+ n) (1+ m))
+                (random-real-matrix (1+ n) (1+ m))))
+         ;; strictly increasing parameters keep the C inside its band matrix
+         (u (%increasing-params n))
+         (v (%increasing-params m)))
+    (agree (list :n n :m m :p p :q q :u u :v v :f f)
+           (list (batten::fit-srf-func-interp f n m p q u v))
+           (with-foreign ((fp f :real-matrix) (up u :real-vector) (vp v :real-vector))
+             (with-stacks (sg)
+               (with-foreign-out ((sfn :sfun))
+                 (if (c-flag-error-p (c-fit-srf-func-interp fp n m p q up vp sfn sg))
+                     (values t nil)
+                     (values nil (list (from-foreign sfn :sfun))))))))))
+
+;;; ------------------------------------------------ knot removal
+
+(defun %copy-surface (sur)
+  (batten::%make-surface (surface-degree-u sur) (surface-degree-v sur)
+                         (copy-seq (surface-knots-u sur)) (copy-seq (surface-knots-v sur))
+                         (%copy-net (surface-cpoints sur))))
+
+(defun %new-interior-knots (knots count)
+  "COUNT sorted random knots strictly inside the domain of KNOTS."
+  (let* ((lo (aref knots 0)) (hi (aref knots (1- (length knots))))
+         (ks (sort (let (l) (dotimes (i count l) (push (+ lo (* (- hi lo) (+ 0.01d0 (rnd 0.98d0)))) l)))
+                   #'<)))
+    (coerce ks 'real-vector)))
+
+(defun %check-params (knots count)
+  "COUNT+1 sorted parameters spanning the domain of KNOTS, the ends exact,
+now and then a knot among them."
+  (let* ((lo (aref knots 0)) (hi (aref knots (1- (length knots))))
+         (u (make-real-vector (1+ count))))
+    (dotimes (i (1+ count))
+      (setf (aref u i) (if (zerop (rnd 6))
+                           (aref knots (rnd (length knots)))
+                           (+ lo (rnd (- hi lo))))))
+    (setf u (sort u #'<))
+    (setf (aref u 0) lo (aref u count) hi)
+    u))
+
+(define-oracle-test fit-srf-approx-remove-knots (:file "srf-fit" :trials 2000)
+  (let ((sur (random-surface :max-degree 4 :max-extra 6 :two-d (zerop (rnd 5))))
+        (dir (case (rnd 3) (0 +udir+) (1 +vdir+) (t +uvdir+))))
+    ;; knots inserted now and then: removable within rounding
+    (when (zerop (rnd 2))
+      (setf sur (batten::srf-insert-knots sur (%new-interior-knots (surface-knots-u sur) (1+ (rnd 3))) +udir+)))
+    (when (zerop (rnd 2))
+      (setf sur (batten::srf-insert-knots sur (%new-interior-knots (surface-knots-v sur) (1+ (rnd 3))) +vdir+)))
+    (let* ((mu (1+ (rnd 14))) (mv (1+ (rnd 14)))
+           (up (%check-params (surface-knots-u sur) mu))
+           (vp (%check-params (surface-knots-v sur) mv))
+           (e (progn
+                ;; now and then a parameter past the end of the domain: the
+                ;; evaluations fail on it (when they reach it)
+                (when (zerop (rnd 40))
+                  (if (zerop (rnd 2))
+                      (incf (aref up mu) 0.5d0)
+                      (incf (aref vp mv) 0.5d0)))
+                (case (rnd 8) (0 0d0) (1 1d-9) (2 1d-3) (3 (rnd 1d0)) (4 (rnd 20d0))
+                (5 (rnd 200d0)) (6 1d4) (t 1d30))))
+           (er (let ((a (make-real-matrix (1+ mu) (1+ mv))))
+                 (unless (zerop (rnd 3))
+                   (dotimes (i (1+ mu))
+                     (dotimes (j (1+ mv))
+                       (setf (aref a i j) (rnd (if (< e 1d10) (max e 1d-6) 10d0))))))
+                 a)))
+      (agree (list :surface sur :up up :vp vp :mu mu :mv mv :e e :dir dir :er er)
+             (let ((s2 (%copy-surface sur)) (er2 (%copy-real-matrix er)))
+               (batten::fit-srf-approx-remove-knots s2 up vp er2 mu mv e dir)
+               (list s2 er2))
+             (with-foreign ((sp sur :surface) (upp up :real-vector) (vpp vp :real-vector)
+                            (erp er :real-matrix))
+               (if (c-flag-error-p (c-fit-srf-approx-remove-knots sp upp vpp erp mu mv e dir))
+                   (values t nil)
+                   (values nil (list (from-foreign sp :surface)
+                                     (from-foreign erp :real-matrix (1+ mu) (1+ mv))))))))))
