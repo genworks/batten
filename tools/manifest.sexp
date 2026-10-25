@@ -17,7 +17,7 @@
    :callees ("N_AllocReal1dArray" "N_AllocReal2dArray" "N_BasisFindSpan" "N_EndNurbs" "N_InitNurbs" "N_KnotVectorGetKnots" "N_SwapIntegers"))
  (:c "N_KnotVectorIsParamOutOfBounds" :lisp "knot-vector-is-param-out-of-bounds" :file "NL_BasisBasic.cpp" :line 55 :lines 13 :wave 0 :status :done
    :callees ("N_ErrSet" "N_KnotVectorGetKnots"))
- (:c "N_KnotVectorIsEndParam" :lisp "knot-vector-is-end-param" :file "NL_BasisBasic.cpp" :line 110 :lines 16 :wave 0 :status :port
+ (:c "N_KnotVectorIsEndParam" :lisp "knot-vector-is-end-param" :file "NL_BasisBasic.cpp" :line 110 :lines 16 :wave 0 :status :done
    :callees ("N_ErrSet" "N_KnotVectorGetKnots"))
  (:c "N_KnotVectorIsValid" :lisp "knot-vector-is-valid" :file "NL_BasisBasic.cpp" :line 172 :lines 43 :wave 0 :status :done
    :callees ("N_ErrSet" "N_KnotVectorGetKnots"))
@@ -349,7 +349,7 @@
    :callees ("N_AllocInt1dArray" "N_AllocKnotVectorAndArray" "N_AllocPt1dArray" "N_AllocReal1dArray" "N_CreateCircArc" "N_CreateInterval" "N_Crv3dTo2d" "N_CrvCompress" "N_CrvDecomposeBez" "N_CrvDerivs" "N_CrvEvalTangent" "N_CrvGetArraySizes" "N_CrvGetDegree" "N_CrvGetKnots" "N_CrvGetType" "N_CrvInitArrays" "N_CrvIs3d" "N_CrvLineFromPtAndVector" "N_CrvOffsetGetMax2ndDeriv" "N_CrvRemoveKnotsDerivConstraints" "N_CrvReparamToInterval" "N_DistPolygon" "N_EndNurbs" "N_FitCalcCrvParamValues" "N_FitCalcKnotVectorEndDerivs" "N_FitCrvCalcKnotVector" "N_FitCrvInterpGivenParams" "N_FitCrvKnotsAndDerivs" "N_FloatOpIsBad" "N_InitNurbs" "N_VectorBlendPt" "N_VectorCopy" "N_VectorCross" "N_VectorNormalizeRef" "N_VectorPtAlongVector" "N_VectorScale"))
  (:c "N_CrvInsertKnot" :lisp "crv-insert-knot" :file "NL_CrvTool.cpp" :line 65 :lines 79 :wave 1 :status :port
    :callees ("N_AllocCPt1dArray" "N_AllocCrvArrays" "N_BasisFindSpanAndMult" "N_Combine2CPts" "N_CopyCPt" "N_CrvGetCPtsAndKnots" "N_CrvGetCPtsDegreeAndKnots" "N_CrvGetKnotVector" "N_CrvSizeArrays" "N_EndNurbs" "N_FreeCrv" "N_InitNurbs" "N_KnotVectorIsEndParam"))
- (:c "N_CrvDecomposeBez" :lisp "crv-decompose-bez" :file "NL_CrvTool.cpp" :line 811 :lines 109 :wave 1 :status :port :root t
+ (:c "N_CrvDecomposeBez" :lisp "crv-decompose-bez" :file "NL_CrvTool.cpp" :line 811 :lines 109 :wave 1 :status :done :root t
    :callees ("N_Alloc1dArrayCrvs" "N_AllocReal1dArray" "N_BasisGetSpanCount" "N_Combine2CPts" "N_CopyCPt" "N_CrvGetCPts" "N_CrvGetCPtsAndKnots" "N_CrvGetCPtsDegreeAndKnots" "N_CrvGetKnotVector" "N_EndNurbs" "N_InitNurbs"))
  (:c "N_CrvDecomposeContinuity" :lisp "crv-decompose-continuity" :file "NL_CrvTool.cpp" :line 1031 :lines 74 :wave 1 :status :done :root t
    :callees ("N_AllocArrayCrvPtrs" "N_AllocCrvAndArrays" "N_AllocInt1dArray" "N_CopyCPt" "N_CrvGetCPtsAndKnots" "N_CrvGetCPtsDegreeAndKnots" "N_EndNurbs" "N_InitNurbs"))
