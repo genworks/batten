@@ -987,3 +987,164 @@ NLib: N_SrfReparamFunc."
                                                 (%copy-c-pt-row qw k c k))))
                 (crv-compress cur-q))
               cur-q)))))))
+
+;;; ------------------------------------------------------------- L5-g1
+
+(defun %crv-adv-become-crv (cur new)
+  "Make curve CUR, in place, the curve NEW (sharing NEW's arrays), as the C's
+in-place operators (curP = curQ) overwrite their input.  Returns CUR."
+  (declare (type curve cur new))
+  (setf (curve-degree cur) (curve-degree new)
+        (curve-knots cur) (curve-knots new)
+        (curve-cpoints cur) (curve-cpoints new))
+  cur)
+
+(defun %crv-adv-become-srf (sur new)
+  "Make surface SUR, in place, the surface NEW (sharing NEW's arrays), as the
+C's in-place operators (surP = surQ) overwrite their input.  Returns SUR."
+  (declare (type surface sur new))
+  (setf (surface-degree-u sur) (surface-degree-u new)
+        (surface-degree-v sur) (surface-degree-v new)
+        (surface-knots-u sur) (surface-knots-u new)
+        (surface-knots-v sur) (surface-knots-v new)
+        (surface-cpoints sur) (surface-cpoints new))
+  sur)
+
+(defun crv-make-compatible-with-srf (cur sur dir ts te)
+  "Make curve CUR and surface SUR's DIR direction (+udir+, else the v
+direction) compatible, both modified in place: the same rationality (the
+non-rational one gets unit weights), both reparametrized onto [TS, TE], the
+lower degree elevated to the higher, and the knot vectors merged (knots closer
+than 1e-8 moved to their average, in place) and inserted.  Returns CUR.
+Signals what the elevation, the merge and the refinement signal (:cal-err
+from the surface operators for a DIR that is neither +udir+ nor +vdir+).
+NLib: N_CrvMakeCompatibleWithSrf."
+  (declare (type curve cur) (type surface sur) (type fixnum dir) (type double-float ts te))
+  (let* ((pc (curve-degree cur))
+         (uc (curve-knots cur))
+         (mc (1- (length uc)))
+         (ratc (is-crv-rat cur))
+         (rats (is-srf-rat sur)))
+    (declare (type fixnum pc mc) (type real-vector uc))
+    ;; make the rationality of each compatible
+    (when (and ratc (not rats))
+      (srf-non-rat-to-rat sur))
+    (when (and rats (not ratc))
+      (crv-non-rat-to-rat cur))
+    ;; the u/v-directional data
+    (let* ((ps (if (= dir +udir+) (surface-degree-u sur) (surface-degree-v sur)))
+           (us (if (= dir +udir+) (surface-knots-u sur) (surface-knots-v sur)))
+           (ms (1- (length us)))
+           (pint (make-real-vector 2)))
+      (declare (type fixnum ps ms) (type real-vector us pint))
+      ;; reparametrize to a common interval
+      (create-interval pint ts te)
+      (when (or (/= (aref uc 0) ts) (/= (aref uc mc) te))
+        (basis-reparam uc pc pint))
+      (when (or (/= (aref us 0) ts) (/= (aref us ms) te))
+        (basis-reparam us ps pint))
+      ;; degree elevate if necessary
+      (cond ((< pc ps)
+             (%crv-adv-become-crv cur (crv-elevate-degree cur (- ps pc))))
+            ((< ps pc)
+             (%crv-adv-become-srf sur (srf-elevate-degree sur (- pc ps) dir))))
+      ;; merge the knot vectors
+      (let* ((knt (vector (curve-knots cur)
+                          (if (= dir +udir+) (surface-knots-u sur) (surface-knots-v sur))))
+             (knx (get-compatible-knot-array knt 1))
+             (kx0 (svref knx 0))
+             (kx1 (svref knx 1)))
+        (declare (type simple-vector knt knx) (type real-vector kx0 kx1))
+        ;; refine the curve and/or the surface
+        (when (>= (1- (length kx0)) 0)
+          (%crv-adv-become-crv cur (crv-refine cur kx0)))
+        (when (>= (1- (length kx1)) 0)
+          (%crv-adv-become-srf sur (srf-insert-knots sur kx1 dir)))))
+    cur))
+
+(defun crv-get-rat-second-deriv (cur)
+  "The second derivative curve of curve CUR, fresh.  A non-rational CUR gives
+CRV-NON-RAT-GET-FIRST-DERIV of order 2; a rational one N/D gives, by the
+symbolic operators, (D D N'' - 2 D D' N' + N (2 D' D' - D D'')) / D^3, the
+numerator elevated by 2 to the denominator's degree.  Signals what the
+symbolic operators signal (:inp-err for degree 1, :deg-err when 3p exceeds
+*dmax*).
+NLib: N_CrvGetRatSecondDeriv."
+  (declare (type curve cur))
+  (unless (is-crv-rat cur)
+    (return-from crv-get-rat-second-deriv (crv-non-rat-get-first-deriv cur 2)))
+  ;; numerator and denominator
+  (multiple-value-bind (n d) (crv-get-num-and-denom cur)
+    (declare (type curve n) (type cfun d))
+    ;; the denominator of the output curve
+    (let* ((dd (crv-func-multiply-crv-func d d))
+           (den (crv-func-multiply-crv-func d dd)))
+      (declare (type cfun dd den))
+      (let ((knx (basis-increase-knot-mult (cfun-knots den) (cfun-degree den) 2)))
+        (declare (type real-vector knx))
+        (when (>= (1- (length knx)) 0)
+          (setf den (crv-func-refine den knx))))
+      ;; the terms of the numerator: D D N''
+      (let* ((npp (crv-non-rat-get-first-deriv n 2))
+             (ddnpp (crv-func-multiply-crv dd npp))
+             ;; 2 D D' N'
+             (dp (crv-func-deriv d 1))
+             (ddp (crv-func-multiply-crv-func d dp)))
+        (declare (type curve npp ddnpp) (type cfun dp ddp))
+        (crv-func-multiply-constant 2.0d0 ddp)
+        (let* ((np (crv-non-rat-get-first-deriv n 1))
+               (ddpnp (crv-func-multiply-crv ddp np)))
+          (declare (type curve np ddpnp))
+          (let ((knx (basis-increase-knot-mult (curve-knots ddpnp) (curve-degree ddpnp) 1)))
+            (declare (type real-vector knx))
+            (when (>= (1- (length knx)) 0)
+              (setf ddpnp (crv-refine ddpnp knx))))
+          ;; N (2 D' D' - D D'')
+          (let ((dpdp (crv-func-multiply-crv-func dp dp)))
+            (declare (type cfun dpdp))
+            (crv-func-multiply-constant 2.0d0 dpdp)
+            (let ((knx (basis-increase-knot-mult (cfun-knots dpdp) (cfun-degree dpdp) 1)))
+              (declare (type real-vector knx))
+              (when (>= (1- (length knx)) 0)
+                (setf dpdp (crv-func-refine dpdp knx))))
+            (let* ((dpp (crv-func-deriv d 2))
+                   (ddpp (crv-func-multiply-crv-func d dpp))
+                   (dsum (crv-func-sum-diff-crv-func dpdp ddpp +minus+ +yes+))
+                   (ddppn (crv-func-multiply-crv dsum n))
+                   ;; add the terms of the numerator
+                   (nsum (crv-sum-diff-crv ddnpp ddpnp +minus+))
+                   (num (crv-sum-diff-crv nsum ddppn +plus+)))
+              (declare (type cfun dpp ddpp dsum) (type curve ddppn nsum num))
+              ;; degree elevate the numerator; the output curve
+              (create-crv-from-num-and-denom (crv-elevate-degree num 2) den))))))))
+
+(defun crv-rat-get-first-deriv (cur)
+  "The first derivative curve of curve CUR, fresh.  A non-rational CUR gives
+CRV-NON-RAT-GET-FIRST-DERIV of order 1; a rational one N/D gives, by the
+symbolic operators, (N' D - N D') / D^2, the numerator elevated by 1 to the
+denominator's degree.  Signals what the symbolic operators signal (:deg-err
+when 2p exceeds *dmax*).
+NLib: N_CrvRatGetFirstDeriv."
+  (declare (type curve cur))
+  (unless (is-crv-rat cur)
+    (return-from crv-rat-get-first-deriv (crv-non-rat-get-first-deriv cur 1)))
+  ;; numerator and denominator
+  (multiple-value-bind (n d) (crv-get-num-and-denom cur)
+    (declare (type curve n) (type cfun d))
+    ;; the denominator of the output curve
+    (let ((den (crv-func-multiply-crv-func d d)))
+      (declare (type cfun den))
+      (let ((knx (basis-increase-knot-mult (cfun-knots den) (cfun-degree den) 1)))
+        (declare (type real-vector knx))
+        (when (>= (1- (length knx)) 0)
+          (setf den (crv-func-refine den knx))))
+      ;; the terms of the numerator
+      (let* ((np (crv-non-rat-get-first-deriv n 1))
+             (dp (crv-func-deriv d 1))
+             (npd (crv-func-multiply-crv d np))
+             (ndp (crv-func-multiply-crv dp n))
+             ;; add the terms of the numerator
+             (num (crv-sum-diff-crv npd ndp +minus+)))
+        (declare (type curve np npd ndp num) (type cfun dp))
+        ;; degree elevate the numerator; the output curve
+        (create-crv-from-num-and-denom (crv-elevate-degree num 1) den)))))

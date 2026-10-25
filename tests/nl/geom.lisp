@@ -882,3 +882,70 @@ onto an end or beyond it, P on the segment, and P anywhere."
                                (list (from-foreign c :point) (from-foreign v :point)
                                      (cffi:mem-ref era :double) (cffi:mem-ref erm :double)
                                      (from-foreign pp :point-array count))))))))))))
+
+;;; ------------------------------------------------------------- L5-g1
+
+(defun %circle-points ()
+  "Points for N_CreateCircFrom2dPts, as (values pts n): z = 0 mostly (a
+random z now and then, +no-z+ rarely, which the line fit rejects); on an arc
+of a random circle, with noise of a random size, or scattered, or collinear
+or nearly so; three points a quarter of the time, now and then one or two."
+  (let* ((count (case (rnd 12)
+                  ((0 1 2) 3)
+                  (3 (1+ (rnd 2)))
+                  (t (+ 4 (rnd 30)))))
+         (pts (make-point-array count))
+         (cx (rnd-range -100d0 100d0))
+         (cy (rnd-range -100d0 100d0))
+         (r (expt 10d0 (rnd-range -2d0 3d0)))
+         (a0 (rnd (* 2 pi)))
+         (span (case (rnd 4) (0 (* 2 pi)) (1 0.1d0) (t (rnd-range 0.3d0 5d0))))
+         (noise (case (rnd 5) (0 0d0) (1 1d-9) (2 1d-4) (3 1d-2) (t 0.2d0))))
+    (case (rnd 8)
+      (0 ;; scattered
+       (dotimes (i count)
+         (setf (aref pts i 0) (rnd-range -100d0 100d0)
+               (aref pts i 1) (rnd-range -100d0 100d0))))
+      (1 ;; collinear, or nearly
+       (let ((dx (rnd-range -1d0 1d0)) (dy (rnd-range -1d0 1d0))
+             (eps (if (zerop (rnd 2)) 0d0 1d-6)))
+         (dotimes (i count)
+           (let ((s (rnd-range -50d0 50d0)))
+             (setf (aref pts i 0) (+ cx (* s dx) (* eps (rnd-range -1d0 1d0)))
+                   (aref pts i 1) (+ cy (* s dy) (* eps (rnd-range -1d0 1d0))))))))
+      (t ;; on an arc
+       (dotimes (i count)
+         (let ((ang (+ a0 (* span (rnd 1d0))))
+               (rr (* r (+ 1d0 (* noise (rnd-range -1d0 1d0))))))
+           (setf (aref pts i 0) (+ cx (* rr (cos ang)))
+                 (aref pts i 1) (+ cy (* rr (sin ang))))))))
+    (case (rnd 15)
+      (0 (dotimes (i count) (setf (aref pts i 2) (rnd-range -1d0 1d0))))
+      (1 (dotimes (i count) (setf (aref pts i 2) +no-z+))))
+    (values pts (1- count))))
+
+(define-oracle-test create-circ-from-2d-pts (:file "geom" :trials 3000)
+  (multiple-value-bind (pts n) (%circle-points)
+    (let ((tol (case (rnd 8) (0 0d0) (1 1d-12) (2 1d-8) (3 1d-5) (4 1d-3) (5 1d-1) (6 -1d0) (t 1d-6)))
+          (etp (case (rnd 30) (0 0) (t (if (zerop (rnd 2)) +maximum+ +average+))))
+          (lp (make-point-array (1+ n))))
+      (dotimes (i (array-total-size pts)) (setf (row-major-aref lp i) (row-major-aref pts i)))
+      (agree (list :pts pts :n n :tol tol :etp etp)
+             (multiple-value-bind (cx cy rr era erm cfl) (batten::create-circ-from-2d-pts lp n tol etp)
+               (if (= cfl +true+)
+                   (list cx cy rr era erm cfl lp)
+                   (list era erm cfl lp)))
+             (with-foreign ((pp pts :point-array))
+               (with-scalars ((cx :double) (cy :double) (rr :double) (era :double) (erm :double)
+                              (cfl :short))
+                 (let ((err (c-flag-error-p (c-create-circ-from-2d-pts pp n tol etp cx cy rr era erm cfl))))
+                   (values err
+                           (unless err
+                             (if (= (cffi:mem-ref cfl :short) +true+)
+                                 (list (cffi:mem-ref cx :double) (cffi:mem-ref cy :double)
+                                       (cffi:mem-ref rr :double) (cffi:mem-ref era :double)
+                                       (cffi:mem-ref erm :double) (cffi:mem-ref cfl :short)
+                                       (from-foreign pp :point-array (1+ n)))
+                                 (list (cffi:mem-ref era :double) (cffi:mem-ref erm :double)
+                                       (cffi:mem-ref cfl :short)
+                                       (from-foreign pp :point-array (1+ n)))))))))))))

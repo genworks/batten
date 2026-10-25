@@ -240,3 +240,112 @@ single linear segment, or control values with flat runs."
                  (with-foreign-out ((q :curve))
                    (let ((failed (c-flag-error-p (c-srf-reparam-func cp fp q sp sq))))
                      (values failed (unless failed (list (from-foreign q :curve))))))))))))
+
+;;; ------------------------------------------------------------- L5-g1
+
+(defun %crv-adv-crv-and-srf ()
+  "A random curve and surface for N_CrvMakeCompatibleWithSrf, with a direction
+and an interval, as (values cur sur dir ts te): rational or not each, the
+curve now and then 2D; the interval now and then the curve's or the surface's
+domain, or [0, 1]; now and then the curve's knots are the surface's in DIR."
+  (let* ((cur (random-curve :max-degree (if (zerop (rnd 10)) 7 5) :max-extra 8
+                            :two-d (zerop (rnd 10))))
+         (sur (random-surface :max-degree 5 :max-extra 5))
+         (dir (if (zerop (rnd 2)) +udir+ +vdir+))
+         (sk (if (= dir +udir+) (surface-knots-u sur) (surface-knots-v sur)))
+         (ck (curve-knots cur)))
+    ;; now and then the same domain and degree, or the same knots
+    (case (rnd 6)
+      (0 (let ((lo (aref sk 0)) (hi (aref sk (1- (length sk)))))
+           (setf (curve-knots cur)
+                 (random-knots (curve-degree cur) (array-dimension (curve-cpoints cur) 0) :lo lo :hi hi))))
+      (1 (let* ((p (if (= dir +udir+) (surface-degree-u sur) (surface-degree-v sur)))
+                (n+1 (- (length sk) p 1))
+                (c (random-curve :max-degree 1 :max-extra (+ n+1 4))))
+           (setf cur (%make-curve p (copy-seq sk)
+                                  (let ((pw (make-cpoint-array n+1)) (cw (curve-cpoints c)))
+                                    (dotimes (i n+1 pw)
+                                      (dotimes (k 4)
+                                        (setf (aref pw i k) (aref cw (mod i (array-dimension cw 0)) k))))))))))
+    (setf ck (curve-knots cur))
+    ;; now and then a curve knot vector that is not valid (start multiplicity
+    ;; p), which the degree elevation rejects, or a bad direction, which the
+    ;; surface operators reject (it reads as the v direction until then)
+    (when (zerop (rnd 30))
+      (let ((p (curve-degree cur)))
+        (setf (aref ck p) (* 0.5d0 (+ (aref ck p) (aref ck (1+ p)))))))
+    (when (zerop (rnd 30))
+      (setf dir 3))
+    (multiple-value-bind (ts te)
+        (case (rnd 5)
+          (0 (values (aref ck 0) (aref ck (1- (length ck)))))
+          (1 (values (aref sk 0) (aref sk (1- (length sk)))))
+          (2 (values 0d0 1d0))
+          (t (let ((lo (rnd-range -10d0 10d0))) (values lo (+ lo 0.5d0 (rnd 10d0))))))
+      (values cur sur dir ts te))))
+
+(define-oracle-test crv-make-compatible-with-srf (:file "crv-adv" :trials 3000)
+  (multiple-value-bind (cur sur dir ts te) (%crv-adv-crv-and-srf)
+    (agree (list :curve cur :surface sur :dir dir :ts ts :te te)
+           (let ((c (batten::crv-copy cur)) (s (batten::srf-copy sur)))
+             (batten::crv-make-compatible-with-srf c s dir ts te)
+             (list c s))
+           (with-foreign ((cp cur :curve) (sp sur :surface))
+             (with-stacks (st)
+               (let ((failed (c-flag-error-p (c-crv-make-compatible-with-srf cp sp dir ts te st))))
+                 (values failed (unless failed
+                                  (list (from-foreign cp :curve) (from-foreign sp :surface))))))))))
+
+(defun %crv-adv-deriv-curve (max-degree)
+  "A random curve for the rational derivative operators: rational mostly,
+degree up to MAX-DEGREE (now and then one more, past *dmax* for the products),
+now and then 2D.  Its knots: RANDOM-KNOTS' (repeated now and then, which the
+knot multiplicity raise of the C rejects when too high), or distinct interior
+knots, or a single Bezier segment."
+  (let* ((c (random-curve :rational (plusp (rnd 8))
+                          :max-degree (if (zerop (rnd 15)) (1+ max-degree) max-degree)
+                          :max-extra 7))
+         (p (curve-degree c))
+         (n+1 (array-dimension (curve-cpoints c) 0))
+         (k (curve-knots c))
+         (lo (aref k 0))
+         (hi (aref k (1- (length k)))))
+    (case (rnd 3)
+      (0 c)
+      (1 ;; distinct interior knots
+       (let ((knots (make-real-vector (+ n+1 p 1))))
+         (dotimes (i (1+ p))
+           (setf (aref knots i) lo
+                 (aref knots (- (+ n+1 p) i)) hi))
+         (do ((i (1+ p) (1+ i))) ((> i (1- n+1)))
+           (setf (aref knots i) (+ lo (* (- hi lo) (/ (+ (- i p) (rnd-range -0.3d0 0.3d0))
+                                                       (float (- n+1 p) 1d0))))))
+         (%make-curve p knots (curve-cpoints c))))
+      (t ;; a Bezier segment
+       (let ((knots (make-real-vector (* 2 (1+ p))))
+             (pw (make-cpoint-array (1+ p))))
+         (dotimes (i (1+ p))
+           (setf (aref knots i) lo
+                 (aref knots (+ p 1 i)) hi)
+           (dotimes (j 4) (setf (aref pw i j) (aref (curve-cpoints c) i j))))
+         (%make-curve p knots pw))))))
+
+(define-oracle-test crv-rat-get-first-deriv (:file "crv-adv" :trials 2000)
+  (let ((c (%crv-adv-deriv-curve 8)))
+    (agree (list :curve c)
+           (list (batten::crv-rat-get-first-deriv c))
+           (with-foreign ((cur c :curve))
+             (with-stacks (sg)
+               (with-foreign-out ((der :curve))
+                 (let ((failed (c-flag-error-p (c-crv-rat-get-first-deriv cur der sg))))
+                   (values failed (unless failed (list (from-foreign der :curve)))))))))))
+
+(define-oracle-test crv-get-rat-second-deriv (:file "crv-adv" :trials 2000)
+  (let ((c (%crv-adv-deriv-curve 5)))
+    (agree (list :curve c)
+           (list (batten::crv-get-rat-second-deriv c))
+           (with-foreign ((cur c :curve))
+             (with-stacks (sg)
+               (with-foreign-out ((der :curve))
+                 (let ((failed (c-flag-error-p (c-crv-get-rat-second-deriv cur der sg))))
+                   (values failed (unless failed (list (from-foreign der :curve)))))))))))
