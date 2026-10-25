@@ -255,6 +255,44 @@ the domain, for the other paths."
                        (values t nil)
                        (values nil (list (cffi:mem-ref ru :long) (from-foreign cq :curve)))))))))))
 
+;;; ------------------------------------------------------------ level 3, group 5
+
+(defun %crv-tool-removals-input ()
+  "A curve and tolerance for removing all removable knots: a random curve, the
+same refined (so its new knots come out again to about rounding) or degree
+elevated (its knots removable once each), with tolerances from zero to past
+the curve's size; weights spread wide now and then, to reach the weight
+test."
+  (let* ((c (if (zerop (rnd 2)) (random-curve :max-extra 10) (%crv-tool-curve :full (+ 2 (rnd 4)))))
+         (c (case (rnd 10)
+              ((0 1 2 3) (let ((x (%crv-tool-refinement c)))
+                           (handler-case (batten::crv-refine c x)
+                             (nurbs-error () c))))
+              ((4 5) (if (< (curve-degree c) 6) (batten::crv-elevate-degree c (1+ (rnd 2))) c))
+              (t c)))
+         (tol (case (rnd 9)
+                (0 0d0) (1 1d-12) (2 1d-9) (3 1d-6) (4 1d-3) (5 1d-1) (6 1d0) (7 1d2) (t 1d6))))
+    (when (and (/= (aref (curve-cpoints c) 0 3) +no-w+) (zerop (rnd 4)))
+      ;; wide weights: scale each control point by a factor in [0.01, 50]
+      (let ((pw (curve-cpoints c)))
+        (dotimes (i (array-dimension pw 0))
+          (let ((f (expt 10d0 (rnd-range -2d0 1.7d0))))
+            (dotimes (k 4)
+              (unless (or (and (= k 2) (= (aref pw i 2) +no-z+)))
+                (setf (aref pw i k) (* f (aref pw i k)))))))))
+    (values c tol)))
+
+(define-oracle-test crv-remove-knots (:file "crv-tool" :trials 3000)
+  (multiple-value-bind (c tol) (%crv-tool-removals-input)
+    (agree (list :curve c :tol tol)
+           (list (batten::crv-remove-knots c tol))
+           (with-foreign ((cp c :curve))
+             (with-foreign-out ((cq :curve))
+               (with-stacks (sq)
+                 (if (c-flag-error-p (c-crv-remove-knots cp tol cq sq))
+                     (values t nil)
+                     (values nil (list (from-foreign cq :curve))))))))))
+
 (define-oracle-test crv-elevate-degree (:file "crv-tool" :trials 3000)
   (let* ((c (if (zerop (rnd 2))
                 (random-curve :max-extra 8)

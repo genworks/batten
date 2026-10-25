@@ -542,3 +542,50 @@ weight's division would fail.  NLib: N_BezConicArcFromPtsAndTangents."
                   w1 0d0)
             (vector-scale ct0 b p1)))))
     w1))
+
+;;; ------------------------------------------------------------- L3-g5
+
+(defun bezier--st-bez-calc-arc-length (pw p eps len depth)
+  "The recursive body of bez-calc-arc-length: add to LEN the arc length of
+the degree-P Bezier curve PW, to tolerance EPS, at recursion depth DEPTH.
+A piece whose control polygon length UB and chord length LB differ by no more
+than EPS contributes UB + LB (the caller halves the total); otherwise it is
+split in half and each half recursed on with half the tolerance.  Returns
+(values eps len): the tolerance actually achieved and the accumulated length.
+Signals :quit beyond *recurselim* levels (the C returns 1 with no error set).
+NLib: ST_BezCalcArcLength."
+  (declare (type cpoint-array pw) (type fixnum p depth) (type double-float eps len))
+  (when (> depth (the fixnum *recurselim*))
+    (nurbs-error :quit 'bez-calc-arc-length))
+  (let* ((ub (dist-c-polygon pw p))
+         (lb (let ((a (make-cpoint)) (b (make-cpoint)))
+               (declare (dynamic-extent a b))
+               (%row-c-pt pw 0 a)
+               (%row-c-pt pw p b)
+               (dist-cpt-cpt a b)))
+         (del (abs (- ub lb))))
+    (declare (type double-float ub lb del))
+    (if (<= del eps)
+        (values del (+ len (+ ub lb)))
+        (let ((qw (make-cpoint-array (1+ p)))
+              (rw (make-cpoint-array (1+ p))))
+          (declare (type cpoint-array qw rw))
+          (bez-split pw p 0.5d0 qw rw)
+          (let ((epl (/ eps 2d0))
+                (epr 0d0))
+            (declare (type double-float epl epr))
+            (multiple-value-setq (epl len) (bezier--st-bez-calc-arc-length qw p epl len (1+ depth)))
+            (setf epr (- eps epl))
+            (multiple-value-setq (epr len) (bezier--st-bez-calc-arc-length rw p epr len (1+ depth)))
+            (values (+ epl epr) len))))))
+
+(defun bez-calc-arc-length (pw p eps len)
+  "Accumulate into LEN the arc length estimate of the degree-P Bezier curve
+with control points PW, to tolerance EPS, by recursive subdivision (see
+bezier--st-bez-calc-arc-length): each piece adds its control polygon length
+plus its chord length, so the caller halves the sum.  Returns (values eps len):
+EPS the tolerance actually achieved and LEN the accumulated sum.  Signals
+:quit when subdivision needs more than *recurselim* levels.
+NLib: N_BezCalcArcLength."
+  (declare (type cpoint-array pw) (type fixnum p) (type double-float eps len))
+  (bezier--st-bez-calc-arc-length pw p eps len 0))
