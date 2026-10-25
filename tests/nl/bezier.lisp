@@ -244,6 +244,55 @@ increment (or second degree) TT."
                        (list (from-foreign qw :cpoint-net (array-dimension qw0 0)
                                            (array-dimension qw0 1)))))))))
 
+;;; ------------------------------------------------------------- L2-g7
+
+(defun %bezier-conic-input ()
+  "Inputs for N_BezConicArcFromPtsAndTangents, as (list P0 T0 P2 T2 P): a
+true conic arc (tangents meeting, P on the arc), parallel tangents (the
+middle point at infinity), random points, or degenerate ones; planar a third
+of the time."
+  (let* ((planar (zerop (rnd 3)))
+         (pt (lambda () (let ((q (random-point))) (when planar (setf (aref q 2) 0d0)) q)))
+         (p0 (funcall pt)) (p2 (funcall pt)) (p1 (funcall pt))
+         (lin (lambda (a x b y) (make-point (+ (* a (aref x 0)) (* b (aref y 0)))
+                                            (+ (* a (aref x 1)) (* b (aref y 1)))
+                                            (+ (* a (aref x 2)) (* b (aref y 2)))))))
+    (case (rnd 10)
+      ((0 1 2 3)                         ; a conic arc
+       (let* ((w (rnd-range 0.05d0 5d0))
+              (u (case (rnd 8) (0 0d0) (1 1d0) (2 0.5d0) (t (rnd 1d0))))
+              (a (* (- 1d0 u) (- 1d0 u))) (b (* 2d0 u (- 1d0 u) w)) (c (* u u))
+              (d (+ a b c))
+              (sc (rnd-range 0.2d0 3d0))
+              (q (make-point (/ (+ (* a (aref p0 0)) (* b (aref p1 0)) (* c (aref p2 0))) d)
+                             (/ (+ (* a (aref p0 1)) (* b (aref p1 1)) (* c (aref p2 1))) d)
+                             (/ (+ (* a (aref p0 2)) (* b (aref p1 2)) (* c (aref p2 2))) d))))
+         (list p0 (funcall lin sc p1 (- sc) p0)
+               p2 (funcall lin (if (zerop (rnd 2)) 1d0 -1d0) p2 -1d0 p1) q)))
+      ((4 5 6)                           ; parallel tangents
+       (let* ((tv (funcall pt))
+              (s (case (rnd 6) (0 0d0) (1 1d0) (t (rnd 1d0))))
+              (k (rnd-range -2d0 2d0)))
+         (list p0 tv p2 (funcall lin (if (zerop (rnd 2)) 1d0 -1.5d0) tv 0d0 tv)
+               (funcall lin 1d0 (funcall lin (- 1d0 s) p0 s p2) k tv))))
+      (7 (list p0 (funcall pt) p2 (funcall pt) (funcall pt)))
+      (8 (list p0 (make-point) p2 (funcall pt) (funcall pt)))
+      (t (list p0 (funcall lin 1d0 p1 -1d0 p0) p2 (funcall lin 1d0 p2 -1d0 p1)
+               (if (zerop (rnd 2)) (copy-seq p1) (copy-seq p0)))))))
+
+(define-oracle-test bez-conic-arc-from-pts-and-tangents (:file "bezier" :trials 6000)
+  (destructuring-bind (p0 t0 p2 t2 p) (%bezier-conic-input)
+    (agree (list :p0 p0 :t0 t0 :p2 p2 :t2 t2 :p p)
+           (let ((p1 (make-point)))
+             (let ((w1 (batten::bez-conic-arc-from-pts-and-tangents p0 t0 p2 t2 p p1)))
+               (list p1 w1)))
+           (with-foreign ((a p0 :point) (b t0 :point) (c p2 :point) (d t2 :point) (e p :point))
+             (with-foreign-out ((p1 :point))
+               (with-scalars ((w1 :double))
+                 (let ((failed (c-flag-error-p (c-bez-conic-arc-from-pts-and-tangents a b c d e p1 w1))))
+                   (values failed (unless failed
+                                    (list (from-foreign p1 :point) (cffi:mem-ref w1 :double)))))))))))
+
 (define-oracle-test bez-reparam (:file "bezier" :trials 3000)
   (let* ((p (rnd 8)) (q (rnd 8))
          (q (if (and (> (* p q) 17) (plusp (rnd 8))) (floor 17 (max p 1)) q))
