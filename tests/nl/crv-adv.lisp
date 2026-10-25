@@ -148,3 +148,95 @@ tolerance)."
              (with-foreign-out ((od :point-array 3))
                (let ((failed (c-flag-error-p (c-crv-planar-offset-get-deriv cur u d np ufl od))))
                  (values failed (unless failed (list (from-foreign od :point-array 3))))))))))
+
+;;; ------------------------------------------------------------- L4-g0
+
+(defun %crv-adv-curve-on (lo hi &rest keys)
+  "A random curve (RANDOM-CURVE with KEYS) on the domain [LO, HI]."
+  (let ((c (apply #'random-curve keys)))
+    (setf (curve-knots c)
+          (random-knots (curve-degree c) (array-dimension (curve-cpoints c) 0) :lo lo :hi hi))
+    c))
+
+(defun %crv-adv-curve-pair ()
+  "Two random curves for N_CrvSumDiffCrv, as (values p q): on one domain
+(now and then two), rational or not each, 2D or 3D together; now and then Q
+with P's degree and knots, or P's knots refined."
+  (let* ((lo (if (zerop (rnd 3)) 0d0 (rnd-range -10d0 10d0)))
+         (hi (+ lo 0.5d0 (rnd 10d0)))
+         (two-d (zerop (rnd 5)))
+         (rp (case (rnd 3) (0 t) (1 nil) (t :random)))
+         (rq (case (rnd 3) (0 t) (1 nil) (t :random)))
+         (p (%crv-adv-curve-on lo hi :two-d two-d :rational rp :max-degree 6 :max-extra 8))
+         (q (case (rnd 8)
+              (0 ;; same degree and knots
+               (let ((c (%crv-adv-curve-on lo hi :two-d two-d :rational rq)))
+                 (%make-curve (curve-degree p) (copy-seq (curve-knots p))
+                              (let ((pw (make-cpoint-array (array-dimension (curve-cpoints p) 0)))
+                                    (cw (curve-cpoints c)))
+                                (dotimes (i (array-dimension pw 0) pw)
+                                  (dotimes (k 4)
+                                    (setf (aref pw i k) (aref cw (mod i (array-dimension cw 0)) k))))))))
+              (1 ;; P refined
+               (let ((xs (sort (let (l) (dotimes (i (1+ (rnd 4)) l)
+                                          (push (+ lo (* (- hi lo) (+ 0.05d0 (rnd 0.9d0)))) l)))
+                               #'<)))
+                 (batten::crv-refine (batten::crv-copy p) (coerce xs 'batten::real-vector))))
+              (2 ;; another domain: the products and the merge rescale it
+               (%crv-adv-curve-on (+ lo (rnd 1d0)) (+ hi (rnd 2d0)) :two-d two-d :rational rq
+                                  :max-degree 6 :max-extra 8))
+              (t (%crv-adv-curve-on lo hi :two-d two-d :rational rq :max-degree 6 :max-extra 8)))))
+    (if (zerop (rnd 2)) (values p q) (values q p))))
+
+(define-oracle-test crv-sum-diff-crv (:file "crv-adv" :trials 3000)
+  (multiple-value-bind (cp cq) (%crv-adv-curve-pair)
+    (let ((opr (case (rnd 25) (0 0) (1 3) (t (if (zerop (rnd 2)) +plus+ +minus+)))))
+      (agree (list :p cp :q cq :opr opr)
+             (let ((pc (batten::crv-copy cp)) (qc (batten::crv-copy cq)))
+               ;; the inputs are returned to their rationality
+               (list (batten::crv-sum-diff-crv pc qc opr) pc qc))
+             (with-foreign ((p cp :curve) (q cq :curve))
+               (with-stacks (sg)
+                 (with-foreign-out ((r :curve))
+                   (let ((failed (c-flag-error-p (c-crv-sum-diff-crv p q opr r sg))))
+                     (values failed (unless failed
+                                      (list (from-foreign r :curve)
+                                            (from-foreign p :curve) (from-foreign q :curve))))))))))))
+
+(defun %crv-adv-reparam-func (a b)
+  "A random increasing B-spline function from A to B (f' > 0 for strictly
+increasing control values): degree 1..4 on a random domain, now and then a
+single linear segment, or control values with flat runs."
+  (let* ((lo (if (zerop (rnd 3)) 0d0 (rnd-range -10d0 10d0)))
+         (hi (+ lo 0.5d0 (rnd 10d0)))
+         (q (if (zerop (rnd 8)) 1 (1+ (rnd 4))))
+         (n+1 (if (and (= q 1) (zerop (rnd 2))) 2 (+ q 1 (rnd 7))))
+         (vals (make-real-vector n+1))
+         (inner (sort (let (l) (dotimes (i (- n+1 2) l) (push (+ a (* (- b a) (+ 0.01d0 (rnd 0.98d0)))) l)))
+                      #'<)))
+    (setf (aref vals 0) a
+          (aref vals (1- n+1)) b)
+    (let ((i 1))
+      (dolist (v inner) (setf (aref vals i) v) (incf i)))
+    ;; now and then two equal control values in the middle
+    (when (and (> n+1 3) (zerop (rnd 10)))
+      (setf (aref vals 2) (aref vals 1)))
+    (%make-cfun q (random-knots q n+1 :lo lo :hi hi) vals)))
+
+(define-oracle-test srf-reparam-func (:file "crv-adv" :trials 3000)
+  (let* ((c (random-curve :max-degree (if (zerop (rnd 10)) 7 4) :max-extra 8))
+         (knots (curve-knots c))
+         (a (aref knots 0))
+         (b (aref knots (1- (length knots))))
+         (f (%crv-adv-reparam-func a b)))
+    ;; now and then an end value off the curve's end (the mapping rejects it)
+    (when (zerop (rnd 25))
+      (incf (aref (cfun-vals f) 0) (* (- b a) (if (zerop (rnd 2)) 1d-2 1d-6))))
+    (agree (list :curve c :cfn f)
+           (list (batten::srf-reparam-func c f))
+           (with-foreign ((cp c :curve) (fp f :cfun))
+             (with-stacks (sp)
+               (with-stacks (sq)
+                 (with-foreign-out ((q :curve))
+                   (let ((failed (c-flag-error-p (c-srf-reparam-func cp fp q sp sq))))
+                     (values failed (unless failed (list (from-foreign q :curve))))))))))))

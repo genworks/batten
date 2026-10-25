@@ -353,3 +353,22 @@ segment, where the bounds meet at once), or all coincident."
                (let ((failed (c-flag-error-p (c-bez-calc-arc-length a p e l))))
                  (values failed (unless failed
                                   (list (cffi:mem-ref e :double) (cffi:mem-ref l :double))))))))))
+
+;;; ------------------------------------------------------------- L4-g0
+
+(define-oracle-test bez-calc-length (:file "bezier" :trials 1500)
+  (let* ((p (rnd 10))
+         (pw (%bezier-arc-cpoints p))
+         (scale (let ((s 0d0))
+                  (dotimes (i 2 (max s 1d0)) (setf s (max s (abs (aref pw 0 i)))))))
+         (tol (case (rnd 12)
+                (0 0d0)
+                (1 (- (rnd 1d0)))
+                (2 (* scale (rnd 10d0)))
+                (t (* scale (expt 10d0 (- (rnd 7d0))))))))
+    (agree (list :pw pw :p p :tol tol)
+           (list (batten::bez-calc-length pw p tol))
+           (with-foreign ((a pw :cpoint-array))
+             (with-scalars ((l :double))
+               (let ((failed (c-flag-error-p (c-bez-calc-length a p tol l))))
+                 (values failed (unless failed (list (cffi:mem-ref l :double))))))))))
