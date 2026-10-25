@@ -301,3 +301,80 @@ NLib: N_SrfReparamToInterval."
                 (declare (type fixnum j))
                 (setf (aref v j) d))))))))
   sur)
+
+;;; ------------------------------------------------------------ level 2, group 5
+
+(defun make-srfs-rat-compatible (sur k)
+  "Make the surfaces SUR[0..K] (a simple-vector of surfaces) all rational,
+in place, when any one of them is rational; otherwise leave them alone.
+Return SUR.
+NLib: N_MakeSrfsRatCompatible."
+  (declare (type simple-vector sur) (type fixnum k))
+  (let ((allnra +true+))
+    (declare (type fixnum allnra))
+    (do ((i 0 (1+ i))) ((> i k))
+      (declare (type fixnum i))
+      (when (is-srf-rat (svref sur i))
+        (setf allnra +false+)
+        (return)))
+    (when (= allnra +false+)
+      (do ((i 0 (1+ i))) ((> i k))
+        (declare (type fixnum i))
+        (unless (is-srf-rat (svref sur i))
+          (srf-non-rat-to-rat (svref sur i))))))
+  sur)
+
+(defun srf-is-flat-cheap (sur eps)
+  "Whether surface SUR is flat to within EPS, cheaply: every Euclidean
+control point within EPS of the plane through the corners' centroid whose
+normal is the cross product of the vectors from that centroid to the
+midpoints of the corner edges P00-P10 and P10-P11.  Returns (values flt dir): FLT +yes+ or +no+, DIR +udir+
+(subdivide at a v value) or +vdir+ (at a u value).  A surface closed in u
+or v, or one whose corner plane is degenerate, is not flat.  Signals as
+plane-pt-normal-to-implicit does.
+NLib: N_SrfIsFlatCheap."
+  (declare (type surface sur) (type double-float eps))
+  (when (srf-is-closed sur +udir+)
+    (return-from srf-is-flat-cheap (values +no+ +vdir+)))
+  (when (srf-is-closed sur +vdir+)
+    (return-from srf-is-flat-cheap (values +no+ +udir+)))
+  (let ((n (surface-n sur)) (m (surface-m sur))
+        (pw (surface-cpoints sur))
+        (cw (make-cpoint))
+        (p00 (make-point)) (p10 (make-point)) (p01 (make-point)) (p11 (make-point))
+        (p (make-point)) (a (make-point)) (b (make-point))
+        (nv (make-point)) (cv (make-point)) (dv (make-point))
+        (flt +yes+) (dir +udir+))
+    (declare (type fixnum n m flt dir) (type cpoint-net pw)
+             (dynamic-extent cw p00 p10 p01 p11 p a b nv cv dv))
+    (c-pt-to-pt-euclid (%net-c-pt pw 0 0 cw) p00)
+    (c-pt-to-pt-euclid (%net-c-pt pw n 0 cw) p10)
+    (c-pt-to-pt-euclid (%net-c-pt pw 0 m cw) p01)
+    (c-pt-to-pt-euclid (%net-c-pt pw n m cw) p11)
+    (combine-4-pts 0.25d0 p00 0.25d0 p10 0.25d0 p01 0.25d0 p11 p)
+    (vector-combine 0.5d0 p00 0.5d0 p10 a)
+    (vector-combine 0.5d0 p10 0.5d0 p11 b)
+    (vector-diff a p cv)
+    (vector-diff b p dv)
+    (let ((lv (vector-magnitude cv))
+          (lu (vector-magnitude dv))
+          (ln 0d0))
+      (declare (type double-float lv lu ln))
+      (vector-cross cv dv nv)
+      (setf ln (vector-magnitude nv))
+      (when (< ln (the double-float *mtol*))
+        (return-from srf-is-flat-cheap
+          (values +no+ (if (> lu lv) +vdir+ +udir+))))
+      (multiple-value-bind (pa pb pc pd) (plane-pt-normal-to-implicit p nv)
+        (declare (type double-float pa pb pc pd))
+        (block scan
+          (dotimes (i (1+ n))
+            (dotimes (j (1+ m))
+              (c-pt-to-pt-euclid (%net-c-pt pw i j cw) p)
+              (let ((dis (dist-signed-pt-plane pa pb pc pd p)))
+                (declare (type double-float dis))
+                (when (> (abs dis) eps)
+                  (setf flt +no+)
+                  (return-from scan))))))
+        (setf dir (if (> lu lv) +vdir+ +udir+))
+        (values flt dir)))))

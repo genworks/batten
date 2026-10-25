@@ -324,3 +324,79 @@ NLib: N_CrvReverse."
            (%c-pt-row bw qw i))
          (%reverse-knots up m uq)
          (%make-curve p uq qw))))))
+
+;;; ------------------------------------------------------------ level 2, group 5
+
+(defun crv-get-b-box (cur box)
+  "Write the min-max box of the Euclidean control polygon of curve CUR into
+BOX (a real-vector of 6: xl xr yb yt zn zf) and return BOX.
+NLib: N_CrvGetBBox."
+  (declare (type curve cur) (type real-vector box))
+  (let ((ppl (crv-get-e-polygon cur 0 (curve-n cur))))
+    (polygon-get-b-box ppl box)))
+
+(defun crv-eval-frenet-frame (cur u flg p tv nv bv)
+  "Write the point of curve CUR at parameter U into P and the unit tangent,
+normal and binormal there into TV, NV and BV; return P.  FLG (+left+ or
++right+) picks the span at a knot.  Signals :deg-err for a degree below 2,
+as crv-derivs does, and :geo-err for a zero first derivative or a zero
+C' x C''.
+NLib: N_CrvEvalFrenetFrame."
+  (declare (type curve cur) (type double-float u) (type fixnum flg) (type point p tv nv bv))
+  (when (<= (curve-degree cur) 1)
+    (nurbs-error :deg-err 'crv-eval-frenet-frame))
+  (let ((cd (make-point-array 3))
+        (d1 (make-point)) (d2 (make-point)))
+    (declare (dynamic-extent cd d1 d2))
+    (crv-derivs cur u flg 2 cd)
+    (%row-pt cd 0 p)
+    (%row-pt cd 1 d1)
+    (%row-pt cd 2 d2)
+    (vector-normalize d1 tv)
+    (vector-cross d1 d2 bv)
+    (vector-normalize-ref bv)
+    (vector-cross-ref bv tv nv)
+    p))
+
+(defun crv-transform (cur rma)
+  "Transform curve CUR in place by the 4x4 matrix RMA (an rmatrix), as
+transform-c-pt does each control point; a 2D curve is made 3D first.
+Return CUR.
+NLib: N_CrvTransform."
+  (declare (type curve cur) (type rmatrix rma))
+  (unless (crv-is-3d cur)
+    (crv-2d-to-3d cur))
+  (let ((pw (curve-cpoints cur))
+        (cw (make-cpoint)))
+    (declare (type cpoint-array pw) (dynamic-extent cw))
+    (dotimes (i (1+ (curve-n cur)))
+      (%row-c-pt pw i cw)
+      (transform-c-pt cw rma cw)
+      (%c-pt-row cw pw i)))
+  cur)
+
+(defun crv-translate (cur tv)
+  "Translate curve CUR in place by vector TV, as translate-c-pt does each
+control point; a 2D curve is made 3D first.  Return CUR.
+NLib: N_CrvTranslate."
+  (declare (type curve cur) (type point tv))
+  (unless (crv-is-3d cur)
+    (crv-2d-to-3d cur))
+  (let ((pw (curve-cpoints cur))
+        (cw (make-cpoint)))
+    (declare (type cpoint-array pw) (dynamic-extent cw))
+    (dotimes (i (1+ (curve-n cur)))
+      (%row-c-pt pw i cw)
+      (translate-c-pt cw tv cw)
+      (%c-pt-row cw pw i)))
+  cur)
+
+(defun crv-reparam (cur ul ur)
+  "Map the knots of curve CUR, in place, linearly onto [UL, UR], as
+crv-reparam-to-interval does.  Return CUR.
+NLib: N_CrvReparam."
+  (declare (type curve cur) (type double-float ul ur))
+  (let ((i (make-real-vector 2)))
+    (declare (dynamic-extent i))
+    (create-interval i ul ur)
+    (crv-reparam-to-interval cur i)))
