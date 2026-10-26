@@ -189,3 +189,82 @@ some, now and then exactly an arc end; a single vertex now and then."
                  (with-scalars ((aef :short))
                    (let ((failed (c-flag-error-p (c-crv-is-polygon-within-tol cpw n cp k eps aef))))
                      (values failed (unless failed (list (cffi:mem-ref aef :short))))))))))))
+
+;;; ------------------------------------------------------------- L13-g0
+
+(defun %crv-approx-c1-curve ()
+  "A random xy-planar C1 curve for N_ApproxContinuousCrvWithArcs: degree 1
+to 5 (2 and 3 most often), interior knots of multiplicity below the degree,
+control points within 10 of the origin with z +no-z+ or 0, rational or not;
+now and then a single Bezier segment, closed (last control point on the
+first), a hairpin (last control point near the first; mostly a quadratic
+Bezier segment), a straight line
+(control points in order on one) or a line wiggling a little off it."
+  (let* ((lo (if (zerop (rnd 3)) 0d0 (rnd-range -10d0 10d0)))
+         (hi (+ lo 0.5d0 (rnd 10d0))))
+    (let* ((shape (rnd 8))
+           ;; hairpins are mostly quadratic Bezier segments
+           (bez2 (and (= shape 4) (/= (rnd 3) 0)))
+           (p (if bez2 2 (case (rnd 10) (0 1) (1 1) (2 2) (3 2) (4 2) (5 3) (6 3) (7 4) (8 5) (t 3))))
+           (n+1 (+ p 1 (if (or bez2 (zerop (rnd 6))) 0 (rnd 7))))
+           (rational (zerop (rnd 2)))
+           (two-d (zerop (rnd 2)))
+           (amp (rnd 1.4d0))
+           (cpoints (make-cpoint-array n+1))
+           ;; interior knots, repeated now and then up to multiplicity p-1
+           (interior (sort (let (ks)
+                             (dotimes (i (- n+1 p 1) ks)
+                               (push (+ lo (* (- hi lo) (+ 0.02d0 (rnd 0.96d0)))) ks)))
+                           #'<))
+           (v (coerce interior 'vector))
+           (th (rnd (* 2 pi))))
+      (dotimes (i (length v))
+        (when (and (> i 0) (zerop (rnd 5)))
+          (let ((mult 0))
+            (do ((j (1- i) (1- j))) ((or (< j 0) (/= (aref v j) (aref v (1- i)))))
+              (incf mult))
+            (when (< mult (1- p))
+              (setf (aref v i) (aref v (1- i)))))))
+      (dotimes (i n+1)
+        (let* ((w (if rational (+ 0.3d0 (rnd 3d0)) 1d0))
+               (s (/ (float i 1d0) (float (1- n+1) 1d0)))
+               ;; shape 2 wiggles off the line by up to AMP (below 1.4),
+               ;; under the polyline chord height of the larger tolerances:
+               ;; few polyline points, whose biarcs fail and are subdivided
+               (off (if (<= 2 shape 3) (rnd-range (- amp) amp) 0d0))
+               (line (member shape '(0 2 3)))
+               (x (if line (- (* 12d0 (- s 0.5d0) (cos th)) (* off (sin th))) (rnd-range -10d0 10d0)))
+               (y (if line (+ (* 12d0 (- s 0.5d0) (sin th)) (* off (cos th))) (rnd-range -10d0 10d0))))
+          (setf (aref cpoints i 0) (* w x)
+                (aref cpoints i 1) (* w y)
+                (aref cpoints i 2) (if two-d +no-z+ 0d0)
+                (aref cpoints i 3) (if rational w +no-w+))))
+      (when (and (= shape 1) (> n+1 3))
+        ;; closed
+        (dotimes (q 4)
+          (setf (aref cpoints (1- n+1) q) (aref cpoints 0 q))))
+      (when (= shape 4)
+        ;; a hairpin: the end within 0.5 of the start, a sharp turn
+        ;; between, whose subdivided biarcs outgrow the output's first size
+        (let ((w0 (if rational (aref cpoints 0 3) 1d0))
+              (w (if rational (aref cpoints (1- n+1) 3) 1d0)))
+          (dotimes (q 2)
+            (setf (aref cpoints (1- n+1) q)
+                  (* w (+ (/ (aref cpoints 0 q) w0) (rnd-range -0.5d0 0.5d0)))))))
+      (%make-curve p (coerce (append (make-list (1+ p) :initial-element lo)
+                                     (coerce v 'list)
+                                     (make-list (1+ p) :initial-element hi))
+                             'real-vector)
+                   cpoints))))
+
+(define-oracle-test approx-continuous-crv-with-arcs (:file "crv-approx" :trials 6000)
+  ;; TOL positive (0 would ask the polyline for exact chords)
+  (let* ((c (%crv-approx-c1-curve))
+         (tol (case (rnd 6) (0 1d-2) (1 0.1d0) (2 1d0) (3 3d0) (t (rnd-range 1d-2 1d0)))))
+    (agree (list :curve c :tol tol)
+           (list (batten::approx-continuous-crv-with-arcs c tol))
+           (with-foreign ((cp c :curve))
+             (with-stacks (sg)
+               (with-foreign-out ((q :curve))
+                 (let ((failed (c-flag-error-p (c-approx-continuous-crv-with-arcs cp tol q sg))))
+                   (values failed (unless failed (list (from-foreign q :curve)))))))))))
