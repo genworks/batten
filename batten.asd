@@ -1,12 +1,27 @@
 ;;;; SPDX-FileCopyrightText: Copyright (c) 2026 Genworks International
 ;;;; SPDX-License-Identifier: Apache-2.0
 
+(defun batten-around-compile (thunk)
+  "Compile Batten's own files without the per-function records CCL and
+Allegro keep by default -- source notes and local-symbol tables on CCL,
+source-file and cross-reference information on Allegro -- which grew a saved
+image by a third again (CCL +7.7 to +5.2 MB, Allegro +10.5 to +6.6 MB).  Bound
+here, so a user's own compilations keep their settings.  Batten's functions
+are then not found by M-. on Allegro; the source is plain to read."
+  (let (#+ccl (ccl:*save-source-locations* nil)
+        #+ccl (ccl:*save-local-symbols* nil)
+        #+ccl (ccl:*fasl-save-local-symbols* nil)
+        #+allegro (excl:*record-source-file-info* nil)
+        #+allegro (excl:*record-xref-info* nil))
+    (funcall thunk)))
+
 (defsystem "batten"
   :description "NURBS curves and surfaces in portable Common Lisp: a port of NLib from NVIDIA's open-source SMLib."
   :version "0.0.1"
   :author "Genworks International"
   :license "Apache-2.0"
   :serial t
+  :around-compile batten-around-compile
   :components ((:module "src"
                 :serial t
                 :components ((:file "package")

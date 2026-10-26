@@ -8,6 +8,10 @@
 
 (in-package :batten)
 
+;;; Maybe-inline: the expansion is kept, but callers inline it only where
+;;; they ask (the exported curve-point! and curve-derivatives!), so the API
+;;; passes U unboxed without the port growing a copy at every call site.
+(declaim (inline crv-eval crv-derivs))
 (defun crv-eval (cur u flg c)
   "Write the point of curve CUR at parameter U into point C and return C.
 FLG (+left+ or +right+) picks the span at a knot.  NLib: N_CrvEval."
@@ -18,7 +22,7 @@ FLG (+left+ or +right+) picks the span at a knot.  NLib: N_CrvEval."
     (declare (type real-vector knots) (type cpoint-array pw) (type fixnum p))
     (knot-vector-is-param-out-of-bounds knots u 'crv-eval)
     (fast
-      (let ((n (make-array (1+ p) :element-type 'double-float)))
+      (let ((n (make-array +deg+1+ :element-type 'double-float)))
         (declare (dynamic-extent n))
         (let* ((spn (basis-eval knots p u flg n))
                (j (- spn p))
@@ -34,7 +38,7 @@ FLG (+left+ or +right+) picks the span at a knot.  NLib: N_CrvEval."
                     cy (+ cy (* alpha (aref pw i 1)))
                     cz (if (/= z +no-z+) (+ cz (* alpha z)) +no-z+)
                     cw (if (/= w +no-w+) (+ cw (* alpha w)) +no-w+))))
-          (multiple-value-bind (x y z) (%homogeneous-to-euclid cx cy cz cw)
+          (with-euclid ((x y z) cx cy cz cw)
             (set-point c x y z)))))))
 
 (defun crv-derivs (cur u flg der cd)
@@ -56,15 +60,18 @@ Return CD.  DER is at most +maxder+.  NLib: N_CrvDerivs."
              (mder (min p der))
              (p+1 (1+ p))
              (der+1 (1+ der))
-             (bd (make-array (* der+1 p+1) :element-type 'double-float))
-             (ndu (make-array (* p+1 p+1) :element-type 'double-float))
-             (left (make-array (1+ p+1) :element-type 'double-float))
-             (right (make-array (1+ p+1) :element-type 'double-float))
-             (a (make-array (* 2 p+1) :element-type 'double-float))
-             (dd (make-array der+1 :element-type 'double-float))
-             (px (make-array p+1 :element-type 'double-float))
-             (py (make-array p+1 :element-type 'double-float))
-             (pz (make-array p+1 :element-type 'double-float)))
+             ;; constant sizes (NL_MAXDEG bounds p, NL_MAXDER bounds der, both
+             ;; checked above): stack-allocated on every implementation; the
+             ;; macrolets below index with the true strides
+             (bd (make-array +der+1-deg+1+ :element-type 'double-float))
+             (ndu (make-array +deg+1-squared+ :element-type 'double-float))
+             (left (make-array +deg+2+ :element-type 'double-float))
+             (right (make-array +deg+2+ :element-type 'double-float))
+             (a (make-array +2deg+2+ :element-type 'double-float))
+             (dd (make-array +der+1+ :element-type 'double-float))
+             (px (make-array +deg+1+ :element-type 'double-float))
+             (py (make-array +deg+1+ :element-type 'double-float))
+             (pz (make-array +deg+1+ :element-type 'double-float)))
         (declare (type fixnum nsp mder p+1 der+1)
                  (dynamic-extent bd ndu left right a dd px py pz))
         (macrolet ((bd (k j) `(aref bd (+ (the fixnum (* ,k p+1)) ,j)))
@@ -143,7 +150,7 @@ Return CD.  DER is at most +maxder+.  NLib: N_CrvDerivs."
             (declare (type fixnum j))
             (do ((i j (1+ i))) ((> i nsp))
               (declare (type fixnum i))
-              (multiple-value-bind (x y z) (%cpoint-row-to-euclid pw i)
+              (with-euclid-row ((x y z) pw i)
                 (setf (aref px (- i j)) x (aref py (- i j)) y (aref pz (- i j)) z))))
           (dotimes (k der+1)
             (let ((cx 0d0) (cy 0d0) (cz 0d0))
@@ -156,6 +163,7 @@ Return CD.  DER is at most +maxder+.  NLib: N_CrvDerivs."
                   (incf cz (* d (aref pz i)))))
               (setf (aref cd k 0) cx (aref cd k 1) cy (aref cd k 2) cz)))
           cd)))))
+(declaim (notinline crv-eval crv-derivs))
 
 (defun crv-eval-tangent (cur u flg p tv)
   "Write the point of curve CUR at parameter U into point P and the unit
@@ -199,12 +207,12 @@ NLib: N_CrvGetMinMaxWeightsAndPts."
                    wmax +no-w+)))
     (fast
       (dotimes (i (1+ n))
-        (multiple-value-bind (x y z) (%cpoint-row-to-euclid pw i)
+        (with-euclid-row ((x y z) pw i)
           (set-point p x y z))
         (sum-2-pts p c c))
       (scale-pt (/ 1d0 (+ (float n 1d0) 1d0)) c c)
       (dotimes (i (1+ n))
-        (multiple-value-bind (x y z) (%cpoint-row-to-euclid pw i)
+        (with-euclid-row ((x y z) pw i)
           (set-point p x y z))
         (diff-2-pts p c p)
         (let ((mag (vector-magnitude p)))

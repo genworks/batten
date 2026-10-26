@@ -13,8 +13,7 @@
   "When true, FLOAT-OP-IS-BAD answers false without checking, as NLib does
 when its NLIBCHKBYPASS is set.  NLib's default, and this one, is to check.")
 
-(declaim (inline float-op-is-bad))
-(defun float-op-is-bad (x y op)
+(define-inline float-op-is-bad (x y op)
   "True when X OP Y would overflow or underflow a double.  OP is +addition+,
 +subtraction+, +multiplication+ or +division+.  NLib: N_FloatOpIsBad."
   (declare (type double-float x y) (type fixnum op))
@@ -48,7 +47,7 @@ when its NLIBCHKBYPASS is set.  NLib's default, and this one, is to check.")
 ;;; ------------------------------------------------- homogeneous to Euclidean
 
 (declaim (inline %homogeneous-to-euclid %cpoint-row-to-euclid))
-(defun %homogeneous-to-euclid (wx wy wz w)
+(define-inline %homogeneous-to-euclid (wx wy wz w)
   "The Euclidean point of homogeneous (WX WY WZ W) as three values, honoring
 +no-z+ and +no-w+, multiplying by the reciprocal of w as N_CPtToPtEuclid does
 (which rounds differently from dividing by w)."
@@ -59,17 +58,41 @@ when its NLIBCHKBYPASS is set.  NLib's default, and this one, is to check.")
           (values (* wx r) (* wy r) (if (/= wz +no-z+) (* wz r) 0d0)))
         (values wx wy (if (/= wz +no-z+) wz 0d0)))))
 
-(defun %cpoint-row-to-euclid (cpoints i)
+(define-inline %cpoint-row-to-euclid (cpoints i)
   "The Euclidean point of row I of a cpoint-array, as three values."
   (declare (type cpoint-array cpoints) (type index i))
   (fast (%homogeneous-to-euclid (aref cpoints i 0) (aref cpoints i 1)
                                 (aref cpoints i 2) (aref cpoints i 3))))
 
-(declaim (inline c-pt-to-pt-euclid))
-(defun c-pt-to-pt-euclid (pw p)
+;;; The same conversion bound straight into typed variables: CCL and Allegro
+;;; box doubles returned as multiple values even from an inlined function,
+;;; which made every evaluation cons.  Same arithmetic, same bits.
+(defmacro with-euclid (((x y z) wx wy wz w) &body body)
+  "Bind X, Y, Z to the Euclidean point of homogeneous (WX WY WZ W), exactly
+as %homogeneous-to-euclid computes it, for BODY."
+  (let ((gx (gensym "WX")) (gy (gensym "WY")) (gz (gensym "WZ")) (gw (gensym "W")) (r (gensym "R")))
+    `(let ((,gx ,wx) (,gy ,wy) (,gz ,wz) (,gw ,w) (,x 0d0) (,y 0d0) (,z 0d0))
+       (declare (type double-float ,gx ,gy ,gz ,gw ,x ,y ,z))
+       (fast
+         (if (/= ,gw +no-w+)
+             (let ((,r (/ 1d0 ,gw)))
+               (declare (type double-float ,r))
+               (setq ,x (* ,gx ,r) ,y (* ,gy ,r) ,z (if (/= ,gz +no-z+) (* ,gz ,r) 0d0)))
+             (setq ,x ,gx ,y ,gy ,z (if (/= ,gz +no-z+) ,gz 0d0))))
+       (locally ,@body))))
+
+(defmacro with-euclid-row (((x y z) cpoints i) &body body)
+  "WITH-EUCLID over row I of cpoint-array CPOINTS (%cpoint-row-to-euclid)."
+  (let ((a (gensym "CPOINTS")) (k (gensym "I")))
+    `(let ((,a ,cpoints) (,k ,i))
+       (declare (type cpoint-array ,a) (type index ,k))
+       (with-euclid ((,x ,y ,z) (aref ,a ,k 0) (aref ,a ,k 1) (aref ,a ,k 2) (aref ,a ,k 3))
+         ,@body))))
+
+(define-inline c-pt-to-pt-euclid (pw p)
   "Write the Euclidean point of control point PW into P.  NLib: N_CPtToPtEuclid."
   (declare (type cpoint pw) (type point p))
-  (multiple-value-bind (x y z) (%homogeneous-to-euclid (aref pw 0) (aref pw 1) (aref pw 2) (aref pw 3))
+  (with-euclid ((x y z) (aref pw 0) (aref pw 1) (aref pw 2) (aref pw 3))
     (setf (aref p 0) x (aref p 1) y (aref p 2) z)
     p))
 

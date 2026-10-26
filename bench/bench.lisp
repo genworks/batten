@@ -19,7 +19,8 @@
 (defun bytes-consed ()
   #+sbcl (sb-ext:get-bytes-consed)
   #+ccl (ccl::total-bytes-allocated)
-  #-(or sbcl ccl) 0)
+  #+allegro (sys::gsgc-totalloc-bytes t)
+  #-(or sbcl ccl allegro) 0)
 
 (defun curve-of (degree rational n+1)
   "The first random curve of the given shape from the seeded generator."

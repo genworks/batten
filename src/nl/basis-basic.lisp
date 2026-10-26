@@ -10,23 +10,21 @@
 
 (in-package :batten)
 
-(defun knot-vector-is-param-out-of-bounds (knots u rname)
+(define-inline knot-vector-is-param-out-of-bounds (knots u rname)
   "Signal :par-err in routine RNAME when U lies outside [U[0], U[m]].
 NLib: N_KnotVectorIsParamOutOfBounds."
   (declare (type real-vector knots) (type double-float u))
   (when (or (< u (aref knots 0)) (> u (aref knots (1- (length knots)))))
     (nurbs-error :par-err rname)))
 
-(declaim (inline knot-vector-is-end-param))
-(defun knot-vector-is-end-param (knots u rname)
+(define-inline knot-vector-is-end-param (knots u rname)
   "Signal :par-err in routine RNAME when U is on or outside the ends of the
 domain: u <= U[0] or u >= U[m].  NLib: N_KnotVectorIsEndParam."
   (declare (type real-vector knots) (type double-float u))
   (when (or (<= u (aref knots 0)) (>= u (aref knots (1- (length knots)))))
     (nurbs-error :par-err rname)))
 
-(declaim (inline basis-find-span))
-(defun basis-find-span (knots p u flg)
+(define-inline basis-find-span (knots p u flg)
   "The knot span containing parameter U: the index i with U[i] < u <= U[i+1]
 for FLG +left+, U[i] <= u < U[i+1] for +right+.  A parameter on or beyond an
 end of the domain lands in the first or last span, stepping past degenerate
@@ -83,8 +81,7 @@ NLib: N_BasisGetSpanCount."
       (when (/= (aref knots i) (aref knots (1+ i)))
         (incf nsp)))))
 
-(declaim (inline basis-eval))
-(defun basis-eval (knots p u flg n)
+(define-inline basis-eval (knots p u flg n)
   "Fill N[0..p] with the non-vanishing B-spline basis functions of degree P at
 U, and return the span index i (N[k] is basis function i-p+k).
 NLib: N_BasisEval."
@@ -104,8 +101,10 @@ NLib: N_BasisEval."
          (- m p 1))
         (t
          (let ((i (basis-find-span knots p u flg))
-               (left (make-array (+ p 2) :element-type 'double-float))
-               (right (make-array (+ p 2) :element-type 'double-float)))
+               ;; constant sizes (NL_MAXDEG bounds p), so every implementation
+               ;; stack-allocates them
+               (left (make-array +deg+2+ :element-type 'double-float))
+               (right (make-array +deg+2+ :element-type 'double-float)))
            (declare (type fixnum i) (dynamic-extent left right))
            (setf (aref n 0) 1d0)
            (do ((k 1 (1+ k))) ((> k p))
@@ -135,10 +134,12 @@ function i-p+j), and return the span index i.  ND is at least (1+ DER) by
     (let* ((i (basis-find-span knots p u flg))
            (mder (min p der))
            (p+1 (1+ p))
-           (left (make-array p+1 :element-type 'double-float))
-           (right (make-array p+1 :element-type 'double-float))
-           (ndu (make-array (* p+1 p+1) :element-type 'double-float))
-           (a (make-array (* 2 p+1) :element-type 'double-float)))
+           ;; constant sizes (NL_MAXDEG bounds p): stack-allocated everywhere;
+           ;; the macrolets index with the true stride p+1
+           (left (make-array +deg+1+ :element-type 'double-float))
+           (right (make-array +deg+1+ :element-type 'double-float))
+           (ndu (make-array +deg+1-squared+ :element-type 'double-float))
+           (a (make-array +2deg+2+ :element-type 'double-float)))
       (declare (type fixnum i mder p+1) (dynamic-extent left right ndu a))
       (macrolet ((ndu (r c) `(aref ndu (+ (the fixnum (* ,r p+1)) ,c)))
                  (a (r c) `(aref a (+ (the fixnum (* ,r p+1)) ,c))))

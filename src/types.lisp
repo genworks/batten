@@ -29,15 +29,56 @@
 arguments are already declared or checked, as NLib's C trusts its inputs."
   `(locally (declare (optimize (speed 3) (safety 0) (debug 0))) ,@body))
 
+(defmacro define-inline (name lambda-list &body body)
+  "DEFUN NAME, declaimed inline.  Allegro CL ignores INLINE declarations on
+user functions -- each call stays a full call, boxing its double arguments
+and results -- but honors compiler macros, so there a compiler macro expands
+every call into the body as a lambda application."
+  `(progn
+     (declaim (inline ,name))
+     (defun ,name ,lambda-list ,@body)
+     #+allegro
+     (define-compiler-macro ,name (&rest args)
+       (list* '(lambda ,lambda-list ,@body) args))))
+
+;;; Scratch-array sizes as named constants: Allegro stack-allocates a
+;;; DYNAMIC-EXTENT array only when its size is a literal or a constant symbol,
+;;; not a constant expression such as (1+ +maxdeg+) (measured: 176 bytes a
+;;; call for that form, none for the others).
+(defconstant +deg+1+ (1+ +maxdeg+))
+(defconstant +deg+2+ (+ +maxdeg+ 2))
+(defconstant +2deg+2+ (* 2 (1+ +maxdeg+)))
+(defconstant +deg+1-squared+ (* (1+ +maxdeg+) (1+ +maxdeg+)))
+(defconstant +der+1+ (1+ +maxder+))
+(defconstant +der+1-squared+ (* (1+ +maxder+) (1+ +maxder+)))
+(defconstant +der+1-deg+1+ (* (1+ +maxder+) (1+ +maxdeg+)))
+
+(defmacro with-scratch-doubles ((var size bound) &body body)
+  "Bind VAR to a scratch vector of at least SIZE doubles for BODY.  When SIZE
+is at most BOUND (a constant), VAR is a stack-allocated vector of BOUND
+elements: implementations allocate a DYNAMIC-EXTENT array on the stack only
+when its size is constant (CCL and Allegro heap-allocate a variable-size one).
+Larger requests fall back to the heap.  BODY is expanded twice; keep it a
+call.  The contents start undefined, as C's stack arrays do."
+  (let ((n (gensym "N")))
+    `(let ((,n ,size))
+       (declare (type fixnum ,n))
+       (if (<= ,n ,bound)
+           (let ((,var (make-array ,bound :element-type 'double-float)))
+             (declare (dynamic-extent ,var))
+             ,@body)
+           (let ((,var (make-array ,n :element-type 'double-float)))
+             ,@body)))))
+
 (defmacro with-c-float-environment (&body body)
   "Run BODY with floating-point traps masked, as C runs: a division by zero
 gives an infinity and an invalid operation a NaN instead of signaling, so a
 ported routine computes the same bits as its C source on every input,
 including the ones where NLib computes an infinity and tests for it
 afterwards.  Batten's routines assume this environment; the exported API
-establishes it.  Allegro CL offers no way to mask the traps: there an input
-on which NLib divides by zero signals DIVISION-BY-ZERO instead (every other
-result is the same)."
+establishes it.  Allegro CL, EGCL and CLISP offer no way to mask the traps
+(CLISP has no infinities or NaNs at all): there an input on which NLib
+divides by zero signals instead (every other result is the same)."
   #+sbcl `(sb-int:with-float-traps-masked (:overflow :invalid :divide-by-zero :inexact :underflow)
             ,@body)
   #+ccl (let ((mode (gensym)))
@@ -47,7 +88,12 @@ result is the same)."
                                            :invalid nil :inexact nil)
                          ,@body)
                (apply #'ccl:set-fpu-mode ,mode))))
-  #-(or sbcl ccl) `(progn ,@body))
+  #+ecl (let ((mask (gensym)))
+          `(let ((,mask (ext:trap-fpe 'last t)))
+             (unwind-protect
+                  (progn (ext:trap-fpe t nil) ,@body)
+               (ext:trap-fpe ,mask t))))
+  #-(or sbcl ccl ecl) `(progn ,@body))
 
 ;;; ---------------------------------------------- constants not in constants.lisp
 
@@ -101,12 +147,11 @@ result is the same)."
   "NL_MAX3" (let ((a (gensym)) (b (gensym)) (c (gensym)))
               `(let ((,a ,x) (,b ,y) (,c ,z)) (if (and (> ,a ,b) (> ,a ,c)) ,a (if (> ,b ,c) ,b ,c)))))
 
-(declaim (inline nl-sign nl-siab))
-(defun nl-sign (x)
+(define-inline nl-sign (x)
   "NL_SIGN: 1.0 for positive X, else -1.0 -- zero included."
   (declare (type double-float x))
   (if (> x 0d0) 1d0 -1d0))
-(defun nl-siab (a b)
+(define-inline nl-siab (a b)
   "NL_SIAB: |a| with the sign of b (b >= 0 counts as positive)."
   (declare (type double-float a b))
   (if (>= b 0d0) (abs a) (- (abs a))))
@@ -121,25 +166,34 @@ result is the same)."
   ;; Allegro has no trap masking (see with-c-float-environment): its bits,
   ;; the x86-64 default NaN, are written out instead.
   #+allegro (excl:shorts-to-double-float #xfff8 0 0 0)
-  #-allegro (with-c-float-environment
-              ;; read at load time so that no compiler folds (and traps on) 0/0
-              (let ((zero (read-from-string "0d0"))) (/ zero zero)))
-  "The NaN an invalid operation produces (0/0), as C gets from sqrt(-1).")
+  ;; nil where the implementation can neither mask the trap nor represent a
+  ;; NaN (CLISP, EGCL): there %C-NAN signals instead
+  #-allegro (ignore-errors
+             (with-c-float-environment
+               ;; read at load time so that no compiler folds (and traps on) 0/0
+               (let ((zero (read-from-string "0d0"))) (/ zero zero))))
+  "The NaN an invalid operation produces (0/0), as C gets from sqrt(-1), or
+nil on an implementation without one.")
 
-(declaim (inline c-sqrt c-pow))
-(defun c-sqrt (x)
+(defun %c-nan (operation &rest operands)
+  "*C-NAN*, or where the implementation has none, the floating-point error C
+would have masked."
+  (or *c-nan*
+      (error 'floating-point-invalid-operation :operation operation :operands operands)))
+
+(define-inline c-sqrt (x)
   "C's sqrt of the double X: X itself for a NaN, a NaN for a negative X."
   (declare (type double-float x))
   (cond ((>= x 0d0) (sqrt (the (double-float 0d0) x)))
         ((/= x x) x)
-        (t *c-nan*)))
+        (t (%c-nan 'sqrt x))))
 
-(defun c-pow (x y)
+(define-inline c-pow (x y)
   "C's pow of the doubles X and Y, Y not a whole number: a NaN for a negative
 X, where CL's EXPT would return a complex."
   (declare (type double-float x y))
   (if (< x 0d0)
-      *c-nan*
+      (%c-nan 'expt x y)
       (the double-float (expt x y))))
 
 ;;; ------------------------------------------------------------------ errors
@@ -161,12 +215,11 @@ code is :quit."
 
 ;;; --------------------------------------------------------- points and arrays
 
-(declaim (inline make-point make-cpoint))
-(defun make-point (&optional (x 0d0) (y 0d0) (z 0d0))
+(define-inline make-point (&optional (x 0d0) (y 0d0) (z 0d0))
   (let ((p (make-array 3 :element-type 'double-float)))
     (setf (aref p 0) (float x 1d0) (aref p 1) (float y 1d0) (aref p 2) (float z 1d0))
     p))
-(defun make-cpoint (&optional (wx 0d0) (wy 0d0) (wz 0d0) (w +no-w+))
+(define-inline make-cpoint (&optional (wx 0d0) (wy 0d0) (wz 0d0) (w +no-w+))
   (let ((p (make-array 4 :element-type 'double-float)))
     (setf (aref p 0) (float wx 1d0) (aref p 1) (float wy 1d0)
           (aref p 2) (float wz 1d0) (aref p 3) (float w 1d0))

@@ -227,8 +227,7 @@ Pw[KU..LU][KV..LV] of SUR, entry [i-KU][j-KV].  Signals :ind-err unless
           (declare (type fixnum i))
           (do ((j kv (1+ j))) ((> j lv))
             (declare (type fixnum j))
-            (multiple-value-bind (x y z)
-                (%homogeneous-to-euclid (aref pw i j 0) (aref pw i j 1) (aref pw i j 2) (aref pw i j 3))
+            (with-euclid ((x y z) (aref pw i j 0) (aref pw i j 1) (aref pw i j 2) (aref pw i j 3))
               (declare (type double-float x y z))
               (setf (aref p (- i ku) (- j kv) 0) x
                     (aref p (- i ku) (- j kv) 1) y

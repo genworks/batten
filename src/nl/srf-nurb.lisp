@@ -10,8 +10,6 @@
 
 (deftype basis-derivatives () '(simple-array double-float (* * * *)))
 
-(defconstant +deg+1+ (1+ +maxdeg+))
-(defconstant +der+1+ (1+ +maxder+))
 
 (declaim (inline srf-nurb--st-compute-basis-functions srf-nurb--st-compute-derivatives))
 
@@ -46,7 +44,7 @@ the unscaled basis function derivatives from the table NDU.
 NLib: N_ComputeDerivatives / N_ComputeDerivativesImpl (static in NL_SrfNurb.cpp)."
   (declare (type fixnum p mder) (type real-vector ndu du))
   (fast
-    (let ((a (make-array (* 2 +deg+1+) :element-type 'double-float)))
+    (let ((a (make-array +2deg+2+ :element-type 'double-float)))
       (declare (dynamic-extent a))
       (macrolet ((ndu (r c) `(aref ndu (+ (the fixnum (* ,r +deg+1+)) ,c)))
                  (du (k r) `(aref du (+ (the fixnum (* ,k +deg+1+)) ,r)))
@@ -91,9 +89,9 @@ in row-major order.  Returns (values usp vsp)."
       (let* ((ku (basis-find-span knu p u ufl))
              (kv 0)
              (p+1 (1+ p)) (q+1 (1+ q)) (vdr+1 (1+ vdr))
-             (ndu (make-array (* +deg+1+ +deg+1+) :element-type 'double-float))
-             (du (make-array (* +der+1+ +deg+1+) :element-type 'double-float))
-             (dv (make-array (* +der+1+ +deg+1+) :element-type 'double-float)))
+             (ndu (make-array +deg+1-squared+ :element-type 'double-float))
+             (du (make-array +der+1-deg+1+ :element-type 'double-float))
+             (dv (make-array +der+1-deg+1+ :element-type 'double-float)))
         (declare (type fixnum ku kv p+1 q+1 vdr+1) (dynamic-extent ndu du dv))
         (macrolet ((du (k j) `(aref du (+ (the fixnum (* ,k +deg+1+)) ,j)))
                    (dv (k j) `(aref dv (+ (the fixnum (* ,k +deg+1+)) ,j)))
@@ -130,7 +128,7 @@ in row-major order.  Returns (values usp vsp)."
             (if (/= (aref pw 0 0 3) +no-w+)
                 ;; rational
                 (let ((tu (make-array +deg+1+ :element-type 'double-float))
-                      (d (make-array (* +der+1+ +der+1+) :element-type 'double-float))
+                      (d (make-array +der+1-squared+ :element-type 'double-float))
                       (s1 (- ku p)) (s2 (- kv q)))
                   (declare (dynamic-extent tu d) (type fixnum s1 s2))
                   (macrolet ((d (k l) `(aref d (+ (the fixnum (* ,k +der+1+)) ,l))))
@@ -202,9 +200,9 @@ with UPPER only k + l <= UDR.  NLib: N_ComputeDerivativeMatrixSpec."
   (declare (type fixnum p q udr vdr l2 l3) (type cpoint-net pw) (type real-vector bd)
            (type point-net sd))
   (fast
-    (let ((pwx (make-array (* +deg+1+ +deg+1+) :element-type 'double-float))
-          (pwy (make-array (* +deg+1+ +deg+1+) :element-type 'double-float))
-          (pwz (make-array (* +deg+1+ +deg+1+) :element-type 'double-float))
+    (let ((pwx (make-array +deg+1-squared+ :element-type 'double-float))
+          (pwy (make-array +deg+1-squared+ :element-type 'double-float))
+          (pwz (make-array +deg+1-squared+ :element-type 'double-float))
           (p+1 (1+ p)) (q+1 (1+ q)) (vdr+1 (1+ vdr)))
       (declare (dynamic-extent pwx pwy pwz) (type fixnum p+1 q+1 vdr+1))
       (dotimes (i p+1)
@@ -240,6 +238,9 @@ with UPPER only k + l <= UDR.  NLib: N_ComputeDerivativeMatrixSpec."
   (compute-derivative-matrix-spec (and no-w t) (and no-z t) (and upper t)
                                   p q udr vdr pw l2 l3 bd sd))
 
+;;; Maybe-inline, as crv-eval: inlined only into the exported surface-point!
+;;; and surface-derivatives!.
+(declaim (inline srf-derivs srf-eval-pt))
 (defun srf-derivs (sur u v ufl vfl mfl udr vdr sd)
   "Write the point of surface SUR at (U, V) and its partial derivatives into
 SD, a point-net of at least (1+ UDR) by (1+ VDR): SD[k][l] is the derivative
@@ -248,14 +249,16 @@ is computed.  Returns SD.  NLib: N_SrfDerivs."
   (declare (type surface sur) (type double-float u v) (type fixnum ufl vfl mfl udr vdr)
            (type point-net sd))
   (let* ((p (surface-degree-u sur)) (q (surface-degree-v sur))
-         (pw (surface-cpoints sur))
-         (bd (make-array (* (1+ udr) (1+ vdr) (1+ p) (1+ q)) :element-type 'double-float)))
-    (declare (type fixnum p q) (dynamic-extent bd))
-    (multiple-value-bind (usp vsp) (%srf-basis-derivs sur u v ufl vfl mfl udr vdr bd)
-      (declare (type fixnum usp vsp))
-      (compute-derivative-matrix (= (aref pw 0 0 3) +no-w+) (= (aref pw 0 0 2) +no-z+)
-                                 (and (= mfl +true+) (= udr vdr))
-                                 p q udr vdr pw (- usp p) (- vsp q) bd sd))))
+         (pw (surface-cpoints sur)))
+    (declare (type fixnum p q))
+    ;; on the stack up to bicubic-and-beyond second derivatives (3x3 orders of
+    ;; 8x8 basis values); the worst case (NL_MAXDER, NL_MAXDEG) is 64 KB
+    (with-scratch-doubles (bd (* (1+ udr) (1+ vdr) (1+ p) (1+ q)) 1024)
+      (multiple-value-bind (usp vsp) (%srf-basis-derivs sur u v ufl vfl mfl udr vdr bd)
+        (declare (type fixnum usp vsp))
+        (compute-derivative-matrix (= (aref pw 0 0 3) +no-w+) (= (aref pw 0 0 2) +no-z+)
+                                   (and (= mfl +true+) (= udr vdr))
+                                   p q udr vdr pw (- usp p) (- vsp q) bd sd)))))
 
 (defun srf-eval-pt (sur u v ufl vfl s)
   "Write the point of surface SUR at (U, V) into point S and return S.
@@ -296,6 +299,7 @@ NLib: N_SrfEvalPt (with N_SrfEvalPtImpl and NI_VectorBlendCPt_specialized)."
               (let ((r (/ 1d0 sw)))
                 (set-point s (* sx r) (* sy r) (if (not noz) (* sz r) 0d0)))
               (set-point s sx sy (if (not noz) sz 0d0))))))))
+(declaim (notinline srf-derivs srf-eval-pt))
 
 (defun srf-eval-pt-normal-at-pole (sur u v ufl vfl p su sv n sd)
   "Point, unit derivatives and unit normal of SUR at (U, V) where a first
