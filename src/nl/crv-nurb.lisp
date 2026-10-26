@@ -157,12 +157,6 @@ Return CD.  DER is at most +maxder+.  NLib: N_CrvDerivs."
               (setf (aref cd k 0) cx (aref cd k 1) cy (aref cd k 2) cz)))
           cd)))))
 
-(declaim (inline %point-array-row))
-(defun %point-array-row (pa i pt)
-  "Copy row I of point-array PA into point PT and return PT."
-  (declare (type point-array pa) (type index i) (type point pt))
-  (set-point pt (aref pa i 0) (aref pa i 1) (aref pa i 2)))
-
 (defun crv-eval-tangent (cur u flg p tv)
   "Write the point of curve CUR at parameter U into point P and the unit
 tangent there into vector TV; return P.  FLG (+left+ or +right+) picks the
@@ -174,8 +168,8 @@ NLib: N_CrvEvalTangent."
         (d1 (make-point)))
     (declare (dynamic-extent cd d1))
     (crv-derivs cur u flg 1 cd)
-    (%point-array-row cd 0 p)
-    (vector-normalize (%point-array-row cd 1 d1) tv)
+    (%row-pt cd 0 p)
+    (vector-normalize (%row-pt cd 1 d1) tv)
     p))
 
 (defun crv-get-min-max-weights-and-pts (cur)
@@ -248,9 +242,9 @@ NLib: N_CrvGetCurvatureDeriv."
         (a (make-point)) (z (make-point)))
     (declare (dynamic-extent d d1 d2 d3 a z))
     (crv-derivs cur u ufl 3 d)
-    (%point-array-row d 1 d1)
-    (%point-array-row d 2 d2)
-    (%point-array-row d 3 d3)
+    (%row-pt d 1 d1)
+    (%row-pt d 2 d2)
+    (%row-pt d 3 d3)
     (vector-cross d1 d2 z)
     (let ((f1 (vector-magnitude z))
           (f2 0d0) (num 0d0) (den 0d0))

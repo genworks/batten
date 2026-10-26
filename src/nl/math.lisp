@@ -173,7 +173,19 @@ when its NLIBCHKBYPASS is set.  NLib's default, and this one, is to check.")
           (setf (aref dst k l 0) a (aref dst k l 1) b (aref dst k l 2) c (aref dst k l 3) d)))
   dst)
 
-(declaim (inline %combine-2-c-pt-rows %vector-blend-c-pt-row))
+(declaim (inline %combine-2-c-pt-rows %combine-2-pt-rows %vector-blend-c-pt-row))
+
+(defun %combine-2-pt-rows (alpha a ai beta b bi c ci)
+  "N_Combine2Pts( alpha, a[ai], beta, b[bi], &c[ci] ) on rows of point-arrays:
+row CI of C = ALPHA * row AI of A + BETA * row BI of B.  Reads before writing."
+  (declare (type double-float alpha beta) (type point-array a b c) (type fixnum ai bi ci))
+  (let ((ax (aref a ai 0)) (ay (aref a ai 1)) (az (aref a ai 2))
+        (bx (aref b bi 0)) (by (aref b bi 1)) (bz (aref b bi 2)))
+    (declare (type double-float ax ay az bx by bz))
+    (setf (aref c ci 0) (+ (* alpha ax) (* beta bx))
+          (aref c ci 1) (+ (* alpha ay) (* beta by))
+          (aref c ci 2) (+ (* alpha az) (* beta bz)))
+    c))
 
 (defun %combine-2-c-pt-rows (alpha a ai beta b bi c ci)
   "N_Combine2CPts( alpha, a[ai], beta, b[bi], &c[ci] ) on rows of

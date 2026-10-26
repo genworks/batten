@@ -7,6 +7,15 @@
 
 (in-package :batten)
 
+(defun %crv-become (cur new)
+  "Make curve CUR, in place, the curve NEW (sharing NEW's arrays), as NLib's
+in-place operators (curP = curQ) overwrite their input.  Returns CUR."
+  (declare (type curve cur new))
+  (setf (curve-degree cur) (curve-degree new)
+        (curve-knots cur) (curve-knots new)
+        (curve-cpoints cur) (curve-cpoints new))
+  cur)
+
 (declaim (inline is-crv-rat))
 (defun is-crv-rat (cur)
   "True when curve CUR is rational (its first control point has a weight).

@@ -7,12 +7,6 @@
 
 (in-package :batten)
 
-(declaim (inline %srf-fit-net-cpt))
-(defun %srf-fit-net-cpt (pw row col dst)
-  "Copy control point PW[ROW][COL] of a cpoint-net into the cpoint DST; return DST."
-  (declare (type cpoint-net pw) (type fixnum row col) (type cpoint dst))
-  (set-cpoint dst (aref pw row col 0) (aref pw row col 1) (aref pw row col 2) (aref pw row col 3)))
-
 (defun fit-srf-removal-boundary (sur r s f l dir br mr)
   "Update the knot removal error bounds BR (a real-matrix indexed by control
 point row and column) and the maximum error MR for removing once the knot of
@@ -49,8 +43,8 @@ updates nothing and signals nothing.  NLib: N_FitSrfRemovalBoundary."
     (flet ((net (k other)
              ;; Pw[k][col] removing in u, Pw[row][k] removing in v
              (if udir
-                 (%srf-fit-net-cpt pw k other pt)
-                 (%srf-fit-net-cpt pw other k pt)))
+                 (%net-c-pt pw k other pt)
+                 (%net-c-pt pw other k pt)))
            (rw (k) (the cpoint (svref rw k))))
       (declare (inline net rw))
       (let* ((first (- r deg))

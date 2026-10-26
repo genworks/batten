@@ -27,7 +27,7 @@
       ((and (= (curve-degree c) degree)
             (eq (and (curve-rational-p c) t) rational)
             (>= (1+ (curve-n c)) n+1)
-            (/= (aref (curve-cpoints c) 2) +no-z+))
+            (/= (aref (curve-cpoints c) 0 2) +no-z+))
        c)))
 
 (defparameter *cases* '((2 nil) (3 nil) (3 t) (5 nil) (5 t))

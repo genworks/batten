@@ -148,8 +148,8 @@ NLib: N_CrvPlanarOffsetGetDeriv."
              (dynamic-extent dd d1 d2 b o))
     ;; derivatives, the curvature and its derivative
     (crv-derivs cur u ufl 2 dd)
-    (%point-array-row dd 1 d1)
-    (%point-array-row dd 2 d2)
+    (%row-pt dd 1 d1)
+    (%row-pt dd 2 d2)
     (vector-cross d1 d2 b)
     (setf num (vector-magnitude b))
     (setf den (vector-magnitude d1))
@@ -990,15 +990,6 @@ NLib: N_SrfReparamFunc."
 
 ;;; ------------------------------------------------------------- L5-g1
 
-(defun %crv-adv-become-crv (cur new)
-  "Make curve CUR, in place, the curve NEW (sharing NEW's arrays), as the C's
-in-place operators (curP = curQ) overwrite their input.  Returns CUR."
-  (declare (type curve cur new))
-  (setf (curve-degree cur) (curve-degree new)
-        (curve-knots cur) (curve-knots new)
-        (curve-cpoints cur) (curve-cpoints new))
-  cur)
-
 (defun %crv-adv-become-srf (sur new)
   "Make surface SUR, in place, the surface NEW (sharing NEW's arrays), as the
 C's in-place operators (surP = surQ) overwrite their input.  Returns SUR."
@@ -1045,7 +1036,7 @@ NLib: N_CrvMakeCompatibleWithSrf."
         (basis-reparam us ps pint))
       ;; degree elevate if necessary
       (cond ((< pc ps)
-             (%crv-adv-become-crv cur (crv-elevate-degree cur (- ps pc))))
+             (%crv-become cur (crv-elevate-degree cur (- ps pc))))
             ((< ps pc)
              (%crv-adv-become-srf sur (srf-elevate-degree sur (- pc ps) dir))))
       ;; merge the knot vectors
@@ -1057,7 +1048,7 @@ NLib: N_CrvMakeCompatibleWithSrf."
         (declare (type simple-vector knt knx) (type real-vector kx0 kx1))
         ;; refine the curve and/or the surface
         (when (>= (1- (length kx0)) 0)
-          (%crv-adv-become-crv cur (crv-refine cur kx0)))
+          (%crv-become cur (crv-refine cur kx0)))
         (when (>= (1- (length kx1)) 0)
           (%crv-adv-become-srf sur (srf-insert-knots sur kx1 dir)))))
     cur))

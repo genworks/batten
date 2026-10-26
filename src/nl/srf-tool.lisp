@@ -13,21 +13,7 @@
 ;;; to N_CopyCPt and N_Combine2CPts.  A Batten net is one (* * 4) array, so
 ;;; these move an entry through a scratch cpoint and call the same routines.
 
-(declaim (inline %net-cpt %net-copy %net-combine))
-
-(defun %net-cpt (net i j cp)
-  "Copy entry [I][J] of cpoint-net NET into cpoint CP (N_CopyCPt from a net)."
-  (declare (type cpoint-net net) (type fixnum i j) (type cpoint cp))
-  (fast (set-cpoint cp (aref net i j 0) (aref net i j 1) (aref net i j 2) (aref net i j 3))))
-
-(defun %net-copy (src si sj dst di dj)
-  "Copy entry SRC[SI][SJ] into DST[DI][DJ] (N_CopyCPt between nets)."
-  (declare (type cpoint-net src dst) (type fixnum si sj di dj))
-  (fast
-    (let ((x (aref src si sj 0)) (y (aref src si sj 1))
-          (z (aref src si sj 2)) (w (aref src si sj 3)))
-      (setf (aref dst di dj 0) x (aref dst di dj 1) y
-            (aref dst di dj 2) z (aref dst di dj 3) w))))
+(declaim (inline %net-combine))
 
 (defun %net-combine (alpha an ai aj beta bn bi bj cn ci cj)
   "CN[CI][CJ] = ALPHA*AN[AI][AJ] + BETA*BN[BI][BJ], by N_Combine2CPts."
@@ -37,8 +23,8 @@
     (let ((a (make-array 4 :element-type 'double-float))
           (b (make-array 4 :element-type 'double-float)))
       (declare (dynamic-extent a b))
-      (%net-cpt an ai aj a)
-      (%net-cpt bn bi bj b)
+      (%net-c-pt an ai aj a)
+      (%net-c-pt bn bi bj b)
       (combine-2-c-pts alpha a beta b a)
       (setf (aref cn ci cj 0) (aref a 0) (aref cn ci cj 1) (aref a 1)
             (aref cn ci cj 2) (aref a 2) (aref cn ci cj 3) (aref a 3)))))
@@ -80,7 +66,7 @@ NLib: N_SrfDecomposeToBez."
       (declare (type fixnum isu ieu iq mlu ru))
       (dotimes (i (1+ p))
         (dotimes (l (1+ m))
-          (%net-copy pw i l bw i l)))
+          (%copy-c-pt-net pw i l bw i l)))
       ;; decompose in u-direction into Bezier strips
       (do () ((not (< ieu r)))
         (incf iq)
@@ -108,7 +94,7 @@ NLib: N_SrfDecomposeToBez."
                   (%net-combine (aref uals (- j su)) bw j l (aref omus (- j su)) bw (1- j) l bw j l)))
               (when (< ieu r)
                 (dotimes (l (1+ m))
-                  (%net-copy bw p l nbw save l))))))
+                  (%copy-c-pt-net bw p l nbw save l))))))
         ;; Bezier strip completed; initialize for v-directional decomposition
         (let ((isv q) (iev (1+ q)) (jq -1) (mlv 0) (rv 0))
           (declare (type fixnum isv iev jq mlv rv))
@@ -116,7 +102,7 @@ NLib: N_SrfDecomposeToBez."
             (declare (type cpoint-net qw))
             (dotimes (j (1+ q))
               (dotimes (k (1+ p))
-                (%net-copy bw k j qw k j))))
+                (%copy-c-pt-net bw k j qw k j))))
           ;; decompose in v-direction into Bezier patches
           (do () ((not (< iev s)))
             (incf jq)
@@ -151,7 +137,7 @@ NLib: N_SrfDecomposeToBez."
                         (%net-combine (aref vals (- j sv)) qw k j (aref omvs (- j sv)) qw k (1- j) qw k j)))
                     (when (< iev s)
                       (dotimes (k (1+ p))
-                        (%net-copy qw k q nqw k save))))))
+                        (%copy-c-pt-net qw k q nqw k save))))))
               ;; knot vectors
               (dotimes (i (1+ p))
                 (setf (aref uq i) (aref up isu)
@@ -164,7 +150,7 @@ NLib: N_SrfDecomposeToBez."
                 (do ((i rv (1+ i))) ((> i q))
                   (declare (type fixnum i))
                   (dotimes (k (1+ p))
-                    (%net-copy bw k (+ (- iev q) i) nqw k i))))
+                    (%copy-c-pt-net bw k (+ (- iev q) i) nqw k i))))
               (setf isv iev
                     iev (1+ iev)))))
         ;; Bezier strip decomposed: prepare for the next strip
@@ -172,7 +158,7 @@ NLib: N_SrfDecomposeToBez."
           (do ((i ru (1+ i))) ((> i p))
             (declare (type fixnum i))
             (dotimes (l (1+ m))
-              (%net-copy pw (+ (- ieu p) i) l nbw i l))))
+              (%copy-c-pt-net pw (+ (- ieu p) i) l nbw i l))))
         (setf isu ieu
               ieu (1+ ieu))
         (rotatef bw nbw)))
@@ -259,14 +245,14 @@ NLib: N_SrfSplit."
             ;; load auxiliary control points
             (do ((i 0 (1+ i))) ((> i (- p mlu)))
               (declare (type fixnum i))
-              (%net-copy pw (+ a i) l sw 0 i))
+              (%copy-c-pt-net pw (+ a i) l sw 0 i))
             ;; save unaltered control points
             (do ((i 0 (1+ i))) ((> i a))
               (declare (type fixnum i))
-              (%net-copy pw i l lw i l))
+              (%copy-c-pt-net pw i l lw i l))
             (do ((i (- spu mlu) (1+ i))) ((> i n))
               (declare (type fixnum i))
-              (%net-copy pw i l rw (- i a) l))
+              (%copy-c-pt-net pw i l rw (- i a) l))
             ;; now split the surface
             (do ((i 1 (1+ i))) ((> i (- p mlu)))
               (declare (type fixnum i))
@@ -276,8 +262,8 @@ NLib: N_SrfSplit."
                 (do ((j 0 (1+ j))) ((> j (- p i mlu)))
                   (declare (type fixnum j))
                   (%net-combine (aref alf i j) sw 0 (1+ j) (aref oma i j) sw 0 j sw 0 j))
-                (%net-copy sw 0 0 lw b l)
-                (%net-copy sw 0 c rw c l)))))
+                (%copy-c-pt-net sw 0 0 lw b l)
+                (%copy-c-pt-net sw 0 c rw c l)))))
         ;; load knot vectors
         (let ((a (- spu mlu)))
           (declare (type fixnum a))
@@ -317,14 +303,14 @@ NLib: N_SrfSplit."
             ;; load auxiliary control points
             (do ((i 0 (1+ i))) ((> i (- q mlv)))
               (declare (type fixnum i))
-              (%net-copy pw k (+ a i) sw 0 i))
+              (%copy-c-pt-net pw k (+ a i) sw 0 i))
             ;; save unaltered control points
             (do ((i 0 (1+ i))) ((> i a))
               (declare (type fixnum i))
-              (%net-copy pw k i lw k i))
+              (%copy-c-pt-net pw k i lw k i))
             (do ((i (- spv mlv) (1+ i))) ((> i m))
               (declare (type fixnum i))
-              (%net-copy pw k i rw k (- i a)))
+              (%copy-c-pt-net pw k i rw k (- i a)))
             ;; now split the surface
             (do ((i 1 (1+ i))) ((> i (- q mlv)))
               (declare (type fixnum i))
@@ -334,8 +320,8 @@ NLib: N_SrfSplit."
                 (do ((j 0 (1+ j))) ((> j (- q i mlv)))
                   (declare (type fixnum j))
                   (%net-combine (aref alf i j) sw 0 (1+ j) (aref oma i j) sw 0 j sw 0 j))
-                (%net-copy sw 0 0 lw k b)
-                (%net-copy sw 0 c rw k c)))))
+                (%copy-c-pt-net sw 0 0 lw k b)
+                (%copy-c-pt-net sw 0 c rw k c)))))
         ;; load knot vectors
         (let ((a (- spv mlv)))
           (declare (type fixnum a))
@@ -534,10 +520,10 @@ same surface)."
              (declare (type fixnum col))
              (do ((j 0 (1+ j))) ((> j (- a p)))
                (declare (type fixnum j))
-               (%net-copy pw j col qw j col))
+               (%copy-c-pt-net pw j col qw j col))
              (do ((j (1- b) (1+ j))) ((> j n))
                (declare (type fixnum j))
-               (%net-copy pw j col qw (+ j xr 1) col)))
+               (%copy-c-pt-net pw j col qw (+ j xr 1) col)))
            ;; refine the knot vector
            (setf i (+ b p -1)
                  k (+ b p xr))
@@ -546,13 +532,13 @@ same surface)."
              (do () ((not (and (<= (aref x j) (aref up i)) (> i a))))
                (do ((col 0 (1+ col))) ((> col m))
                  (declare (type fixnum col))
-                 (%net-copy pw (- i p 1) col qw (- k p 1) col))
+                 (%copy-c-pt-net pw (- i p 1) col qw (- k p 1) col))
                (setf (aref uq k) (aref up i))
                (decf k)
                (decf i))
              (do ((col 0 (1+ col))) ((> col m))
                (declare (type fixnum col))
-               (%net-copy qw (- k p) col qw (- k p 1) col))
+               (%copy-c-pt-net qw (- k p) col qw (- k p 1) col))
              (do ((l 1 (1+ l))) ((> l p))
                (declare (type fixnum l))
                (let ((tt (+ (- k p) l))
@@ -561,7 +547,7 @@ same surface)."
                  (if (<= (abs alf) 0d0)
                      (do ((col 0 (1+ col))) ((> col m))
                        (declare (type fixnum col))
-                       (%net-copy qw tt col qw (1- tt) col))
+                       (%copy-c-pt-net qw tt col qw (1- tt) col))
                      (let* ((alf (/ alf (- (aref uq (+ k l)) (aref up (+ (- i p) l)))))
                             (oma (- 1d0 alf)))
                        (declare (type double-float alf oma))
@@ -591,10 +577,10 @@ same surface)."
              (declare (type fixnum row))
              (do ((j 0 (1+ j))) ((> j (- a q)))
                (declare (type fixnum j))
-               (%net-copy pw row j qw row j))
+               (%copy-c-pt-net pw row j qw row j))
              (do ((j (1- b) (1+ j))) ((> j m))
                (declare (type fixnum j))
-               (%net-copy pw row j qw row (+ j xr 1))))
+               (%copy-c-pt-net pw row j qw row (+ j xr 1))))
            ;; refine the knot vector
            (setf i (+ b q -1)
                  k (+ b q xr))
@@ -603,13 +589,13 @@ same surface)."
              (do () ((not (and (<= (aref x j) (aref vp i)) (> i a))))
                (do ((row 0 (1+ row))) ((> row n))
                  (declare (type fixnum row))
-                 (%net-copy pw row (- i q 1) qw row (- k q 1)))
+                 (%copy-c-pt-net pw row (- i q 1) qw row (- k q 1)))
                (setf (aref vq k) (aref vp i))
                (decf k)
                (decf i))
              (do ((row 0 (1+ row))) ((> row n))
                (declare (type fixnum row))
-               (%net-copy qw row (- k q) qw row (- k q 1)))
+               (%copy-c-pt-net qw row (- k q) qw row (- k q 1)))
              (do ((l 1 (1+ l))) ((> l q))
                (declare (type fixnum l))
                (let ((tt (+ (- k q) l))
@@ -618,7 +604,7 @@ same surface)."
                  (if (<= (abs alf) 0d0)
                      (do ((row 0 (1+ row))) ((> row n))
                        (declare (type fixnum row))
-                       (%net-copy qw row tt qw row (1- tt)))
+                       (%copy-c-pt-net qw row tt qw row (1- tt)))
                      (let* ((alf (/ alf (- (aref vq (+ k l)) (aref vp (+ (- i q) l)))))
                             (oma (- 1d0 alf)))
                        (declare (type double-float alf oma))
@@ -678,14 +664,14 @@ NLib: N_SrfRemoveOneKnot."
            (declare (type fixnum col))
            (let ((i first) (j last) (ii 1) (jj (- last off)))
              (declare (type fixnum i j ii jj))
-             (%net-cpt pw off col (svref rw 0))
-             (%net-cpt pw (1+ last) col (svref rw (- (1+ last) off)))
+             (%net-c-pt pw off col (svref rw 0))
+             (%net-c-pt pw (1+ last) col (svref rw (- (1+ last) off)))
              ;; new control points for one removal step
              (do () ((not (> (- j i) 0)))
-               (%net-cpt pw i col tmp)
+               (%net-c-pt pw i col tmp)
                (combine-2-c-pts (aref alf (- i first)) tmp (aref oma (- i first)) (svref rw (1- ii))
                                 (svref rw ii))
-               (%net-cpt pw j col tmp)
+               (%net-c-pt pw j col tmp)
                (combine-2-c-pts (aref bet (- j first)) tmp (aref omb (- j first)) (svref rw (1+ jj))
                                 (svref rw jj))
                (incf i) (decf j) (incf ii) (decf jj))
@@ -694,7 +680,7 @@ NLib: N_SrfRemoveOneKnot."
                  (setf dw (dist-cpt-cpt-homo (svref rw (1- ii)) (svref rw (1+ jj))))
                  (progn
                    (combine-2-c-pts del (svref rw (1+ jj)) omd (svref rw (1- ii)) a)
-                   (%net-cpt pw i col tmp)
+                   (%net-c-pt pw i col tmp)
                    (setf dw (dist-cpt-cpt-homo tmp a))))
              (when (> dw mr)
                (setf mr dw))))))
@@ -717,14 +703,14 @@ NLib: N_SrfRemoveOneKnot."
            (declare (type fixnum row))
            (let ((i first) (j last) (ii 1) (jj (- last off)))
              (declare (type fixnum i j ii jj))
-             (%net-cpt pw row off (svref rw 0))
-             (%net-cpt pw row (1+ last) (svref rw (- (1+ last) off)))
+             (%net-c-pt pw row off (svref rw 0))
+             (%net-c-pt pw row (1+ last) (svref rw (- (1+ last) off)))
              ;; new control points for one removal step
              (do () ((not (> (- j i) 0)))
-               (%net-cpt pw row i tmp)
+               (%net-c-pt pw row i tmp)
                (combine-2-c-pts (aref alf (- i first)) tmp (aref oma (- i first)) (svref rw (1- ii))
                                 (svref rw ii))
-               (%net-cpt pw row j tmp)
+               (%net-c-pt pw row j tmp)
                (combine-2-c-pts (aref bet (- j first)) tmp (aref omb (- j first)) (svref rw (1+ jj))
                                 (svref rw jj))
                (incf i) (decf j) (incf ii) (decf jj))
@@ -733,7 +719,7 @@ NLib: N_SrfRemoveOneKnot."
                  (setf dw (dist-cpt-cpt-homo (svref rw (1- ii)) (svref rw (1+ jj))))
                  (progn
                    (combine-2-c-pts del (svref rw (1+ jj)) omd (svref rw (1- ii)) a)
-                   (%net-cpt pw row i tmp)
+                   (%net-c-pt pw row i tmp)
                    (setf dw (dist-cpt-cpt-homo tmp a))))
              (when (> dw mr)
                (setf mr dw))))))
@@ -982,8 +968,8 @@ NLib: N_SrfRemoveAllKnots."
                       (dotimes (col (1+ m))
                         (let ((i first) (j last) (ii 1) (jj (- last off)))
                           (declare (type fixnum i j ii jj))
-                          (%net-copy qw off col rw col 0)
-                          (%net-copy qw (1+ last) col rw col (- (1+ last) off))
+                          (%copy-c-pt-net qw off col rw col 0)
+                          (%copy-c-pt-net qw (1+ last) col rw col (- (1+ last) off))
                           ;; new control points for one removal step
                           (fast
                             (do () ((not (> (- j i) 0)))
@@ -1023,8 +1009,8 @@ NLib: N_SrfRemoveAllKnots."
                         (declare (type fixnum i j))
                         (fast
                           (do () ((not (> (- j i) 0)))
-                            (%net-copy rw col (- i off) qw i col)
-                            (%net-copy rw col (- j off) qw j col)
+                            (%copy-c-pt-net rw col (- i off) qw i col)
+                            (%copy-c-pt-net rw col (- j off) qw j col)
                             (incf i) (decf j)))))
                     ;; successful removal: shift down some entities
                     (when (= su 1)
@@ -1046,7 +1032,7 @@ NLib: N_SrfRemoveAllKnots."
                       (fast
                         (do ((i (1+ fout) (1+ i))) ((> i n))
                           (declare (type fixnum i))
-                          (%net-copy qw i col qw (1- i) col))))
+                          (%copy-c-pt-net qw i col qw (1- i) col))))
                     (decf n)
                     (decf r)
                     ;; N_SrfSetSizeIndices
@@ -1165,8 +1151,8 @@ NLib: N_SrfRemoveAllKnots."
                       (dotimes (row (1+ n))
                         (let ((i first) (j last) (ii 1) (jj (- last off)))
                           (declare (type fixnum i j ii jj))
-                          (%net-copy qw row off rw row 0)
-                          (%net-copy qw row (1+ last) rw row (- (1+ last) off))
+                          (%copy-c-pt-net qw row off rw row 0)
+                          (%copy-c-pt-net qw row (1+ last) rw row (- (1+ last) off))
                           ;; new control points for one removal step
                           (fast
                             (do () ((not (> (- j i) 0)))
@@ -1206,8 +1192,8 @@ NLib: N_SrfRemoveAllKnots."
                         (declare (type fixnum i j))
                         (fast
                           (do () ((not (> (- j i) 0)))
-                            (%net-copy rw row (- i off) qw row i)
-                            (%net-copy rw row (- j off) qw row j)
+                            (%copy-c-pt-net rw row (- i off) qw row i)
+                            (%copy-c-pt-net rw row (- j off) qw row j)
                             (incf i) (decf j)))))
                     ;; successful removal: shift down some entities
                     (when (= sv 1)
@@ -1229,7 +1215,7 @@ NLib: N_SrfRemoveAllKnots."
                       (fast
                         (do ((j (1+ fout) (1+ j))) ((> j m))
                           (declare (type fixnum j))
-                          (%net-copy qw row j qw row (1- j)))))
+                          (%copy-c-pt-net qw row j qw row (1- j)))))
                     (decf m)
                     (decf s)
                     ;; N_SrfSetSizeIndices
@@ -1262,7 +1248,7 @@ NLib: N_SrfRemoveAllKnots."
           (let ((net (make-cpoint-net (1+ n) (1+ m))))
             (dotimes (i (1+ n))
               (dotimes (j (1+ m))
-                (%net-copy qw i j net i j)))
+                (%copy-c-pt-net qw i j net i j)))
             (setf (surface-cpoints sur-q) net
                   (surface-knots-u sur-q) (subseq uq 0 (1+ r))
                   (surface-knots-v sur-q) (subseq vq 0 (1+ s))))
@@ -1340,7 +1326,7 @@ NLib: N_SrfExtractPatch."
                   ;; initial control points
                   (do ((i is (1+ i))) ((> i ie))
                     (declare (type fixnum i))
-                    (%net-copy pw i col aw (- i is) col))
+                    (%copy-c-pt-net pw i col aw (- i is) col))
                   ;; insert the left knot
                   (let ((ll (- sul p)))
                     (declare (type fixnum ll))
@@ -1383,7 +1369,7 @@ NLib: N_SrfExtractPatch."
                     ;; initial control points
                     (do ((j js (1+ j))) ((> j je))
                       (declare (type fixnum j))
-                      (%net-copy aw row j qw row (- j js)))
+                      (%copy-c-pt-net aw row j qw row (- j js)))
                     ;; insert the left knot
                     (let ((ll (- svl q)))
                       (declare (type fixnum ll))
@@ -1498,7 +1484,7 @@ NLib: N_SrfElevateDegree."
       (when (= tt 0)
         (dotimes (row (1+ np))
           (dotimes (col (1+ mp))
-            (%net-copy pw row col qw row col)))
+            (%copy-c-pt-net pw row col qw row col)))
         (dotimes (i (1+ rp))
           (setf (aref uq i) (aref up i)))
         (dotimes (j (1+ sp))
@@ -1532,9 +1518,9 @@ NLib: N_SrfElevateDegree."
               (setf (aref vq j) (aref vp j)))
             ;; initialize the Bezier strip
             (dotimes (col (1+ mp))
-              (%net-copy pw 0 col qw 0 col)
+              (%copy-c-pt-net pw 0 col qw 0 col)
               (dotimes (i (1+ pp))
-                (%net-copy pw i col bw i col)))
+                (%copy-c-pt-net pw i col bw i col)))
             ;; the degree elevation matrix
             (%check-mem-real-matrix dm pq pp +mt-full+ pp 'srf-elevate-degree)
             (bez-get-degree-elevation-matrix pp tt (rmatrix-rm dm))
@@ -1586,7 +1572,7 @@ NLib: N_SrfElevateDegree."
                       (do ((k pp (1- k))) ((< k s))
                         (declare (type fixnum k))
                         (%net-combine (aref alfs (- k s)) bw k col (aref omas (- k s)) bw (1- k) col bw k col))
-                      (%net-copy bw pp col nw save col))))
+                      (%copy-c-pt-net bw pp col nw save col))))
                 ;; degree elevate the Bezier strip
                 (bez-srf-elevate-degree bw pp tt dm +udir+ lbz pq col dw)
                 ;; remove the knot UP[a]
@@ -1612,15 +1598,15 @@ NLib: N_SrfElevateDegree."
                 ;; load control points
                 (do ((i lbz (1+ i))) ((> i rbz))
                   (declare (type fixnum i))
-                  (%net-copy dw i col qw pind col)
+                  (%copy-c-pt-net dw i col qw pind col)
                   (incf pind))
                 ;; initialize for the next pass
                 (when (< b rp)
                   (dotimes (i r)
-                    (%net-copy nw i col bw i col))
+                    (%copy-c-pt-net nw i col bw i col))
                   (do ((i r (1+ i))) ((> i pp))
                     (declare (type fixnum i))
-                    (%net-copy pw (+ (- b pp) i) col bw i col))))
+                    (%copy-c-pt-net pw (+ (- b pp) i) col bw i col))))
               (setf cind pind)
               ;; load the knot vector and prepare for the next pass
               (when (/= a pp)
@@ -1644,9 +1630,9 @@ NLib: N_SrfElevateDegree."
               (setf (aref vq j) (aref vp a)))
             ;; initialize the Bezier strip
             (dotimes (row (1+ np))
-              (%net-copy pw row 0 qw row 0)
+              (%copy-c-pt-net pw row 0 qw row 0)
               (dotimes (j (1+ qp))
-                (%net-copy pw row j bw row j)))
+                (%copy-c-pt-net pw row j bw row j)))
             ;; the degree elevation matrix
             (%check-mem-real-matrix dm qq qp +mt-full+ qp 'srf-elevate-degree)
             (bez-get-degree-elevation-matrix qp tt (rmatrix-rm dm))
@@ -1698,7 +1684,7 @@ NLib: N_SrfElevateDegree."
                       (do ((k qp (1- k))) ((< k s))
                         (declare (type fixnum k))
                         (%net-combine (aref alfs (- k s)) bw row k (aref omas (- k s)) bw row (1- k) bw row k))
-                      (%net-copy bw row qp nw row save))))
+                      (%copy-c-pt-net bw row qp nw row save))))
                 ;; degree elevate the Bezier strip
                 (bez-srf-elevate-degree bw qp tt dm +vdir+ lbz qq row dw)
                 ;; remove the knot VP[a]
@@ -1724,15 +1710,15 @@ NLib: N_SrfElevateDegree."
                 ;; load control points
                 (do ((j lbz (1+ j))) ((> j rbz))
                   (declare (type fixnum j))
-                  (%net-copy dw row j qw row pind)
+                  (%copy-c-pt-net dw row j qw row pind)
                   (incf pind))
                 ;; initialize for the next pass
                 (when (< b sp)
                   (dotimes (j r)
-                    (%net-copy nw row j bw row j))
+                    (%copy-c-pt-net nw row j bw row j))
                   (do ((j r (1+ j))) ((> j qp))
                     (declare (type fixnum j))
-                    (%net-copy pw row (+ (- b qp) j) bw row j))))
+                    (%copy-c-pt-net pw row (+ (- b qp) j) bw row j))))
               (setf cind pind)
               ;; load the knot vector and prepare for the next pass
               (when (/= a qp)

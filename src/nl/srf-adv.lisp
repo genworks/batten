@@ -501,15 +501,6 @@ NLib: N_CreateBVectors."
 
 (defconstant +srf-adv--kn-tol+ 1.0d-6 "KN_TOL in NL_SrfAdv.cpp: relative knot tolerance.")
 
-(defun %srf-adv-become-crv (cur new)
-  "Make curve CUR, in place, the curve NEW (sharing NEW's arrays), as the C's
-in-place operators (curP = curQ) overwrite their input.  Returns CUR."
-  (declare (type curve cur new))
-  (setf (curve-degree cur) (curve-degree new)
-        (curve-knots cur) (curve-knots new)
-        (curve-cpoints cur) (curve-cpoints new))
-  cur)
-
 (defun srf-modify-boundary-crv (sur-p newbdy dirflg end uv cont)
   "Surface SUR-P with one boundary replaced by curve NEWBDY, as a fresh
 surface: DIRFLG +udir+ replaces the u = umin (END +start+) or u = umax
@@ -729,7 +720,7 @@ NLib: N_ReparmCrvsIsectPt."
               (c-func-derivs cfn (aref u r) +left+ 1 fd)
               (when (<= (aref fd 1) 0d0)
                 (nurbs-error :der-err 'reparm-crvs-isect-pt))))
-          (%srf-adv-become-crv (svref cur-u j) (srf-reparam-func (svref cur-u j) cfn)))))
+          (%crv-become (svref cur-u j) (srf-reparam-func (svref cur-u j) cfn)))))
     ;; reparametrize the v-curves
     (dotimes (i (1+ l))
       (let ((this (make-real-vector (1+ k))))
@@ -745,7 +736,7 @@ NLib: N_ReparmCrvsIsectPt."
               (c-func-derivs cfn (aref u r) +left+ 1 fd)
               (when (<= (aref fd 1) 0d0)
                 (nurbs-error :der-err 'reparm-crvs-isect-pt))))
-          (%srf-adv-become-crv (svref cur-v i) (srf-reparam-func (svref cur-v i) cfn)))))
+          (%crv-become (svref cur-v i) (srf-reparam-func (svref cur-v i) cfn)))))
     ;; make compatible again
     (crvs-make-compatible cur-u k)
     (crvs-make-compatible cur-v l)
@@ -1022,12 +1013,6 @@ NLib: N_CreateCoonsBoundaryCrvs."
   (dotimes (c 4)
     (setf (aref to ti tj c) (aref from fi fj c))))
 
-(defun %srf-adv-skin-row (from i to j)
-  "N_CopyCPt from row I of cpoint-array FROM to row J of TO."
-  (declare (type cpoint-array from to) (type fixnum i j))
-  (dotimes (c 4)
-    (setf (aref to j c) (aref from i c))))
-
 (defun %srf-adv-skin-net-row (from fi fj to j)
   "N_CopyCPt from entry FI,FJ of cpoint-net FROM to row J of cpoint-array TO."
   (declare (type cpoint-net from) (type cpoint-array to) (type fixnum fi fj j))
@@ -1124,7 +1109,7 @@ NLib: N_CreateSkinSrf."
                (fit-crv-calc-knot-vector u k p us))
            (dotimes (j (1+ m))
              (dotimes (i (1+ k))
-               (%srf-adv-skin-row (curve-cpoints (svref cur i)) j aw i))
+               (%copy-c-pt-row (curve-cpoints (svref cur i)) j aw i))
              (let ((cura (if closed
                              (progn
                                (dotimes (i (1+ k))
@@ -1186,7 +1171,7 @@ NLib: N_CreateSkinSrf."
                (fit-crv-calc-knot-vector v k q vs))
            (dotimes (i (1+ n))
              (dotimes (j (1+ k))
-               (%srf-adv-skin-row (curve-cpoints (svref cur j)) i aw j))
+               (%copy-c-pt-row (curve-cpoints (svref cur j)) i aw j))
              (let ((cura (if closed
                              (progn
                                (dotimes (j (1+ k))
@@ -1265,7 +1250,7 @@ NLib: N_CreateSkinSrfParams."
              (fit-crv-calc-knot-vector uc k p knc))
            (dotimes (j (1+ m))
              (dotimes (i (1+ k))
-               (%srf-adv-skin-row (curve-cpoints (svref cur i)) j aw i))
+               (%copy-c-pt-row (curve-cpoints (svref cur i)) j aw i))
              (let ((cura (if closed
                              (progn
                                (dotimes (i (1+ k))
@@ -1320,7 +1305,7 @@ NLib: N_CreateSkinSrfParams."
              (fit-crv-calc-knot-vector vc k q knc))
            (dotimes (i (1+ n))
              (dotimes (j (1+ k))
-               (%srf-adv-skin-row (curve-cpoints (svref cur j)) i aw j))
+               (%copy-c-pt-row (curve-cpoints (svref cur j)) i aw j))
              (let ((cura (if closed
                              (progn
                                (dotimes (j (1+ k))
