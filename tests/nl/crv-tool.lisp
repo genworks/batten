@@ -418,3 +418,51 @@ rational or not, 2D or not, each at random."
                                    (dotimes (i (1+ k) (nreverse out))
                                      (push (from-foreign (cffi:mem-aref arr :pointer i) :curve)
                                            out)))))))))))))
+
+;;; ------------------------------------------------------------- L12-g0
+
+(defun %crv-tool-reduction-input ()
+  "A curve and tolerance for reducing the degree once: mostly a random curve
+raised by one degree (so that the reduction succeeds to about rounding),
+perturbed a little now and then, else a random curve as it comes (degree 1
+now and then); knots in runs up to the degree; weights spread wide now and
+then, to reach the weight test; tolerances from zero to past the curve's
+size."
+  (let* ((c (if (zerop (rnd 2))
+                (random-curve :max-degree 6 :max-extra 8)
+                (%crv-tool-curve :full (+ 2 (rnd 4)))))
+         (c (case (rnd 10)
+              ((0 1 2 3 4 5) (if (< (curve-degree c) 7) (batten::crv-elevate-degree c 1) c))
+              (t c)))
+         (pw (curve-cpoints c))
+         (tol (case (rnd 9)
+                (0 0d0) (1 1d-12) (2 1d-9) (3 1d-6) (4 1d-3) (5 1d-1) (6 1d0) (7 1d2) (t 1d6))))
+    (when (zerop (rnd 4))
+      ;; nudge one control point
+      (let ((i (rnd (array-dimension pw 0))) (d (expt 10d0 (rnd-range -8d0 0d0))))
+        (dotimes (k 2)
+          (incf (aref pw i k) (* d (- (rnd 2d0) 1d0))))))
+    (when (and (/= (aref pw 0 3) +no-w+) (zerop (rnd 4)))
+      ;; wide weights: scale each control point by a factor in [0.01, 50]
+      (dotimes (i (array-dimension pw 0))
+        (let ((f (expt 10d0 (rnd-range -2d0 1.7d0))))
+          (dotimes (k 4)
+            (unless (and (= k 2) (= (aref pw i 2) +no-z+))
+              (setf (aref pw i k) (* f (aref pw i k))))))))
+    (values c tol)))
+
+(define-oracle-test crv-reduce-degree-once (:file "crv-tool" :trials 3000)
+  (multiple-value-bind (c tol) (%crv-tool-reduction-input)
+    (agree (list :curve c :tol tol)
+           (multiple-value-list (batten::crv-reduce-degree-once c tol))
+           (with-foreign ((cp c :curve))
+             (with-foreign-out ((cq :curve))
+               (with-stacks (sp)
+                 (with-stacks (sq)
+                   (with-scalars ((rfl :short) (mtol :double))
+                     (if (c-flag-error-p (c-crv-reduce-degree-once cp tol rfl cq mtol sp sq))
+                         (values t nil)
+                         (let ((ok (= (cffi:mem-ref rfl :short) +yes+)))
+                           (values nil (list (cffi:mem-ref rfl :short)
+                                             (if ok (from-foreign cq :curve) nil)
+                                             (cffi:mem-ref mtol :double)))))))))))))
