@@ -31,7 +31,8 @@ and the library).  Each docstring names its NLib source, e.g.
 Because every routine performs the same IEEE double operations in the same
 order, the results are also identical across Common Lisp implementations.
 `batten-random:evaluation-digest` hashes the bits of 50,000 random
-evaluations; SBCL, Clozure CL and Allegro CL produce the same digest.
+evaluations; seven implementations produce the same digest -- SBCL, Clozure
+CL, Allegro CL, ECL, CLISP, dotcl and EGCL.
 
 ## Conventions
 
