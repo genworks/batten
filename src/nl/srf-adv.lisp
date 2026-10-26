@@ -1013,3 +1013,328 @@ NLib: N_CreateCoonsBoundaryCrvs."
                 (dotimes (j (length va))
                   (setf (aref vo j) (aref va j)))
                 (%make-surface (surface-degree-u s0) (surface-degree-v s0) uo vo pw)))))))))
+
+;;; ------------------------------------------------------------- L8-g0
+
+(defun %srf-adv-skin-copy (from fi fj to ti tj)
+  "N_CopyCPt from entry FI,FJ of cpoint-net FROM to entry TI,TJ of TO."
+  (declare (type cpoint-net from to) (type fixnum fi fj ti tj))
+  (dotimes (c 4)
+    (setf (aref to ti tj c) (aref from fi fj c))))
+
+(defun %srf-adv-skin-row (from i to j)
+  "N_CopyCPt from row I of cpoint-array FROM to row J of TO."
+  (declare (type cpoint-array from to) (type fixnum i j))
+  (dotimes (c 4)
+    (setf (aref to j c) (aref from i c))))
+
+(defun %srf-adv-skin-net-row (from fi fj to j)
+  "N_CopyCPt from entry FI,FJ of cpoint-net FROM to row J of cpoint-array TO."
+  (declare (type cpoint-net from) (type cpoint-array to) (type fixnum fi fj j))
+  (dotimes (c 4)
+    (setf (aref to j c) (aref from fi fj c))))
+
+(defun %srf-adv-skin-row-net (from i to ti tj)
+  "N_CopyCPt from row I of cpoint-array FROM to entry TI,TJ of cpoint-net TO."
+  (declare (type cpoint-array from) (type cpoint-net to) (type fixnum i ti tj))
+  (dotimes (c 4)
+    (setf (aref to ti tj c) (aref from i c))))
+
+(defun %srf-adv-skin-closed-curve (cw k p uc knt aw u knu)
+  "The closed-skin interpolant of one row: the curve of degree P interpolating
+CW[0..K] at UC on KNT gives the derivative at UC[(K+1)/2] (from the left
+side's formula, NL_LEFT), which is then imposed at both ends of the curve
+interpolating AW[0..K] at U on KNU (N_CreateSkinSrf's and
+N_CreateSkinSrfParams's shared closed branch)."
+  (declare (type cpoint-array cw aw) (type fixnum k p) (type real-vector uc knt u knu))
+  (let* ((cura (fit-crv-interp-given-params cw k +hpoint+ uc knt p))
+         (l (truncate (1+ k) 2))
+         (dw (make-cpoint-array 2))
+         (ws (make-cpoint)))
+    (declare (type curve cura) (type fixnum l) (type cpoint-array dw) (type cpoint ws))
+    (crv-derivs-at-knot cura (aref uc l) +left+ 1 dw)
+    (%row-c-pt dw 1 ws)
+    (fit-crv-knots-and-derivs aw k +hpoint+ u knu p ws ws)))
+
+(defun create-skin-srf (cur k cmp cld deg dir knot-tol)
+  "A fresh surface skinned through the cross-sectional curves CUR[0..K] (a
+simple-vector of curves): with CMP +yes+ they are first made compatible in
+place (crvs-make-compatible-knot-tol with KNOT-TOL), otherwise they must be
+compatible already.  DIR +udir+ skins in u (the curves are v-curves), +vdir+
+in v, with degree DEG, at chord-length parameters of the curves' control
+points (fit-calc-srf-param-values).  When CUR[0] and CUR[K] coincide (to
+*mtol*, after crvs-are-coincident makes the two compatible in place) and CLD
+is +yes+ the surface is closed C1 smoothly: two more control points in the
+skinning direction, each row's end derivative taken from an interpolant
+through the curves rotated by K/2.  Signals :cal-err for another DIR (after
+the compatibility steps), :wei-err for weights outside [*wmin*, *wmax*] (the
+C builds the surface all the same), and what the compatibility, parameter,
+knot and interpolation routines signal.
+NLib: N_CreateSkinSrf."
+  (declare (type simple-vector cur) (type fixnum k cmp cld deg dir) (type double-float knot-tol))
+  (when (= cmp +yes+)
+    (crvs-make-compatible-knot-tol cur k knot-tol))
+  (let ((closed (and (crvs-are-coincident (svref cur 0) (svref cur k) *mtol*)
+                     (= cld +yes+))))
+    (cond
+      ((= dir +udir+)
+       (let* ((c0 (svref cur 0))
+              (m (curve-n c0)) (q (curve-degree c0)) (s (curve-m c0)) (v-knots (curve-knots c0))
+              (n (if closed (+ k 2) k))
+              (nu k) (mv m) (p deg)
+              (r (+ n p 1))
+              (rw (make-cpoint-net (1+ k) (1+ m)))
+              (sw nil))
+         (declare (type fixnum m q s n nu mv p r) (type real-vector v-knots) (type cpoint-net rw))
+         (dotimes (i (1+ k))
+           (let ((pw (curve-cpoints (svref cur i))))
+             (declare (type cpoint-array pw))
+             (dotimes (j (1+ m))
+               (%srf-adv-skin-row-net pw j rw i j))))
+         (when closed
+           (let ((nh (truncate k 2)))
+             (declare (type fixnum nh))
+             (setf sw (make-cpoint-net (1+ k) (1+ m)))
+             (dotimes (i (1+ k))
+               (let ((l (mod (+ nh i) k)))
+                 (declare (type fixnum l))
+                 (when (= l 0) (setf l k))
+                 (dotimes (j (1+ m))
+                   (%srf-adv-skin-copy rw l j sw i j))))))
+         (let ((qw (make-cpoint-net (1+ n) (1+ m)))
+               (us (make-real-vector (1+ r)))
+               (vs (make-real-vector (1+ s)))
+               (aw (make-cpoint-array (1+ k)))
+               (u (make-real-vector (1+ nu)))
+               (v (make-real-vector (1+ mv)))
+               (uc nil) (vc nil) (cw nil) (knt nil))
+           (declare (type cpoint-net qw) (type real-vector us vs u v) (type cpoint-array aw))
+           ;; the parameters
+           (fit-calc-srf-param-values rw nu mv +hpoint+ +chordlength+ u v)
+           (when closed
+             (setf uc (make-real-vector (1+ nu)) vc (make-real-vector (1+ mv)))
+             (fit-calc-srf-param-values sw nu mv +hpoint+ +chordlength+ uc vc))
+           ;; the control points
+           (if closed
+               (progn
+                 (setf cw (make-cpoint-array (1+ k))
+                       knt (make-real-vector (+ k p 2)))
+                 (fit-crv-calc-knot-vector uc k p knt)
+                 (fit-calc-knot-vector-end-derivs u k p us))
+               (fit-crv-calc-knot-vector u k p us))
+           (dotimes (j (1+ m))
+             (dotimes (i (1+ k))
+               (%srf-adv-skin-row (curve-cpoints (svref cur i)) j aw i))
+             (let ((cura (if closed
+                             (progn
+                               (dotimes (i (1+ k))
+                                 (%srf-adv-skin-net-row sw i j cw i))
+                               (%srf-adv-skin-closed-curve cw k p uc knt aw u us))
+                             (fit-crv-interp-given-params aw k +hpoint+ u us p))))
+               (declare (type curve cura))
+               (let ((bw (curve-cpoints cura)))
+                 (declare (type cpoint-array bw))
+                 (dotimes (i (1+ n))
+                   (%srf-adv-skin-row-net bw i qw i j)))))
+           (dotimes (j (1+ s))
+             (setf (aref vs j) (aref v-knots j)))
+           (srf-weights-are-valid (%make-surface p q us vs qw) 'create-skin-srf))))
+      ((= dir +vdir+)
+       (let* ((c0 (svref cur 0))
+              (n (curve-n c0)) (p (curve-degree c0)) (r (curve-m c0)) (u-knots (curve-knots c0))
+              (m (if closed (+ k 2) k))
+              (nu n) (mv k) (q deg)
+              (s (+ m q 1))
+              (rw (make-cpoint-net (1+ n) (1+ k)))
+              (sw nil))
+         (declare (type fixnum m q s n nu mv p r) (type real-vector u-knots) (type cpoint-net rw))
+         (dotimes (j (1+ k))
+           (let ((pw (curve-cpoints (svref cur j))))
+             (declare (type cpoint-array pw))
+             (dotimes (i (1+ n))
+               (%srf-adv-skin-row-net pw i rw i j))))
+         (when closed
+           (let ((mh (truncate k 2)))
+             (declare (type fixnum mh))
+             (setf sw (make-cpoint-net (1+ n) (1+ k)))
+             (dotimes (j (1+ k))
+               (let ((l (mod (+ mh j) k)))
+                 (declare (type fixnum l))
+                 (when (= l 0) (setf l k))
+                 (dotimes (i (1+ n))
+                   (%srf-adv-skin-copy rw i l sw i j))))))
+         (let ((qw (make-cpoint-net (1+ n) (1+ m)))
+               (us (make-real-vector (1+ r)))
+               (vs (make-real-vector (1+ s)))
+               (aw (make-cpoint-array (1+ k)))
+               (u (make-real-vector (1+ nu)))
+               (v (make-real-vector (1+ mv)))
+               (uc nil) (vc nil) (cw nil) (knt nil))
+           (declare (type cpoint-net qw) (type real-vector us vs u v) (type cpoint-array aw))
+           ;; the parameters
+           (fit-calc-srf-param-values rw nu mv +hpoint+ +chordlength+ u v)
+           (when closed
+             (setf uc (make-real-vector (1+ nu)) vc (make-real-vector (1+ mv)))
+             (fit-calc-srf-param-values sw nu mv +hpoint+ +chordlength+ uc vc))
+           ;; the control points
+           (if closed
+               (progn
+                 (setf cw (make-cpoint-array (1+ k))
+                       knt (make-real-vector (+ k q 2)))
+                 (fit-crv-calc-knot-vector vc k q knt)
+                 (fit-calc-knot-vector-end-derivs v k q vs))
+               (fit-crv-calc-knot-vector v k q vs))
+           (dotimes (i (1+ n))
+             (dotimes (j (1+ k))
+               (%srf-adv-skin-row (curve-cpoints (svref cur j)) i aw j))
+             (let ((cura (if closed
+                             (progn
+                               (dotimes (j (1+ k))
+                                 (%srf-adv-skin-net-row sw i j cw j))
+                               (%srf-adv-skin-closed-curve cw k q vc knt aw v vs))
+                             (fit-crv-interp-given-params aw k +hpoint+ v vs q))))
+               (declare (type curve cura))
+               (let ((bw (curve-cpoints cura)))
+                 (declare (type cpoint-array bw))
+                 (dotimes (j (1+ m))
+                   (%srf-adv-skin-row-net bw j qw i j)))))
+           (dotimes (i (1+ r))
+             (setf (aref us i) (aref u-knots i)))
+           (srf-weights-are-valid (%make-surface p q us vs qw) 'create-skin-srf))))
+      (t (nurbs-error :cal-err 'create-skin-srf)))))
+
+(defun create-skin-srf-params (cur k cmp cld deg dir tt knt)
+  "A fresh surface skinned through the cross-sectional curves CUR[0..K] (a
+simple-vector of curves) at the given parameters TT[0..K], on the given knot
+vector KNT in the skinning direction: with CMP +yes+ the curves are first made
+compatible in place (crvs-make-compatible), otherwise they must be compatible
+already.  DIR +udir+ skins in u (the curves are v-curves), +vdir+ in v, with
+degree DEG.  When CUR[0] and CUR[K] coincide (to *mtol*, after
+crvs-are-coincident makes the two compatible in place) and CLD is +yes+ the
+surface is closed C1 smoothly, as in create-skin-srf: two more control points,
+KNT then holding K+DEG+4 knots, each row's end derivative taken from an
+interpolant at chord-length parameters through the curves rotated by K/2.
+Signals :inp-err when KNT has the wrong length, :cal-err for another DIR (both
+after the compatibility steps), :wei-err for weights outside [*wmin*, *wmax*]
+(the C builds the surface all the same), and what the compatibility, parameter
+and interpolation routines signal.
+NLib: N_CreateSkinSrfParams."
+  (declare (type simple-vector cur) (type fixnum k cmp cld deg dir) (type real-vector tt knt))
+  (when (= cmp +yes+)
+    (crvs-make-compatible cur k))
+  (let ((closed (and (crvs-are-coincident (svref cur 0) (svref cur k) *mtol*)
+                     (= cld +yes+)))
+        (mt (1- (length knt))))
+    (declare (type fixnum mt))
+    (cond
+      ((= dir +udir+)
+       (let* ((c0 (svref cur 0))
+              (m (curve-n c0)) (q (curve-degree c0)) (s (curve-m c0)) (v-knots (curve-knots c0))
+              (n (if closed (+ k 2) k))
+              (nc k) (mc m) (p deg)
+              (r (+ n p 1))
+              (sw nil))
+         (declare (type fixnum m q s n nc mc p r) (type real-vector v-knots))
+         (when (/= r mt)
+           (nurbs-error :inp-err 'create-skin-srf-params))
+         (when closed
+           (let ((nh (truncate k 2)))
+             (declare (type fixnum nh))
+             (setf sw (make-cpoint-net (1+ k) (1+ m)))
+             (dotimes (i (1+ k))
+               (let ((l (mod (+ nh i) k)))
+                 (declare (type fixnum l))
+                 (when (= l 0) (setf l k))
+                 (let ((pw (curve-cpoints (svref cur l))))
+                   (declare (type cpoint-array pw))
+                   (dotimes (j (1+ m))
+                     (%srf-adv-skin-row-net pw j sw i j)))))))
+         (let ((qw (make-cpoint-net (1+ n) (1+ m)))
+               (us (make-real-vector (1+ r)))
+               (vs (make-real-vector (1+ s)))
+               (aw (make-cpoint-array (1+ k)))
+               (uc nil) (vc nil) (cw nil) (knc nil))
+           (declare (type cpoint-net qw) (type real-vector us vs) (type cpoint-array aw))
+           (when closed
+             (setf cw (make-cpoint-array (1+ k)))
+             (setf uc (make-real-vector (1+ nc)) vc (make-real-vector (1+ mc)))
+             (fit-calc-srf-param-values sw nc mc +hpoint+ +chordlength+ uc vc))
+           ;; the control points
+           (when closed
+             (setf knc (make-real-vector (+ k p 2)))
+             (fit-crv-calc-knot-vector uc k p knc))
+           (dotimes (j (1+ m))
+             (dotimes (i (1+ k))
+               (%srf-adv-skin-row (curve-cpoints (svref cur i)) j aw i))
+             (let ((cura (if closed
+                             (progn
+                               (dotimes (i (1+ k))
+                                 (%srf-adv-skin-net-row sw i j cw i))
+                               (%srf-adv-skin-closed-curve cw k p uc knc aw tt knt))
+                             (fit-crv-interp-given-params aw k +hpoint+ tt knt p))))
+               (declare (type curve cura))
+               (let ((bw (curve-cpoints cura)))
+                 (declare (type cpoint-array bw))
+                 (dotimes (i (1+ n))
+                   (%srf-adv-skin-row-net bw i qw i j)))))
+           (dotimes (i (1+ r))
+             (setf (aref us i) (aref knt i)))
+           (dotimes (j (1+ s))
+             (setf (aref vs j) (aref v-knots j)))
+           (srf-weights-are-valid (%make-surface p q us vs qw) 'create-skin-srf-params))))
+      ((= dir +vdir+)
+       (let* ((c0 (svref cur 0))
+              (n (curve-n c0)) (p (curve-degree c0)) (r (curve-m c0)) (u-knots (curve-knots c0))
+              (m (if closed (+ k 2) k))
+              (nc n) (mc k) (q deg)
+              (s (+ m q 1))
+              (sw nil))
+         (declare (type fixnum m q s n nc mc p r) (type real-vector u-knots))
+         (when (/= s mt)
+           (nurbs-error :inp-err 'create-skin-srf-params))
+         (when closed
+           (let ((mh (truncate k 2)))
+             (declare (type fixnum mh))
+             (setf sw (make-cpoint-net (1+ n) (1+ k)))
+             (dotimes (j (1+ k))
+               (let ((l (mod (+ mh j) k)))
+                 (declare (type fixnum l))
+                 (when (= l 0) (setf l k))
+                 (let ((pw (curve-cpoints (svref cur l))))
+                   (declare (type cpoint-array pw))
+                   (dotimes (i (1+ n))
+                     (%srf-adv-skin-row-net pw i sw i j)))))))
+         (let ((qw (make-cpoint-net (1+ n) (1+ m)))
+               (us (make-real-vector (1+ r)))
+               (vs (make-real-vector (1+ s)))
+               (aw (make-cpoint-array (1+ k)))
+               (uc nil) (vc nil) (cw nil) (knc nil))
+           (declare (type cpoint-net qw) (type real-vector us vs) (type cpoint-array aw))
+           (when closed
+             (setf cw (make-cpoint-array (1+ k)))
+             (setf uc (make-real-vector (1+ nc)) vc (make-real-vector (1+ mc)))
+             (fit-calc-srf-param-values sw nc mc +hpoint+ +chordlength+ uc vc))
+           ;; the control points
+           (when closed
+             (setf knc (make-real-vector (+ k q 2)))
+             (fit-crv-calc-knot-vector vc k q knc))
+           (dotimes (i (1+ n))
+             (dotimes (j (1+ k))
+               (%srf-adv-skin-row (curve-cpoints (svref cur j)) i aw j))
+             (let ((cura (if closed
+                             (progn
+                               (dotimes (j (1+ k))
+                                 (%srf-adv-skin-net-row sw i j cw j))
+                               (%srf-adv-skin-closed-curve cw k q vc knc aw tt knt))
+                             (fit-crv-interp-given-params aw k +hpoint+ tt knt q))))
+               (declare (type curve cura))
+               (let ((bw (curve-cpoints cura)))
+                 (declare (type cpoint-array bw))
+                 (dotimes (j (1+ m))
+                   (%srf-adv-skin-row-net bw j qw i j)))))
+           (dotimes (i (1+ r))
+             (setf (aref us i) (aref u-knots i)))
+           (dotimes (j (1+ s))
+             (setf (aref vs j) (aref knt j)))
+           (srf-weights-are-valid (%make-surface p q us vs qw) 'create-skin-srf-params))))
+      (t (nurbs-error :cal-err 'create-skin-srf-params)))))

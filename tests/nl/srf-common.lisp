@@ -147,3 +147,40 @@ kind."
                    (values failed (unless failed
                                     (list (from-foreign sur :surface) (from-foreign cur :curve)
                                           (from-foreign sp :point) (from-foreign tp :point)))))))))))
+
+;;; ------------------------------------------------------------- L8-g0
+
+(define-oracle-test create-sphere (:file "srf-common" :trials 1500)
+  ;; angles mostly valid (0 <= as < ae <= 180), now and then at the ends,
+  ;; equal, reversed or outside; radius now and then zero (every profile
+  ;; point on the axis) or negative; quartic revolutions only below 241
+  ;; degrees (the C's weight array holds 9)
+  (let* ((c (if (zerop (rnd 5)) (make-point 0d0 0d0 0d0) (random-point 50d0)))
+         (r (case (rnd 15) (0 0d0) (1 (- (rnd 10d0))) (t (rnd-range 0.01d0 100d0))))
+         (as (case (rnd 6) ((0 1) 0d0) (2 (float (* 30 (rnd 6)) 1d0)) (t (rnd 180d0))))
+         (ae (case (rnd 6) ((0 1) 180d0) (2 (min 180d0 (+ as (rnd 1d-3))))
+               (t (rnd-range as 180d0))))
+         (as (case (rnd 50) (0 ae) (1 (- (rnd 5d0))) (t as)))
+         (ae (case (rnd 50) (0 (+ 180d0 (rnd 5d0))) (1 (- as (rnd 5d0))) (t ae)))
+         (al (case (rnd 10)
+               (0 90d0) (1 180d0) (2 270d0) (3 360d0)
+               (4 (rnd-range 0.1d0 5d0))
+               (5 (rnd-range 360d0 500d0))
+               (6 (- (rnd 100d0)))
+               (t (rnd-range 0.1d0 360d0))))
+         (ctp (case (rnd 30)
+                (0 +cubic+)
+                (t (elt (list +quadratic+ +quartic+ +quintic+) (rnd 3)))))
+         (rtp (case (rnd 30)
+                (0 1)
+                ((1 2 3 4) (if (and (> al 0d0) (< al 240d0)) +quartic+ +quadratic+))
+                (t (if (zerop (rnd 2)) +quadratic+ +quintic+)))))
+    (agree (list :c c :r r :as as :ae ae :al al :ctp ctp :rtp rtp)
+           (let ((cc (copy-seq c)))
+             (list (batten::create-sphere cc r as ae al ctp rtp) (equalp cc c)))
+           (with-foreign ((fc c :point))
+             (with-stacks (sg)
+               (with-foreign-out ((sur :surface))
+                 (let ((failed (c-flag-error-p (c-create-sphere fc r as ae al ctp rtp sur sg))))
+                   (values failed (unless failed
+                                    (list (from-foreign sur :surface) t))))))))))

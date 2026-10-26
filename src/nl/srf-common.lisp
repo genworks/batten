@@ -269,3 +269,22 @@ NLib: N_CreateRevolvedSrf."
         (dotimes (j (1+ ss))
           (setf (aref vq j) (aref v j)))
         (%make-surface p q uq vq qw)))))
+
+;;; ------------------------------------------------------------- L8-g0
+
+(defun create-sphere (c r as ae al ctp rtp)
+  "A fresh NURBS sphere or spherical patch of center C and radius R: the
+circular arc from angle AS to AE (degrees, 0 <= AS < AE <= 180, 0 at C + r*Z)
+in the plane of Z and Y, of the kind CTP names, revolved about the Z axis
+through C by the angle AL with a circle of the kind RTP names.  Signals
+:cal-err when the angles are out of range, and what create-circ-arc and
+create-revolved-srf signal.
+NLib: N_CreateSphere."
+  (declare (type point c) (type double-float r as ae al) (type fixnum ctp rtp))
+  (when (>= as ae)
+    (nurbs-error :cal-err 'create-sphere))
+  (when (or (< as 0d0) (> ae 180d0))
+    (nurbs-error :cal-err 'create-sphere))
+  (let ((cura (create-circ-arc c (make-point 0d0 0d0 1d0) (make-point 0d0 1d0 0d0)
+                               r as ae ctp)))
+    (create-revolved-srf cura c (make-point 0d0 0d0 1d0) al rtp)))
