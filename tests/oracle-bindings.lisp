@@ -163,6 +163,18 @@
 (cffi:defcfun ("shim_N_BezSrfElevateDegree" c-bez-srf-elevate-degree) :short
   (pw :pointer) (r :short) (t* :long) (dm :pointer) (dir :short) (f :long) (l :long) (roc :long) (qw :pointer))
 
+;; NL_FLAG N_BezEvalOneBasis(NL_DEGREE p, NL_INDEX i, NL_PARAMETER u, NL_REAL *B)
+(cffi:defcfun ("shim_N_BezEvalOneBasis" c-bez-eval-one-basis) :short
+  (p :short) (i :long) (u :double) (b :pointer))
+
+;; NL_VOID N_BezDegreeReduceCoefs(NL_DEGREE p, NL_REAL *alf, NL_REAL *oma, NL_REAL *bet, NL_REAL *omb)
+(cffi:defcfun ("shim_N_BezDegreeReduceCoefs" c-bez-degree-reduce-coefs) :void
+  (p :short) (alf :pointer) (oma :pointer) (bet :pointer) (omb :pointer))
+
+;; NL_FLAG N_BezReduceDegree(NL_CPOINT *Pw, NL_DEGREE p, NL_REAL *alf, NL_REAL *oma, NL_REAL *bet, NL_REAL *omb, NL_CPOINT *Qw, NL_REAL *e)
+(cffi:defcfun ("shim_N_BezReduceDegree" c-bez-reduce-degree) :short
+  (pw :pointer) (p :short) (alf :pointer) (oma :pointer) (bet :pointer) (omb :pointer) (qw :pointer) (e :pointer))
+
 ;; NL_FLAG N_BezConicArcFromPtsAndTangents(NL_POINT P0, NL_VECTOR T0, NL_POINT P2, NL_VECTOR T2, NL_POINT P, NL_POINT *P1, NL_REAL *w1)
 (cffi:defcfun ("shim_N_BezConicArcFromPtsAndTangents" c-bez-conic-arc-from-pts-and-tangents) :short
   (p-0 :pointer) (t-0 :pointer) (p-2 :pointer) (t-2 :pointer) (p :pointer) (p-1 :pointer) (w-1 :pointer))
@@ -191,6 +203,10 @@
 (cffi:defcfun ("shim_N_BezCalcLength" c-bez-calc-length) :short
   (pw :pointer) (p :short) (tol :double) (len :pointer))
 
+;; NL_FLAG N_BezCenterRadiusFrom3CPts(NL_CPOINT P0w, NL_CPOINT P1w, NL_CPOINT P2w, NL_POINT *C, NL_REAL *r, NL_REAL *alf, NL_REAL *bet, NL_POINT *Ps, NL_POINT *Pe)
+(cffi:defcfun ("shim_N_BezCenterRadiusFrom3CPts" c-bez-center-radius-from-3-c-pts) :short
+  (p-0w :pointer) (p-1w :pointer) (p-2w :pointer) (c :pointer) (r :pointer) (alf :pointer) (bet :pointer) (ps :pointer) (pe :pointer))
+
 ;; NL_FLAG N_CrvDerivsAtKnot(NL_CURVE *cur, NL_PARAMETER u, NL_FLAG flg, NL_INDEX der, NL_CPOINT *Dw)
 (cffi:defcfun ("shim_N_CrvDerivsAtKnot" c-crv-derivs-at-knot) :short
   (cur :pointer) (u :double) (flg :short) (der :long) (dw :pointer))
@@ -198,6 +214,10 @@
 ;; NL_FLAG N_CrvExtendByDist(NL_CURVE *curP, NL_REAL dist, NL_FLAG flg, NL_FLAG end, NL_FLAG cont, NL_CURVE *curQ, NL_STACKS *SP, NL_STACKS *SQ)
 (cffi:defcfun ("shim_N_CrvExtendByDist" c-crv-extend-by-dist) :short
   (cur-p :pointer) (dist :double) (flg :short) (end :short) (cont :short) (cur-q :pointer) (sp :pointer) (sq :pointer))
+
+;; NL_FLAG N_CrvExtendToPt(NL_CURVE *curP, NL_POINT pt, NL_FLAG end, NL_FLAG cont, NL_CURVE *curQ, NL_STACKS *SP, NL_STACKS *SQ)
+(cffi:defcfun ("shim_N_CrvExtendToPt" c-crv-extend-to-pt) :short
+  (cur-p :pointer) (pt :pointer) (end :short) (cont :short) (cur-q :pointer) (sp :pointer) (sq :pointer))
 
 ;; NL_FLAG N_CrvGetMax2ndDeriv(NL_CURVE *cur, NL_REAL *Muu)
 (cffi:defcfun ("shim_N_CrvGetMax2ndDeriv" c-crv-get-max-2nd-deriv) :short
@@ -254,6 +274,14 @@
 ;; NL_FLAG N_SrfReparamMultKnots(NL_CURVE *curP, NL_REAL tol, NL_CURVE *curQ, NL_STACKS *SG)
 (cffi:defcfun ("shim_N_SrfReparamMultKnots" c-srf-reparam-mult-knots) :short
   (cur-p :pointer) (tol :double) (cur-q :pointer) (sg :pointer))
+
+;; NL_FLAG N_ApproxContinuousCrvWithArcs(NL_CURVE * curP, NL_REAL tol, NL_CURVE * curQ, NL_STACKS * SG)
+(cffi:defcfun ("shim_N_ApproxContinuousCrvWithArcs" c-approx-continuous-crv-with-arcs) :short
+  (cur-p :pointer) (tol :double) (cur-q :pointer) (sg :pointer))
+
+;; NL_FLAG N_CrvIsPolygonWithinTol(NL_CPOINT *Pw, NL_INDEX n, NL_POINT * P, NL_INDEX k, NL_REAL eps, NL_FLAG * aef)
+(cffi:defcfun ("shim_N_CrvIsPolygonWithinTol" c-crv-is-polygon-within-tol) :short
+  (pw :pointer) (n :long) (p :pointer) (k :long) (eps :double) (aef :pointer))
 
 ;; NL_FLAG N_ApproxNurbsWithNonRatCrv(NL_CURVE *curP, NL_REAL tol, NL_DEGREE deg, NL_FLAG par, NL_FLAG tan, NL_CURVE *curQ, NL_STACKS *SG)
 (cffi:defcfun ("shim_N_ApproxNurbsWithNonRatCrv" c-approx-nurbs-with-non-rat-crv) :short
@@ -354,6 +382,10 @@
 ;; NL_FLAG N_CrvCompress(NL_CURVE *cur, NL_STACKS *SG)
 (cffi:defcfun ("shim_N_CrvCompress" c-crv-compress) :short
   (cur :pointer) (sg :pointer))
+
+;; NL_FLAG N_CrvExpand(NL_CURVE *cur, NL_INDEX new_n, NL_INDEX new_m, NL_STACKS *SG)
+(cffi:defcfun ("shim_N_CrvExpand" c-crv-expand) :short
+  (cur :pointer) (new-n :long) (new-m :long) (sg :pointer))
 
 ;; NL_VOID N_CrvSetSizeIndices(NL_CURVE *cur, NL_INDEX n, NL_DEGREE p, NL_INDEX m)
 (cffi:defcfun ("shim_N_CrvSetSizeIndices" c-crv-set-size-indices) :void
@@ -478,6 +510,10 @@
 ;; NL_FLAG N_FitArcToPts(NL_POINT *P, NL_INDEX n, NL_REAL tol, NL_FLAG etp, NL_FLAG arc, NL_FLAG cit, NL_CURVE *cur, NL_FLAG *cut, NL_REAL *era, NL_REAL *erm, NL_STACKS *SG)
 (cffi:defcfun ("shim_N_FitArcToPts" c-fit-arc-to-pts) :short
   (p :pointer) (n :long) (tol :double) (etp :short) (arc :short) (cit :short) (cur :pointer) (cut :pointer) (era :pointer) (erm :pointer) (sg :pointer))
+
+;; NL_FLAG N_FitArcToEndPtsAndTangents(NL_POINT Ps, NL_VECTOR Ts, NL_POINT Pe, NL_VECTOR Te, NL_CPOINT *Pw, NL_INDEX *n)
+(cffi:defcfun ("shim_N_FitArcToEndPtsAndTangents" c-fit-arc-to-end-pts-and-tangents) :short
+  (ps :pointer) (ts :pointer) (pe :pointer) (te :pointer) (pw :pointer) (n :pointer))
 
 ;; NL_FLAG N_FitCalcCrvParamValues(NL_VOID *A, NL_INDEX n, NL_FLAG ptp, NL_FLAG par, NL_PARAMETER *u)
 (cffi:defcfun ("shim_N_FitCalcCrvParamValues" c-fit-calc-crv-param-values) :short
@@ -702,6 +738,10 @@
 ;; NL_FLAG N_CrvElevateDegree(NL_CURVE *curP, NL_INDEX t, NL_CURVE *curQ, NL_STACKS *SP, NL_STACKS *SQ)
 (cffi:defcfun ("shim_N_CrvElevateDegree" c-crv-elevate-degree) :short
   (cur-p :pointer) (t* :long) (cur-q :pointer) (sp :pointer) (sq :pointer))
+
+;; NL_FLAG N_CrvReduceDegreeOnce(NL_CURVE *curP, NL_REAL tol, NL_FLAG *rfl, NL_CURVE *curQ, NL_REAL *mtol, NL_STACKS *SP, NL_STACKS *SQ)
+(cffi:defcfun ("shim_N_CrvReduceDegreeOnce" c-crv-reduce-degree-once) :short
+  (cur-p :pointer) (tol :double) (rfl :pointer) (cur-q :pointer) (mtol :pointer) (sp :pointer) (sq :pointer))
 
 ;; NL_FLAG N_CrvsMakeCompatibleKnotTol(NL_CURVE ** cur, NL_INDEX k, NL_REAL KnotTol, NL_STACKS *S)
 (cffi:defcfun ("shim_N_CrvsMakeCompatibleKnotTol" c-crvs-make-compatible-knot-tol) :short
@@ -1215,6 +1255,14 @@
 (cffi:defcfun ("shim_N_PlanePtNormalToImplicit" c-plane-pt-normal-to-implicit) :short
   (p :pointer) (n :pointer) (a :pointer) (b :pointer) (c :pointer) (d :pointer))
 
+;; NL_FLAG N_DistPtArc(NL_POINT P, NL_POINT C, NL_REAL r, NL_REAL alf, NL_REAL bet, NL_POINT Ps, NL_POINT Pe, NL_REAL *d)
+(cffi:defcfun ("shim_N_DistPtArc" c-dist-pt-arc) :short
+  (p :pointer) (c :pointer) (r :double) (alf :double) (bet :double) (ps :pointer) (pe :pointer) (d :pointer))
+
+;; NL_FLAG N_DistMaxLineArc(NL_POINT C, NL_REAL r, NL_REAL alf, NL_REAL bet, NL_POINT Ps, NL_POINT Pe, NL_POINT P, NL_POINT Q, NL_REAL *d)
+(cffi:defcfun ("shim_N_DistMaxLineArc" c-dist-max-line-arc) :short
+  (c :pointer) (r :double) (alf :double) (bet :double) (ps :pointer) (pe :pointer) (p :pointer) (q :pointer) (d :pointer))
+
 ;; NL_FLAG N_LineImplicitToPtVector(NL_REAL a, NL_REAL b, NL_REAL c, NL_POINT *P, NL_VECTOR *V)
 (cffi:defcfun ("shim_N_LineImplicitToPtVector" c-line-implicit-to-pt-vector) :short
   (a :double) (b :double) (c :double) (p :pointer) (v :pointer))
@@ -1503,6 +1551,10 @@
 (cffi:defcfun ("shim_N_SrfEvalPtGrid" c-srf-eval-pt-grid) :short
   (sur :pointer) (u :pointer) (v :pointer) (nn :long) (mm :long) (ufl :short) (vfl :short) (s :pointer))
 
+;; NL_FLAG N_SrfExtendToCrv(NL_SURFACE *surP, NL_CURVE *newbdy, NL_FLAG dflg, NL_FLAG end, NL_FLAG cont, NL_SURFACE *surQ, NL_STACKS *SP, NL_STACKS *SQ)
+(cffi:defcfun ("shim_N_SrfExtendToCrv" c-srf-extend-to-crv) :short
+  (sur-p :pointer) (newbdy :pointer) (dflg :short) (end :short) (cont :short) (sur-q :pointer) (sp :pointer) (sq :pointer))
+
 ;; NL_FLAG N_SrfModifyBoundaryCrv(NL_SURFACE *surP, NL_CURVE *newbdy, NL_FLAG dirflg, NL_FLAG end, NL_REAL uv, NL_FLAG cont, NL_SURFACE *surQ, NL_STACKS *SP, NL_STACKS *SQ)
 (cffi:defcfun ("shim_N_SrfModifyBoundaryCrv" c-srf-modify-boundary-crv) :short
   (sur-p :pointer) (newbdy :pointer) (dirflg :short) (end :short) (uv :double) (cont :short) (sur-q :pointer) (sp :pointer) (sq :pointer))
@@ -1763,6 +1815,10 @@
 (cffi:defcfun ("shim_N_FitSrfInterpBoundary" c-fit-srf-interp-boundary) :short
   (p :pointer) (k :long) (l :long) (bnd-u :pointer) (bnd-v :pointer) (u :pointer) (v :pointer) (sur :pointer) (sg :pointer))
 
+;; NL_FLAG N_FitSrfInterpBicubic(NL_POINT ** P, NL_INDEX k, NL_INDEX l, NL_FLAG tan, NL_SURFACE *sur, NL_STACKS *SG)
+(cffi:defcfun ("shim_N_FitSrfInterpBicubic" c-fit-srf-interp-bicubic) :short
+  (p :pointer) (k :long) (l :long) (tan :short) (sur :pointer) (sg :pointer))
+
 ;; NL_FLAG N_FitSrfApproxRemoveKnots(NL_SURFACE *sur, NL_REAL *uParams, NL_REAL *vParams, NL_REAL ** er, NL_INDEX mu, NL_INDEX mv, NL_REAL E, NL_FLAG dir)
 (cffi:defcfun ("shim_N_FitSrfApproxRemoveKnots" c-fit-srf-approx-remove-knots) :short
   (sur :pointer) (u-params :pointer) (v-params :pointer) (er :pointer) (mu :long) (mv :long) (e :double) (dir :short))
@@ -1843,6 +1899,10 @@
 (cffi:defcfun ("shim_N_SrfOffset" c-srf-offset) :short
   (sur-p :pointer) (d :double) (pp :short) (qq :short) (par :short) (eps :double) (tol :double) (sur-q :pointer) (sg :pointer))
 
+;; NL_FLAG N_SrfInsertKnot(NL_SURFACE *surP, NL_PARAMETER t, NL_INDEX mt, NL_FLAG dir, NL_SURFACE *surQ, NL_STACKS *SP, NL_STACKS *SQ)
+(cffi:defcfun ("shim_N_SrfInsertKnot" c-srf-insert-knot) :short
+  (sur-p :pointer) (t* :double) (mt :long) (dir :short) (sur-q :pointer) (sp :pointer) (sq :pointer))
+
 ;; NL_FLAG N_SrfSplit(NL_SURFACE * sur, NL_PARAMETER dSplitParam, NL_FLAG dir, NL_SURFACE * surL, NL_SURFACE * surR, NL_STACKS * SG)
 (cffi:defcfun ("shim_N_SrfSplit" c-srf-split) :short
   (sur :pointer) (d-split-param :double) (dir :short) (sur-l :pointer) (sur-r :pointer) (sg :pointer))
@@ -1863,6 +1923,10 @@
 (cffi:defcfun ("shim_N_SrfExtractPatch" c-srf-extract-patch) :short
   (sur-p :pointer) (ul :double) (ur :double) (vl :double) (vr :double) (sur-q :pointer) (sp :pointer) (sq :pointer))
 
+;; NL_FLAG N_SrfRemoveKnotConditional(NL_SURFACE *surP, NL_PARAMETER t, NL_INDEX nt, NL_REAL tol, NL_FLAG dir, NL_INDEX *rt, NL_SURFACE *surQ, NL_STACKS *SQ)
+(cffi:defcfun ("shim_N_SrfRemoveKnotConditional" c-srf-remove-knot-conditional) :short
+  (sur-p :pointer) (t* :double) (nt :long) (tol :double) (dir :short) (rt :pointer) (sur-q :pointer) (sq :pointer))
+
 ;; NL_FLAG N_SrfRemoveOneKnot(NL_SURFACE *sur, NL_INDEX r, NL_INDEX s, NL_INDEX f, NL_INDEX l, NL_FLAG dir, NL_REAL *mr)
 (cffi:defcfun ("shim_N_SrfRemoveOneKnot" c-srf-remove-one-knot) :short
   (sur :pointer) (r :long) (s :long) (f :long) (l :long) (dir :short) (mr :pointer))
@@ -1882,6 +1946,10 @@
 ;; NL_FLAG N_MakeSrfsCompatible(NL_SURFACE ** sur, NL_INDEX k, NL_FLAG UorV, NL_STACKS *S)
 (cffi:defcfun ("shim_N_MakeSrfsCompatible" c-make-srfs-compatible) :short
   (sur :pointer) (k :long) (uor-v :short) (s :pointer))
+
+;; NL_FLAG N_SrfJoin(NL_SURFACE *sur1, NL_SURFACE *sur2, NL_FLAG dir, NL_REAL tol, NL_SURFACE *surJ, NL_STACKS *SG)
+(cffi:defcfun ("shim_N_SrfJoin" c-srf-join) :short
+  (sur-1 :pointer) (sur-2 :pointer) (dir :short) (tol :double) (sur-j :pointer) (sg :pointer))
 
 ;; NL_VOID N_InitNurbs(NL_STACKS *S)
 (cffi:defcfun ("shim_N_InitNurbs" c-init-nurbs) :void

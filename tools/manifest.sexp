@@ -87,6 +87,12 @@
    :callees ("N_BezFuncMultiplyBezCrvMatrix" "N_CopyCPt" "N_EndNurbs" "N_GetRealMatrixPtr" "N_InitNurbs" "N_RealMatrixIsNULL" "N_ScaleCPtXYZ" "N_VectorBlendCPt"))
  (:c "N_BezSrfElevateDegree" :lisp "bez-srf-elevate-degree" :file "NL_Bezier.cpp" :line 1509 :lines 60 :wave 0 :status :done
    :callees ("N_BezGetDegreeElevationMatrix" "N_CopyCPt" "N_EndNurbs" "N_GetRealMatrixPtr" "N_InitNurbs" "N_RealMatrixIsNULL" "N_VectorBlendCPt"))
+ (:c "N_BezEvalOneBasis" :lisp "bez-eval-one-basis" :file "NL_Bezier.cpp" :line 1925 :lines 47 :wave 0 :status :port
+   :callees ("N_AllocReal1dArray" "N_EndNurbs" "N_InitNurbs"))
+ (:c "N_BezDegreeReduceCoefs" :lisp "bez-degree-reduce-coefs" :file "NL_Bezier.cpp" :line 2476 :lines 15 :wave 0 :status :port
+   :callees ())
+ (:c "N_BezReduceDegree" :lisp "bez-reduce-degree" :file "NL_Bezier.cpp" :line 2540 :lines 58 :wave 0 :status :port
+   :callees ("N_BezEvalOneBasis" "N_Combine2CPts" "N_CopyCPt" "N_DistCptCptHomo" "N_EndNurbs" "N_InitNurbs"))
  (:c "N_BezConicArcFromPtsAndTangents" :lisp "bez-conic-arc-from-pts-and-tangents" :file "NL_Bezier.cpp" :line 2939 :lines 68 :wave 0 :status :done
    :callees ("N_CreateLinePtPt" "N_CreateLineStartDirVector" "N_EndNurbs" "N_FloatOpIsBad" "N_InitNurbs" "N_IsectLineLine" "N_VectorDiff" "N_VectorDot" "N_VectorScale"))
  (:c "N_BezSetConicWeight" :lisp "bez-set-conic-weight" :file "NL_Bezier.cpp" :line 3291 :lines 17 :wave 0 :status :done
@@ -103,13 +109,17 @@
    :callees ("N_AllocCPt1dArray" "N_BezSplit" "N_DistCPolygon" "N_DistCptCpt" "N_EndNurbs" "N_InitNurbs"))
  (:c "N_BezCalcLength" :lisp "bez-calc-length" :file "NL_Bezier.cpp" :line 4832 :lines 23 :wave 0 :status :done
    :callees ("N_BezCalcArcLength" "N_EndNurbs" "N_InitNurbs"))
+ (:c "N_BezCenterRadiusFrom3CPts" :lisp "bez-center-radius-from-3-c-pts" :file "NL_Bezier.cpp" :line 5781 :lines 61 :wave 0 :status :port
+   :callees ("N_CPtToPtEuclid" "N_Combine2Pts" "N_CopyPt" "N_DistPtLineSeg" "N_DistPtPt" "N_FloatOpIsBad" "N_PtFromXYZ" "N_VectorCreate" "N_VectorDiff" "N_VectorDirectedAngle" "N_VectorDot" "N_VectorNormalizeRef" "N_VectorPerpendicular" "N_VectorPtAlongVector" "N_VectorReverseInPlace"))
  (:c "N_CrvDerivsAtKnot" :lisp "crv-derivs-at-knot" :file "NL_CrvAdv.cpp" :line 181 :lines 34 :wave 3 :status :done
    :callees ("N_AllocReal2dArray" "N_BasisDerivs" "N_CopyCPt" "N_CrvGetCPtsDegreeAndKnots" "N_CrvGetKnotVector" "N_EndNurbs" "N_InitNurbs" "N_KnotVectorIsParamOutOfBounds" "N_VectorBlendCPt"))
  (:c "N_CrvExtendByDist" :lisp "crv-extend-by-dist" :file "NL_CrvAdv.cpp" :line 630 :lines 4 :wave 3 :status :done :root t
    :callees ("ST_curxcdr"))
  (:c "ST_curxcdr" :lisp "crv-adv--st-curxcdr" :file "NL_CrvAdv.cpp" :line 640 :lines 580 :wave 3 :status :done :static t
    :callees ("N_AllocCPt1dArray" "N_AllocCrvArrays" "N_BasisFindSpanAndMult" "N_CPtFromWxWyWz" "N_CPtGetW" "N_CPtToPtEuclid" "N_CPtToWxWyWz" "N_Combine2CPts" "N_CopyCPt" "N_CptReflect" "N_CreatePlanePtNormal" "N_CrvArcLength" "N_CrvCopy" "N_CrvGetCPtsAndKnots" "N_CrvGetCPtsDegreeAndKnots" "N_CrvGetKnotVector" "N_CrvInitArrays" "N_CrvInsertKnot" "N_CrvRemoveKnot" "N_CrvSizeArrays" "N_EndNurbs" "N_FloatOpIsBad" "N_FreeCrv" "N_InitNurbs" "N_IsCrvRat" "N_PtToXYZ" "N_ScaleCPt" "N_VectorBlendCPt" "N_VectorBlendPt" "N_VectorDir" "N_VectorNormalize"))
- (:c "N_CrvGetMax2ndDeriv" :lisp "crv-get-max-2nd-deriv" :file "NL_CrvAdv.cpp" :line 3059 :lines 48 :wave 3 :status :done
+ (:c "N_CrvExtendToPt" :lisp "crv-extend-to-pt" :file "NL_CrvAdv.cpp" :line 1656 :lines 544 :wave 3 :status :port :fenced t
+   :callees ("N_AllocCrvArrays" "N_CPtGetW" "N_CPtSetW" "N_CPtSetZ" "N_CPtToPtEuclid" "N_CPtToWxWyWz" "N_Combine2CPts" "N_Combine2Pts" "N_CopyCPt" "N_CopyPt" "N_CreateLineStartDirVector" "N_CrvCopy" "N_CrvDerivs" "N_CrvGetCPtsAndKnots" "N_CrvGetCPtsDegreeAndKnots" "N_CrvInitArrays" "N_CrvInsertKnot" "N_CrvIs3d" "N_CrvRemoveKnot" "N_CrvSizeArrays" "N_DistCptCpt" "N_DistPtPt" "N_EndNurbs" "N_FloatOpIsBad" "N_FreeCrv" "N_InitNurbs" "N_IsCrvRat" "N_IsectLineLine" "N_ProjectPtLine" "N_PtToCPt" "N_ScaleCPt" "N_ScalePt" "N_VectorBlendCPt" "N_VectorCross" "N_VectorDir" "N_VectorDot" "N_VectorMagnitude" "N_VectorNormalize"))
+ (:c "N_CrvGetMax2ndDeriv" :lisp "crv-get-max-2nd-deriv" :file "NL_CrvAdv.cpp" :line 3059 :lines 48 :wave 3 :status :done :root t
    :callees ("N_AllocPt1dArray" "N_AllocReal1dArray" "N_CrvDecomposeBez" "N_CrvDerivs" "N_CrvGetDegree" "N_CrvGetKnots" "N_EndNurbs" "N_InitNurbs" "N_PtMagnitude"))
  (:c "N_CrvPlanarOffsetGetDeriv" :lisp "crv-planar-offset-get-deriv" :file "NL_CrvAdv.cpp" :line 3184 :lines 35 :wave 3 :status :done
    :callees ("N_CrvDerivs" "N_CrvGetCurvatureDeriv" "N_EndNurbs" "N_FloatOpIsBad" "N_InitNurbs" "N_VectorCombine" "N_VectorCross" "N_VectorDot" "N_VectorMagnitude" "N_VectorScale"))
@@ -129,7 +139,7 @@
    :callees ("N_AllocKnotVectorAndArray" "N_BasisGetSpanCount" "N_BasisIncreaseKnotMult" "N_CFuncGetDegree" "N_CFuncGetKnotVector" "N_CFuncInitArrays" "N_CreateCrvFromNumAndDenom" "N_CrvElevateDegree" "N_CrvFuncDeriv" "N_CrvFuncMultiplyConstant" "N_CrvFuncMultiplyCrv" "N_CrvFuncMultiplyCrvFunc" "N_CrvFuncRefine" "N_CrvFuncSumDiffCrvFunc" "N_CrvGetDegree" "N_CrvGetKnotVector" "N_CrvGetNumAndDenom" "N_CrvInitArrays" "N_CrvNonRatGetFirstDeriv" "N_CrvRefine" "N_CrvSumDiffCrv" "N_EndNurbs" "N_InitNurbs" "N_IsCrvRat" "N_KnotVectorGetKnots"))
  (:c "N_CrvSumDiffCrv" :lisp "crv-sum-diff-crv" :file "NL_CrvAdv.cpp" :line 10058 :lines 155 :wave 3 :status :done
    :callees ("N_AllocKnotVectorAndArray" "N_BasisGetSpanCount" "N_CFuncInitArrays" "N_CreateCrvFromNumAndDenom" "N_CrvCopy" "N_CrvElevateDegree" "N_CrvFuncMultiplyCrv" "N_CrvFuncMultiplyCrvFunc" "N_CrvGetCPts" "N_CrvGetCPtsAndKnots" "N_CrvGetCPtsDegreeAndKnots" "N_CrvGetKnotVector" "N_CrvGetNumAndDenom" "N_CrvInitArrays" "N_CrvNonRatToRat" "N_CrvRatToNonRat" "N_CrvRefine" "N_CrvSizeArrays" "N_Diff2CPts" "N_EndNurbs" "N_GetCompatibleKnotArrayMult" "N_InitNurbs" "N_IsCrvRat" "N_KnotVectorGetKnots" "N_Sum2CPts"))
- (:c "N_CrvNonRatGetFirstDeriv" :lisp "crv-non-rat-get-first-deriv" :file "NL_CrvAdv.cpp" :line 10995 :lines 52 :wave 3 :status :done
+ (:c "N_CrvNonRatGetFirstDeriv" :lisp "crv-non-rat-get-first-deriv" :file "NL_CrvAdv.cpp" :line 10995 :lines 52 :wave 3 :status :done :root t
    :callees ("N_AllocCPt1dArray" "N_Combine2CPts" "N_CopyCPt" "N_CrvGetCPtsAndKnots" "N_CrvGetCPtsDegreeAndKnots" "N_CrvSizeArrays" "N_EndNurbs" "N_FloatOpIsBad" "N_InitNurbs" "N_IsCrvRat"))
  (:c "N_CrvRatGetFirstDeriv" :lisp "crv-rat-get-first-deriv" :file "NL_CrvAdv.cpp" :line 11128 :lines 73 :wave 3 :status :done :root t
    :callees ("N_AllocKnotVectorAndArray" "N_BasisGetSpanCount" "N_BasisIncreaseKnotMult" "N_CFuncGetDegree" "N_CFuncGetKnotVector" "N_CFuncInitArrays" "N_CreateCrvFromNumAndDenom" "N_CrvElevateDegree" "N_CrvFuncDeriv" "N_CrvFuncMultiplyCrv" "N_CrvFuncMultiplyCrvFunc" "N_CrvFuncRefine" "N_CrvGetNumAndDenom" "N_CrvInitArrays" "N_CrvNonRatGetFirstDeriv" "N_CrvSumDiffCrv" "N_EndNurbs" "N_InitNurbs" "N_IsCrvRat" "N_KnotVectorGetKnots"))
@@ -137,6 +147,10 @@
    :callees ("N_AllocCPt1dArray" "N_AllocCrvArrays" "N_AllocKnotVectorAndArray" "N_AllocReal1dArray" "N_BasisGetSpanCount" "N_BezReparam" "N_CFuncGetData" "N_CFuncGetDegree" "N_CFuncGetKnotVector" "N_CFuncInitArrays" "N_Combine2CPts" "N_CopyCPt" "N_CrvCompress" "N_CrvFuncRefine" "N_CrvGetCPtsAndKnots" "N_CrvGetCPtsDegreeAndKnots" "N_CrvGetDegree" "N_CrvGetKnotVector" "N_CrvInitArrays" "N_CrvRefine" "N_CrvSetSizeIndices" "N_CrvSizeArrays" "N_EndNurbs" "N_FreeCrv" "N_InitNurbs" "N_KnotVectorGetKnots" "N_MapKnotsBetweenCrvFuncAndKnotVector"))
  (:c "N_SrfReparamMultKnots" :lisp "srf-reparam-mult-knots" :file "NL_CrvAdv.cpp" :line 13712 :lines 79 :wave 3 :status :done :root t
    :callees ("N_CopyCPt" "N_CrvArcLength" "N_CrvCopy" "N_CrvGetCPtsAndKnots" "N_CrvGetCPtsDegreeAndKnots" "N_CrvInitArrays" "N_CrvSizeArrays" "N_EndNurbs" "N_InitNurbs"))
+ (:c "N_ApproxContinuousCrvWithArcs" :lisp "approx-continuous-crv-with-arcs" :file "NL_CrvApprox.cpp" :line 239 :lines 252 :wave 5 :status :port :root t
+   :callees ("N_AllocPt1dArray" "N_AllocReal1dArray" "N_ApproxCrvWithPolyline" "N_CPtToPtEuclid" "N_Combine2Pts" "N_CopyCPt" "N_CrvAreArraysNULL" "N_CrvCompress" "N_CrvDerivs" "N_CrvExpand" "N_CrvGetArraySizes" "N_CrvGetCPtsAndKnots" "N_CrvGetDegree" "N_CrvIsPolygonWithinTol" "N_CrvSetSizeIndices" "N_CrvSizeArrays" "N_DistPtPt" "N_EndNurbs" "N_FitArcToEndPtsAndTangents" "N_FitCalcCrvParamValues" "N_InitNurbs" "N_Realloc1dRealArray" "N_VectorCopy" "N_Weight"))
+ (:c "N_CrvIsPolygonWithinTol" :lisp "crv-is-polygon-within-tol" :file "NL_CrvApprox.cpp" :line 870 :lines 86 :wave 5 :status :port :root t
+   :callees ("N_AllocInt1dArray" "N_AllocPt1dArray" "N_AllocReal1dArray" "N_BezCenterRadiusFrom3CPts" "N_DistMaxLineArc" "N_DistPtArc" "N_EndNurbs" "N_InitNurbs"))
  (:c "N_ApproxNurbsWithNonRatCrv" :lisp "approx-nurbs-with-non-rat-crv" :file "NL_CrvApprox.cpp" :line 2698 :lines 161 :wave 5 :status :done :root t
    :callees ("N_AllocInt1dArray" "N_AllocKnotVectorAndArray" "N_AllocPt1dArray" "N_AllocReal1dArray" "N_CreateInterval" "N_Crv3dTo2d" "N_CrvArcLength" "N_CrvCompress" "N_CrvDecomposeBez" "N_CrvDerivs" "N_CrvEval" "N_CrvGetArraySizes" "N_CrvGetDegree" "N_CrvGetKnots" "N_CrvGetMax2ndDeriv" "N_CrvInitArrays" "N_CrvIs3d" "N_CrvRemoveKnotsDerivConstraints" "N_CrvReparamToInterval" "N_EndNurbs" "N_FitCalcCrvParamValues" "N_FitCalcKnotVectorEndDerivs" "N_FitCrvCalcKnotVector" "N_FitCrvInterpGivenParams" "N_FitCrvKnotsAndDerivs" "N_FloatOpIsBad" "N_InitNurbs" "N_VectorCopy" "N_VectorNormalizeRef" "N_VectorScale"))
  (:c "N_CrvIs3d" :lisp "crv-is-3d" :file "NL_CrvBasic.cpp" :line 38 :lines 15 :wave 0 :status :done
@@ -149,9 +163,9 @@
    :callees ("N_AllocCPolygonAndArray" "N_AllocCrv" "N_AllocKnotVectorAndArray" "N_CrvFromCPolygonAndKnotVector"))
  (:c "N_Alloc1dArrayCrvs" :lisp "alloc-1d-array-crvs" :file "NL_CrvBasic.cpp" :line 832 :lines 35 :wave 0 :status :vanish
    :callees ("N_AllocCrvAndArrays" "N_ErrSet" "N_Free" "N_Malloc"))
- (:c "N_AllocArrayCrvPtrs" :lisp "alloc-array-crv-ptrs" :file "NL_CrvBasic.cpp" :line 918 :lines 24 :wave 0 :status :vanish
+ (:c "N_AllocArrayCrvPtrs" :lisp "alloc-array-crv-ptrs" :file "NL_CrvBasic.cpp" :line 918 :lines 24 :wave 0 :status :vanish :root t
    :callees ("N_ErrSet" "N_Free" "N_Malloc"))
- (:c "N_AllocArrayCrvPtrsAndData" :lisp "alloc-array-crv-ptrs-and-data" :file "NL_CrvBasic.cpp" :line 992 :lines 33 :wave 0 :status :vanish
+ (:c "N_AllocArrayCrvPtrsAndData" :lisp "alloc-array-crv-ptrs-and-data" :file "NL_CrvBasic.cpp" :line 992 :lines 33 :wave 0 :status :vanish :root t
    :callees ("N_AllocCrv" "N_CrvInitArrays" "N_ErrSet" "N_Free" "N_Malloc"))
  (:c "N_CrvFromCPolygonAndKnotVector" :lisp "crv-from-c-polygon-and-knot-vector" :file "NL_CrvBasic.cpp" :line 1335 :lines 6 :wave 0 :status :done
    :callees ())
@@ -187,13 +201,15 @@
    :callees ())
  (:c "N_CrvCompress" :lisp "crv-compress" :file "NL_CrvBasic.cpp" :line 2235 :lines 26 :wave 0 :status :done
    :callees ("N_AllocCPt1dArray" "N_AllocReal1dArray" "N_CopyCPt" "N_CrvGetArraySizes" "N_CrvGetCPtsAndKnots" "N_CrvSetCPtsAndKnots" "N_FreeCPt1dArray" "N_FreeReal1dArray"))
+ (:c "N_CrvExpand" :lisp "crv-expand" :file "NL_CrvBasic.cpp" :line 2316 :lines 31 :wave 0 :status :port
+   :callees ("N_AllocCPt1dArray" "N_AllocReal1dArray" "N_CopyCPt" "N_CrvGetArraySizes" "N_CrvGetCPtsAndKnots" "N_CrvGetDegree" "N_CrvSetCPtsAndKnots" "N_CrvSetSizeIndices" "N_FreeCPt1dArray" "N_FreeReal1dArray"))
  (:c "N_CrvSetSizeIndices" :lisp "crv-set-size-indices" :file "NL_CrvBasic.cpp" :line 2437 :lines 6 :wave 0 :status :vanish
    :callees ())
  (:c "N_CrvInitArrays" :lisp "crv-init-arrays" :file "NL_CrvBasic.cpp" :line 2472 :lines 6 :wave 0 :status :vanish :root t
    :callees ())
  (:c "N_CrvAreArraysNULL" :lisp "crv-are-arrays-null" :file "NL_CrvBasic.cpp" :line 2506 :lines 15 :wave 0 :status :vanish
    :callees ("N_CrvDetachPolygonKnot"))
- (:c "N_IsCrvRat" :lisp "is-crv-rat" :file "NL_CrvBasic.cpp" :line 2554 :lines 16 :wave 0 :status :done
+ (:c "N_IsCrvRat" :lisp "is-crv-rat" :file "NL_CrvBasic.cpp" :line 2554 :lines 16 :wave 0 :status :done :root t
    :callees ("N_CPtGetW" "N_CrvGetCPts"))
  (:c "N_CrvIsClosed" :lisp "crv-is-closed" :file "NL_CrvBasic.cpp" :line 2605 :lines 19 :wave 0 :status :done
    :callees ("N_CPtToPtEuclid" "N_CrvGetCPts" "N_DistPtPt"))
@@ -249,6 +265,8 @@
    :callees ("N_BezConicArcFromPtsAndTangents" "N_BezConicSplit" "N_CopyPt" "N_CrvGetCPtsAndKnots" "N_CrvSizeArrays" "N_VectorDot" "N_VectorMagnitude" "N_Weight"))
  (:c "N_FitArcToPts" :lisp "fit-arc-to-pts" :file "NL_CrvFit.cpp" :line 89 :lines 140 :wave 4 :status :done :root t :fenced t
    :callees ("N_AllocReal1dArray" "N_CreateCircArc" "N_CreateCircFrom2dPts" "N_CrvLineFromPtAndVector" "N_EndNurbs" "N_InitNurbs" "N_LineFitPts" "N_ProjectPtLineParam" "N_ShellSortReal" "N_VectorCreate" "N_VectorDiff" "N_VectorDirectedAngle" "N_VectorSum"))
+ (:c "N_FitArcToEndPtsAndTangents" :lisp "fit-arc-to-end-pts-and-tangents" :file "NL_CrvFit.cpp" :line 353 :lines 200 :wave 4 :status :port
+   :callees ("N_Combine2Pts" "N_DistPtLineSeg" "N_DistPtPt" "N_PtToXYZ" "N_VectorCross" "N_VectorDiff" "N_VectorDot" "N_VectorNormalize" "N_VectorNormalizeRef" "N_VectorPerpendicular" "N_VectorPtAlongVector" "N_VectorReverse" "N_VectorSum" "N_Weight" "ST_CalcCPtsCircle"))
  (:c "N_FitCalcCrvParamValues" :lisp "fit-calc-crv-param-values" :file "NL_CrvFit.cpp" :line 1361 :lines 81 :wave 4 :status :done
    :callees ("N_AllocReal1dArray" "N_DistCptCptHomo" "N_DistPtPt" "N_EndNurbs" "N_InitNurbs"))
  (:c "N_FitFuncInterpGivenParams" :lisp "fit-func-interp-given-params" :file "NL_CrvFit.cpp" :line 1845 :lines 58 :wave 4 :status :done
@@ -301,6 +319,8 @@
    :callees ("N_KnotVectorGetKnots" "N_SetKnotIndex"))
  (:c "N_FitCrvPtsNormals" :lisp "fit-crv-pts-normals" :file "NL_CrvFit.cpp" :line 18067 :lines 44 :wave 4 :status :done :root t :fenced t
    :callees ("N_AllocPt1dArray" "N_CrvClosestPt" "N_CrvDerivs" "N_CrvGetParamBounds" "N_CrvInitArrays" "N_EndNurbs" "N_FitCrvFirstDeriv" "N_FitCrvInterp" "N_InitNurbs" "N_VectorCross"))
+ (:c "ST_CalcCPtsCircle" :lisp "crv-fit--st-calc-c-pts-circle" :file "NL_CrvFit.cpp" :line 19297 :lines 16 :wave 4 :status :port :static t
+   :callees ("N_DistPtPt" "N_Weight"))
  (:c "N_CrvClosestPt" :lisp "crv-closest-pt" :file "NL_CrvGeom.cpp" :line 64 :lines 100 :wave 2 :status :done
    :callees ("N_CopyPt" "N_CrvDerivs" "N_CrvGetKnots" "N_CrvIsClosed" "N_EndNurbs" "N_FloatOpIsBad" "N_InitNurbs" "N_VectorDiff" "N_VectorDot" "N_VectorMagnitude"))
  (:c "N_CrvArcLength" :lisp "crv-arc-length" :file "NL_CrvGeom.cpp" :line 659 :lines 130 :wave 2 :status :done :root t
@@ -313,7 +333,7 @@
    :callees ("N_AllocPt1dArray" "N_AllocReal1dArray" "N_ApproxCrvWithPolyline" "N_EndNurbs" "N_InitNurbs" "N_ProjectPtLineParam" "N_VectorCopy"))
  (:c "ST_bezlen" :lisp "crv-geom--st-bezlen" :file "NL_CrvGeom.cpp" :line 2390 :lines 56 :wave 2 :status :done :static t
    :callees ("N_AllocCPt1dArray" "N_BezSplit" "N_DistCPolygon" "N_DistCptCpt" "N_EndNurbs" "N_InitNurbs"))
- (:c "N_CrvEvalCurvature" :lisp "crv-eval-curvature" :file "NL_CrvNurb.cpp" :line 663 :lines 40 :wave 0 :status :done
+ (:c "N_CrvEvalCurvature" :lisp "crv-eval-curvature" :file "NL_CrvNurb.cpp" :line 663 :lines 40 :wave 0 :status :done :root t
    :callees ("N_CopyPt" "N_CrvDerivs" "N_CrvEvalFrenetFrame" "N_EndNurbs" "N_FloatOpIsBad" "N_InitNurbs" "N_VectorCross" "N_VectorMagnitude" "N_VectorNormalize" "N_VectorPtAlongVector"))
  (:c "N_CrvEval" :lisp "crv-eval" :file "NL_CrvNurb.cpp" :line 773 :lines 41 :wave 0 :status :done :root t
    :callees ("N_BasisEval" "N_CPtToPtEuclid" "N_KnotVectorIsParamOutOfBounds"))
@@ -335,7 +355,7 @@
    :callees ("N_Crv2dTo3d" "N_CrvGetCPts" "N_CrvIs3d" "N_EndNurbs" "N_InitNurbs" "N_TranslateCPt"))
  (:c "N_CrvReverse" :lisp "crv-reverse" :file "NL_CrvNurb.cpp" :line 2430 :lines 36 :wave 0 :status :done :root t
    :callees ("N_CopyCPt" "N_CrvGetCPtsAndKnots" "N_CrvGetCPtsDegreeAndKnots" "N_CrvSizeArrays" "N_SwapCPts"))
- (:c "N_CrvGetBBoxMaxDiagDist" :lisp "crv-get-b-box-max-diag-dist" :file "NL_CrvNurb.cpp" :line 2521 :lines 14 :wave 0 :status :done
+ (:c "N_CrvGetBBoxMaxDiagDist" :lisp "crv-get-b-box-max-diag-dist" :file "NL_CrvNurb.cpp" :line 2521 :lines 14 :wave 0 :status :done :root t
    :callees ("N_BBoxGetDiagonal" "N_CrvGetBBox" "N_EndNurbs" "N_InitNurbs"))
  (:c "N_CrvReparam" :lisp "crv-reparam" :file "NL_CrvNurb.cpp" :line 3454 :lines 6 :wave 0 :status :done :root t
    :callees ("N_CreateInterval" "N_CrvReparamToInterval"))
@@ -361,8 +381,10 @@
    :callees ("N_AllocCPt1dArray" "N_Combine2CPts" "N_CopyCPt" "N_CrvGetCPtsDegreeAndKnots" "N_DistCptCptHomo" "N_EndNurbs" "N_InitNurbs"))
  (:c "N_CrvRemoveKnots" :lisp "crv-remove-knots" :file "NL_CrvTool.cpp" :line 2295 :lines 279 :wave 1 :status :done
    :callees ("N_AllocCPt1dArray" "N_AllocInt1dArray" "N_AllocReal1dArray" "N_BasisFindAllSpanMaxima" "N_CPtGetW" "N_Combine2CPts" "N_CopyCPt" "N_CrvCompress" "N_CrvCopy" "N_CrvGetCPtsDegreeAndKnots" "N_CrvGetCPtsKnotVectorAndKnots" "N_CrvGetMinMaxWeightsAndPts" "N_CrvRemoveKnotMaxErr" "N_CrvSetSizeIndices" "N_CrvSizeArrays" "N_EndNurbs" "N_InitNurbs" "N_IsCrvRat"))
- (:c "N_CrvElevateDegree" :lisp "crv-elevate-degree" :file "NL_CrvTool.cpp" :line 3285 :lines 191 :wave 1 :status :done
+ (:c "N_CrvElevateDegree" :lisp "crv-elevate-degree" :file "NL_CrvTool.cpp" :line 3285 :lines 191 :wave 1 :status :done :root t
    :callees ("N_AllocCPt1dArray" "N_AllocCrvArrays" "N_AllocReal1dArray" "N_BasisGetSpanCount" "N_BezElevateDegree" "N_BezGetDegreeElevationMatrix" "N_Combine2CPts" "N_CopyCPt" "N_CrvGetCPtsAndKnots" "N_CrvGetCPtsDegreeAndKnots" "N_CrvGetKnotVector" "N_CrvSizeArrays" "N_EndNurbs" "N_FreeCrv" "N_InitNurbs" "N_InitRealMatrix" "N_KnotVectorIsValid"))
+ (:c "N_CrvReduceDegreeOnce" :lisp "crv-reduce-degree-once" :file "NL_CrvTool.cpp" :line 3636 :lines 352 :wave 1 :status :port :root t
+   :callees ("N_AllocCPt1dArray" "N_AllocCrvArrays" "N_AllocReal1dArray" "N_BasisFindAllSpanMaxima" "N_BasisGetSpanCount" "N_BezDegreeReduceCoefs" "N_BezReduceDegree" "N_CPtGetW" "N_Combine2CPts" "N_CopyCPt" "N_CrvGetCPtsAndKnots" "N_CrvGetCPtsDegreeAndKnots" "N_CrvGetKnotVector" "N_CrvGetMinMaxWeightsAndPts" "N_CrvInitArrays" "N_CrvSizeArrays" "N_DistCptCptHomo" "N_EndNurbs" "N_FreeCrv" "N_InitNurbs" "N_IsCrvRat" "N_KnotVectorFromRealArray"))
  (:c "N_CrvsMakeCompatibleKnotTol" :lisp "crvs-make-compatible-knot-tol" :file "NL_CrvTool.cpp" :line 4289 :lines 81 :wave 1 :status :done
    :callees ("N_Alloc1dArrayKnotVectPtrs" "N_CrvElevateDegree" "N_CrvGetDegree" "N_CrvGetKnotVector" "N_CrvGetParamBounds" "N_CrvRefine" "N_CrvReparamToInterval" "N_CrvsMakeRatCompatible" "N_EndNurbs" "N_GetCompatibleKnotArray" "N_GetCompatibleKnotVectorToTol" "N_InitNurbs" "N_KnotVectorGetKnots"))
  (:c "N_CrvsMakeCompatible" :lisp "crvs-make-compatible" :file "NL_CrvTool.cpp" :line 4468 :lines 5 :wave 1 :status :done :root t
@@ -459,7 +481,7 @@
    :callees ())
  (:c "N_CFuncGetArraySizes" :lisp "c-func-get-array-sizes" :file "NL_FuncsBasic.cpp" :line 1382 :lines 5 :wave 0 :status :vanish
    :callees ())
- (:c "N_CFuncGetKnots" :lisp "c-func-get-knots" :file "NL_FuncsBasic.cpp" :line 1417 :lines 5 :wave 0 :status :vanish
+ (:c "N_CFuncGetKnots" :lisp "c-func-get-knots" :file "NL_FuncsBasic.cpp" :line 1417 :lines 5 :wave 0 :status :vanish :root t
    :callees ())
  (:c "N_CFuncGetKnotVector" :lisp "c-func-get-knot-vector" :file "NL_FuncsBasic.cpp" :line 1450 :lines 4 :wave 0 :status :vanish
    :callees ())
@@ -619,6 +641,10 @@
    :callees ("N_CPtFromWxWyWz" "N_CPtToPtEuclid" "N_CPtToWxWyWz" "N_PlaneGetNormal" "N_ProjectPtPlane" "N_PtToXYZ" "N_Sum2Pts" "N_VectorDir" "N_VectorNormalize"))
  (:c "N_PlanePtNormalToImplicit" :lisp "plane-pt-normal-to-implicit" :file "NL_Geom.cpp" :line 6398 :lines 13 :wave 0 :status :done
    :callees ("N_PtToXYZ" "N_VectorDot" "N_VectorNormalizeRef"))
+ (:c "N_DistPtArc" :lisp "dist-pt-arc" :file "NL_Geom.cpp" :line 6508 :lines 76 :wave 0 :status :port
+   :callees ("N_DistPerpPtLineSeg" "N_DistPtPt" "N_VectorCreate" "N_VectorDiff" "N_VectorDirectedAngle"))
+ (:c "N_DistMaxLineArc" :lisp "dist-max-line-arc" :file "NL_Geom.cpp" :line 6648 :lines 99 :wave 0 :status :port
+   :callees ("N_CreateLinePtPt" "N_DistPerpPtLineSeg" "N_DistPtArc" "N_DistPtPt" "N_IsectLineLine" "N_ProjectPtLineParam" "N_VectorCopy"))
  (:c "N_LineImplicitToPtVector" :lisp "line-implicit-to-pt-vector" :file "NL_Geom.cpp" :line 6878 :lines 29 :wave 0 :status :done
    :callees ("N_FloatOpIsBad" "N_PtFromXYZ" "N_VectorNormalizeRef"))
  (:c "N_LineFit2dPts" :lisp "line-fit-2d-pts" :file "NL_Geom.cpp" :line 7030 :lines 148 :wave 0 :status :done
@@ -771,6 +797,8 @@
    :callees ("ST_GetSpiralAngle"))
  (:c "N_SrfEvalPtGrid" :lisp "srf-eval-pt-grid" :file "NL_SrfAdv.cpp" :line 94 :lines 96 :wave 6 :status :done :root t
    :callees ("N_AllocCPt1dArray" "N_AllocInt1dArray" "N_AllocReal2dArray" "N_BasisEvalArray" "N_CPtToPtEuclid" "N_CopyCPt" "N_EndNurbs" "N_InitNurbs" "N_SrfGetCPtsDegreesAndKnots" "N_SrfGetKnotVectors" "N_VectorBlendCPt"))
+ (:c "N_SrfExtendToCrv" :lisp "srf-extend-to-crv" :file "NL_SrfAdv.cpp" :line 2711 :lines 643 :wave 6 :status :port :root t :fenced t
+   :callees ("N_AllocCPt1dArray" "N_AllocCPt2dArray" "N_AllocSrfArrays" "N_CPtGetW" "N_Combine2CPts" "N_CopyCPt" "N_CrvCopy" "N_CrvEval" "N_CrvExtendToPt" "N_CrvGetCPts" "N_CrvGetParamBounds" "N_CrvInitArrays" "N_CrvMakeCompatibleWithSrf" "N_CrvSizeArrays" "N_EndNurbs" "N_FreeCrv" "N_FreeSrf" "N_InitNurbs" "N_IsSrfRat" "N_ScaleCPt" "N_SrfCopy" "N_SrfExtractIsoCrv" "N_SrfGetCPtsAndKnots" "N_SrfGetCPtsDegreesAndKnots" "N_SrfGetParameterBounds" "N_SrfInitArrays" "N_SrfInsertKnot" "N_SrfRemoveKnotConditional" "N_SrfSizeArrays" "N_VectorBlendCPt"))
  (:c "N_SrfModifyBoundaryCrv" :lisp "srf-modify-boundary-crv" :file "NL_SrfAdv.cpp" :line 3782 :lines 191 :wave 6 :status :done :root t
    :callees ("N_AllocSrfArrays" "N_CPtFromWxWyWz" "N_CopyCPt" "N_CreateRectangle" "N_CrvCopy" "N_CrvGetCPtsDegreeAndKnots" "N_CrvInitArrays" "N_CrvMakeCompatibleWithSrf" "N_Diff2CPts" "N_EndNurbs" "N_FreeSrf" "N_InitNurbs" "N_IsCrvRat" "N_MakeSrfsCompatibleUV" "N_SrfCopy" "N_SrfGetCPtsAndKnots" "N_SrfGetCPtsDegreesAndKnots" "N_SrfGetParameterBounds" "N_SrfInitArrays" "N_SrfReparamToInterval" "N_SrfSizeArrays" "N_Sum2CPts"))
  (:c "N_SrfEvalPtNormalDeriv" :lisp "srf-eval-pt-normal-deriv" :file "NL_SrfAdv.cpp" :line 4455 :lines 102 :wave 6 :status :done
@@ -853,7 +881,7 @@
    :callees ())
  (:c "N_SrfAreArraysNULL" :lisp "srf-are-arrays-null" :file "NL_SrfBasic.cpp" :line 2137 :lines 15 :wave 0 :status :vanish
    :callees ("N_SrfGetNetAndKnotVectors"))
- (:c "N_IsSrfRat" :lisp "is-srf-rat" :file "NL_SrfBasic.cpp" :line 2188 :lines 16 :wave 0 :status :done
+ (:c "N_IsSrfRat" :lisp "is-srf-rat" :file "NL_SrfBasic.cpp" :line 2188 :lines 16 :wave 0 :status :done :root t
    :callees ("N_CPtGetW" "N_SrfGetCPts"))
  (:c "N_SrfIsClosed" :lisp "srf-is-closed" :file "NL_SrfBasic.cpp" :line 2323 :lines 41 :wave 0 :status :done
    :callees ("N_CPtToPtEuclid" "N_DistPtPt" "N_SrfGetCPts"))
@@ -905,6 +933,8 @@
    :callees ("N_AllocReal1dArray" "N_BasisEval" "N_EndNurbs" "N_FitCrvCalcKnotVector" "N_GetRealMatrixPtr" "N_InitNurbs" "N_RealMatrixLuDecompose" "N_RealMatrixRightForBack" "N_SFuncGetKnotVectors" "N_SFuncSizeArrays" "N_SetRealMatrix" "N_SrfFuncCntrlVal"))
  (:c "N_FitSrfInterpBoundary" :lisp "fit-srf-interp-boundary" :file "NL_SrfFit.cpp" :line 9690 :lines 218 :wave 5 :status :done :root t
    :callees ("N_AllocArrayCrvPtrs" "N_AllocCrv" "N_AllocPt1dArray" "N_AllocReal1dArray" "N_CPtToPtEuclid" "N_CopyCPt" "N_CrvCopy" "N_CrvGetArraySizes" "N_CrvGetCPts" "N_CrvGetDegree" "N_CrvGetKnotVector" "N_CrvGetKnots" "N_CrvInitArrays" "N_CrvProjectPts" "N_CrvsAreCombatible" "N_CrvsMakeCompatible" "N_EndNurbs" "N_FitCrvKnotsAndTangents" "N_InitNurbs" "N_IsCrvRat" "N_KnotVectorGetKnots" "N_KnotsCopy" "N_SrfGetCPtsAndKnots" "N_SrfSizeArrays" "N_VectorCopy"))
+ (:c "N_FitSrfInterpBicubic" :lisp "fit-srf-interp-bicubic" :file "NL_SrfFit.cpp" :line 12645 :lines 10 :wave 5 :status :port :root t
+   :callees ("N_FitPtsNormals"))
  (:c "N_FitSrfApproxRemoveKnots" :lisp "fit-srf-approx-remove-knots" :file "NL_SrfFit.cpp" :line 14164 :lines 626 :wave 5 :status :done
    :callees ("N_AllocCPt1dArray" "N_AllocInt1dArray" "N_AllocReal1dArray" "N_AllocReal2dArray" "N_BasisIEval" "N_CFuncEval" "N_CFuncFromKnots" "N_CFuncSetSizeIndices" "N_Combine2CPts" "N_CopyCPt" "N_EndNurbs" "N_FitSrfRemovalBoundary" "N_InitNurbs" "N_SrfGetCPtsDegreesAndKnots" "N_SrfGetKnotVectors" "N_SrfSetSizeIndices"))
  (:c "N_FitSrfRemovalBoundary" :lisp "fit-srf-removal-boundary" :file "NL_SrfFit.cpp" :line 15087 :lines 133 :wave 5 :status :done
@@ -951,6 +981,8 @@
    :callees ("N_BBoxGetDiagonal" "N_EndNurbs" "N_InitNurbs" "N_SrfGetBBox"))
  (:c "N_SrfOffset" :lisp "srf-offset" :file "NL_SrfOffset.cpp" :line 678 :lines 409 :wave 7 :status :done :root t
    :callees ("N_AllocInt1dArray" "N_AllocInt2dArray" "N_AllocKnotVectorAndArray" "N_AllocPt2dArray" "N_AllocReal1dArray" "N_CPtToPtAndW" "N_CreateRectangle" "N_CreateRevolvedSrf" "N_CreateSrfCornerPts" "N_CreateSrfExtrudeCrv" "N_CrvEvalTangent" "N_CrvGetParamBounds" "N_CrvInitArrays" "N_CrvIsPlanar" "N_CrvOffsetPtSampling" "N_EndNurbs" "N_FitCalcSrfParamValues" "N_FitCrvCalcKnotVector" "N_FitSrfLstSqApprox" "N_FitSrfToPtsKnots" "N_FloatOpIsBad" "N_FreePt2dArray" "N_InitNurbs" "N_PtsAreEqual" "N_SrfCompress" "N_SrfCopy" "N_SrfDecomposeToBez" "N_SrfEvalPtNormalAtPole" "N_SrfEvalPtPtDerivNormalFast" "N_SrfGetArraySizes" "N_SrfGetAverageLen" "N_SrfGetCPts" "N_SrfGetDegrees" "N_SrfGetGridPtsNormals" "N_SrfGetKnots" "N_SrfGetParameterBounds" "N_SrfInitArrays" "N_SrfOffsetGetMaxDeriv" "N_SrfRemoveAllKnots" "N_SrfReparamToInterval" "N_SrfTranslate" "N_SrfType" "N_SwapUV" "N_VectorCross" "N_VectorDiff" "N_VectorDot" "N_VectorMagnitude" "N_VectorNormalizeRef" "N_VectorPtAlongVector" "N_VectorScale" "N_VectorScaleRef" "N_Weight"))
+ (:c "N_SrfInsertKnot" :lisp "srf-insert-knot" :file "NL_SrfTool.cpp" :line 68 :lines 169 :wave 1 :status :port
+   :callees ("N_AllocCPt1dArray" "N_AllocReal2dArray" "N_AllocSrfArrays" "N_BasisFindSpanAndMult" "N_Combine2CPts" "N_CopyCPt" "N_EndNurbs" "N_FreeSrf" "N_InitNurbs" "N_KnotVectorIsEndParam" "N_SrfGetCPtsAndKnots" "N_SrfGetCPtsDegreesAndKnots" "N_SrfGetKnotVectors" "N_SrfSizeArrays"))
  (:c "N_SrfSplit" :lisp "srf-split" :file "NL_SrfTool.cpp" :line 403 :lines 183 :wave 1 :status :done :root t
    :callees ("N_BasisFindSpanAndMult" "N_Combine2CPts" "N_CopyCPt" "N_KnotVectorIsEndParam" "N_SrfGetCPtsDegreesAndKnots" "N_SrfSizeArrays"))
  (:c "N_SrfDecomposeToBez" :lisp "srf-decompose-to-bez" :file "NL_SrfTool.cpp" :line 870 :lines 170 :wave 1 :status :done
@@ -961,16 +993,20 @@
    :callees ("N_AllocSrfArrays" "N_BasisFindSpan" "N_Combine2CPts" "N_CopyCPt" "N_EndNurbs" "N_FreeSrf" "N_InitNurbs" "N_KnotVectorGetKnots" "N_KnotVectorIsEndParam" "N_SrfGetCPtsAndKnots" "N_SrfGetCPtsDegreesAndKnots" "N_SrfGetKnotVectors" "N_SrfSizeArrays"))
  (:c "N_SrfExtractPatch" :lisp "srf-extract-patch" :file "NL_SrfTool.cpp" :line 1814 :lines 195 :wave 1 :status :done
    :callees ("N_AllocCPt2dArray" "N_AllocSrfArrays" "N_BasisFindSpanAndMult" "N_Combine2CPts" "N_CopyCPt" "N_EndNurbs" "N_FreeSrf" "N_InitNurbs" "N_SrfGetCPtsAndKnots" "N_SrfGetCPtsDegreesAndKnots" "N_SrfGetKnotVectors" "N_SrfReparamToInterval" "N_SrfSizeArrays"))
+ (:c "N_SrfRemoveKnotConditional" :lisp "srf-remove-knot-conditional" :file "NL_SrfTool.cpp" :line 2191 :lines 409 :wave 1 :status :port
+   :callees ("N_AllocCPt1dArray" "N_AllocReal1dArray" "N_BasisFindGlobalMax" "N_BasisFindSpanAndMult" "N_CPtGetW" "N_Combine2CPts" "N_CopyCPt" "N_DistCptCptHomo" "N_EndNurbs" "N_InitNurbs" "N_IsSrfRat" "N_KnotVectorIsEndParam" "N_SrfGetCPtsAndKnots" "N_SrfGetCPtsDegreesAndKnots" "N_SrfGetKnotVectors" "N_SrfMinMaxWeightPosVectors" "N_SrfSetSizeIndices" "N_SrfSizeArrays"))
  (:c "N_SrfRemoveOneKnot" :lisp "srf-remove-one-knot" :file "NL_SrfTool.cpp" :line 2859 :lines 134 :wave 1 :status :done
    :callees ("N_AllocCPt1dArray" "N_AllocReal1dArray" "N_Combine2CPts" "N_CopyCPt" "N_DistCptCptHomo" "N_EndNurbs" "N_InitNurbs" "N_SrfGetCPtsDegreesAndKnots"))
  (:c "N_SrfRemoveAllKnots" :lisp "srf-remove-all-knots" :file "NL_SrfTool.cpp" :line 3114 :lines 694 :wave 1 :status :done :root t
    :callees ("N_AllocCPt2dArray" "N_AllocInt1dArray" "N_AllocReal1dArray" "N_AllocReal2dArray" "N_BasisFindAllSpanMaxima" "N_CPtGetW" "N_Combine2CPts" "N_CopyCPt" "N_EndNurbs" "N_InitNurbs" "N_IsSrfRat" "N_SrfCompress" "N_SrfCopy" "N_SrfGetCPtsDegreesAndKnots" "N_SrfGetCPtsKnotVectorAndKnots" "N_SrfMinMaxWeightPosVectors" "N_SrfRemoveOneKnot" "N_SrfSetSizeIndices" "N_SrfSizeArrays"))
  (:c "N_SrfElevateDegree" :lisp "srf-elevate-degree" :file "NL_SrfTool.cpp" :line 4224 :lines 424 :wave 1 :status :done
    :callees ("N_AllocCPt2dArray" "N_AllocReal1dArray" "N_AllocReal2dArray" "N_AllocSrfArrays" "N_BasisGetSpanCount" "N_BezGetDegreeElevationMatrix" "N_BezSrfElevateDegree" "N_Combine2CPts" "N_CopyCPt" "N_EndNurbs" "N_FreeSrf" "N_InitNurbs" "N_InitRealMatrix" "N_KnotVectorIsValid" "N_SrfGetCPtsAndKnots" "N_SrfGetCPtsDegreesAndKnots" "N_SrfGetKnotVectors" "N_SrfSizeArrays"))
- (:c "N_MakeSrfsCompatibleUV" :lisp "make-srfs-compatible-uv" :file "NL_SrfTool.cpp" :line 6107 :lines 4 :wave 1 :status :done
+ (:c "N_MakeSrfsCompatibleUV" :lisp "make-srfs-compatible-uv" :file "NL_SrfTool.cpp" :line 6107 :lines 4 :wave 1 :status :done :root t
    :callees ("N_MakeSrfsCompatible"))
  (:c "N_MakeSrfsCompatible" :lisp "make-srfs-compatible" :file "NL_SrfTool.cpp" :line 6151 :lines 111 :wave 1 :status :done
    :callees ("N_Alloc1dArrayKnotVectPtrs" "N_EndNurbs" "N_GetCompatibleKnotArray" "N_InitNurbs" "N_KnotVectorGetKnots" "N_MakeSrfsRatCompatible" "N_SrfElevateDegree" "N_SrfGetDegrees" "N_SrfGetKnotVectors" "N_SrfGetParameterBounds" "N_SrfInsertKnots" "N_SrfReparam" "N_SrfReparamToInterval"))
+ (:c "N_SrfJoin" :lisp "srf-join" :file "NL_SrfTool.cpp" :line 6504 :lines 186 :wave 1 :status :port :root t
+   :callees ("N_AllocSrfArrays" "N_CPtGetW" "N_CPtSetW" "N_Combine2CPts" "N_CopyCPt" "N_EndNurbs" "N_FreeSrf" "N_InitNurbs" "N_IsSrfRat" "N_SrfElevateDegree" "N_SrfGetCPtsAndKnots" "N_SrfGetCPtsDegreesAndKnots" "N_SrfInitArrays" "N_SrfRemoveKnotConditional" "N_SrfSizeArrays"))
  (:c "N_InitNurbs" :lisp "init-nurbs" :file "NL_Util.cpp" :line 52 :lines 55 :wave 0 :status :vanish :root t
    :callees ("N_FileClose" "N_FileOpen"))
  (:c "N_EndNurbs" :lisp "end-nurbs" :file "NL_Util.cpp" :line 134 :lines 453 :wave 0 :status :vanish :root t
