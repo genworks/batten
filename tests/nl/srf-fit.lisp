@@ -579,3 +579,24 @@ now and then a knot among them."
                            (up (with-foreign ((upp up :real-vector)) (run upp (cffi:null-pointer))))
                            (vp (with-foreign ((vpp vp :real-vector)) (run (cffi:null-pointer) vpp)))
                            (t (run (cffi:null-pointer) (cffi:null-pointer))))))))))))
+
+;;; ------------------------------------------------ bicubic interpolation
+
+(define-oracle-test fit-srf-interp-bicubic (:file "srf-fit" :trials 2000)
+  ;; K, L >= 2: N_FitPtsNormals reads tangents it never set for less
+  (let* ((k (+ 2 (rnd 7))) (l (+ 2 (rnd 7)))
+         (pts (%random-grid (1+ k) (1+ l)))
+         (tan (case (rnd 40) (0 0) (t (if (zerop (rnd 2)) +bessel+ +akima+)))))
+    ;; closed now and then in u, in v or both
+    (when (zerop (rnd 4))
+      (dotimes (j (1+ l)) (dotimes (c 3) (setf (aref pts k j c) (aref pts 0 j c)))))
+    (when (zerop (rnd 4))
+      (dotimes (i (1+ k)) (dotimes (c 3) (setf (aref pts i l c) (aref pts i 0 c)))))
+    (agree (list :k k :l l :tan tan :p-net pts)
+           (list (batten::fit-srf-interp-bicubic pts k l tan))
+           (with-foreign ((pp pts :point-net))
+             (with-stacks (sg)
+               (with-foreign-out ((sur :surface))
+                 (if (c-flag-error-p (c-fit-srf-interp-bicubic pp k l tan sur sg))
+                     (values t nil)
+                     (values nil (list (from-foreign sur :surface))))))))))

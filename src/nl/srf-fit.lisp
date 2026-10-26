@@ -2326,3 +2326,13 @@ NLib: N_FitSrfInterpBoundary."
             (replace us ui*)
             (replace vs vi*)
             (%make-surface p q us vs sw)))))))
+
+;;; ------------------------------------------------ bicubic interpolation
+
+(defun fit-srf-interp-bicubic (pnet k l tan)
+  "The C11 nonrational bicubic surface interpolating the points
+PNET[0..K][0..L] (a point-net), with tangents by TAN (+bessel+ or +akima+):
+FIT-PTS-NORMALS with no normals.  Returns a fresh surface.
+NLib: N_FitSrfInterpBicubic."
+  (declare (type point-net pnet) (type fixnum k l tan))
+  (fit-pts-normals pnet nil k l tan))
