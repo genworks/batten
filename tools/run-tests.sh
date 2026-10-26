@@ -14,6 +14,9 @@
 # BATTEN_ORACLE_DIR  where tools/build-oracle.sh put the oracle libraries
 #                    (default: oracle/ in this checkout)
 # BATTEN_TEST_IMAGE  an SBCL image with CFFI (default: the public Gendl SBCL image)
+# BATTEN_TEST_LISP   an SBCL executable with CFFI to run directly instead of a
+#                    container -- for a CI job already running in such an image
+#                    (e.g. /opt/gendl/gdl/program/gdl-sbcl)
 set -euo pipefail
 FILE=${1:-all}
 TRIALS=${2:-nil}
@@ -24,26 +27,35 @@ IMAGE=${BATTEN_TEST_IMAGE:-genworks/gendl:devo-sbcl}
 if [ "$FILE" = all ]; then FILEARG=nil; else FILEARG="\"$FILE\""; fi
 if [ -n "$NAME" ]; then NAMEARG="\"$NAME\""; else NAMEARG=nil; fi
 
-docker run --rm -v "$ROOT":/batten:ro -v "$ORACLE":/oracle:ro \
-  -e BATTEN_ORACLE_DIR=/oracle/ \
-  --entrypoint /opt/gendl/gdl/program/gdl-sbcl "$IMAGE" --non-interactive --eval "
+# The run, with Batten at $1 and the oracle at $2 as the Lisp sees them.
+form() {
+  cat <<EOF
 (progn
-  (asdf:register-preloaded-system \"cffi\")
-  (push #p\"/batten/\" asdf:*central-registry*)
+  (asdf:register-preloaded-system "cffi")
+  (push #p"$1/" asdf:*central-registry*)
   (let ((warnings nil))
     (handler-bind ((warning (lambda (w)
                               (unless (typep w 'style-warning) (push (princ-to-string w) warnings))
                               (muffle-warning w))))
-      (asdf:load-system \"batten/tests\"))
+      (asdf:load-system "batten/tests"))
     (when warnings
-      (format t \"~&COMPILER WARNINGS (~d):~%~{  ~a~%~}\" (length warnings) warnings)))
-  (uiop:symbol-call :batten-oracle :load-oracle)
-  (format t \"~&=== batten tests ===~%\")
+      (format t "~&COMPILER WARNINGS (~d):~%~{  ~a~%~}" (length warnings) warnings)))
+  (uiop:symbol-call :batten-oracle :load-oracle "$2/")
+  (format t "~&=== batten tests ===~%")
   (let ((*print-length* 8) (*print-level* 4))
-    (setf (symbol-value (find-symbol \"*VERBOSE*\" :batten-tests)) t)
+    (setf (symbol-value (find-symbol "*VERBOSE*" :batten-tests)) t)
     (let ((ok (uiop:symbol-call :batten-tests :run-all :file $FILEARG :trials $TRIALS :name $NAMEARG)))
       (uiop:symbol-call :batten-tests :coverage-report :file $FILEARG)
-      (sb-ext:exit :code (if ok 0 1)))))" 2>&1 |
+      (sb-ext:exit :code (if ok 0 1)))))
+EOF
+}
+
+if [ -n "${BATTEN_TEST_LISP:-}" ]; then
+  "$BATTEN_TEST_LISP" --non-interactive --eval "$(form "$ROOT" "$ORACLE")" 2>&1
+else
+  docker run --rm -v "$ROOT":/batten:ro -v "$ORACLE":/oracle:ro \
+    --entrypoint /opt/gendl/gdl/program/gdl-sbcl "$IMAGE" --non-interactive --eval "$(form /batten /oracle)" 2>&1
+fi |
   # drop the image's banner and the compiler's chatter up to the marker, but
   # keep the lines around any error before it (a failed load)
   awk '/^=== batten tests ===/ {on=1; next}
