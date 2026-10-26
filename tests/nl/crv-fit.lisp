@@ -758,3 +758,49 @@ then): on a circular arc with noise, on a line with noise, or random."
   (let ((b (make-array (array-dimensions a) :element-type 'double-float)))
     (dotimes (i (array-total-size a) b)
       (setf (row-major-aref b i) (row-major-aref a i)))))
+
+;;; ------------------------------------------------------------- L11-g0
+
+(defun %cf11-biarc-case ()
+  "End points and end tangents in the xy-plane for
+N_FitArcToEndPtsAndTangents, as (ps ts pe te): general, parallel or
+antiparallel tangents (along the chord or not), a zero tangent, a tangent
+sum perpendicular to the chord, nearly parallel tangents, or coincident end
+points."
+  (let* ((ps (make-point (rnd-range -50d0 50d0) (rnd-range -50d0 50d0) 0d0))
+         (len (expt 10d0 (rnd-range -2d0 2d0)))
+         (phi (rnd-range -3.2d0 3.2d0))
+         (cx (cos phi)) (cy (sin phi))
+         (pe (make-point (+ (aref ps 0) (* len cx)) (+ (aref ps 1) (* len cy)) 0d0))
+         (s1 (rnd-range 0.1d0 10d0)) (s2 (rnd-range 0.1d0 10d0))
+         (ang (lambda (a s) (make-point (* s (cos (+ phi a))) (* s (sin (+ phi a))) 0d0)))
+         (a1 (rnd-range -3.2d0 3.2d0)) (a2 (rnd-range -3.2d0 3.2d0)))
+    (case (rnd 14)
+      (0 (list ps (funcall ang 0d0 s1) pe (funcall ang 0d0 s2)))          ; collinear, chord-wise
+      (1 (list ps (funcall ang pi s1) pe (funcall ang pi s2)))            ; collinear, backwards
+      (2 (list ps (funcall ang 0d0 s1) pe (funcall ang pi s2)))           ; along the chord, antiparallel
+      (3 (list ps (funcall ang pi s1) pe (funcall ang 0d0 s2)))           ; pointing away
+      (4 (list ps (funcall ang a1 s1) pe (funcall ang a1 s2)))            ; parallel
+      (5 (list ps (funcall ang a1 s1) pe (funcall ang (+ a1 pi) s2)))     ; antiparallel
+      (6 (list ps (make-point 0d0 0d0 0d0) pe (funcall ang a2 s2)))       ; zero tangents
+      (7 (list ps (funcall ang a1 s1) pe (make-point 0d0 0d0 0d0)))
+      (8 (list ps (funcall ang a1 s1) pe (funcall ang (- pi a1) s2)))     ; sum perpendicular to the chord
+      (9 (list ps (funcall ang a1 s1) pe (funcall ang (+ a1 (rnd-range -1d-9 1d-9)) s2)))
+      (10 (list ps (funcall ang a1 s1) (copy-seq ps) (funcall ang a2 s2))) ; coincident ends
+      (t (list ps (funcall ang a1 s1) pe (funcall ang a2 s2))))))
+
+;;; Pw is given far more rows than the C's documented 18, so a deep split
+;;; cannot run past it on either side; every row is compared.  The tangents
+;;; are compared after the call too: the C normalizes copies.
+(define-oracle-test fit-arc-to-end-pts-and-tangents (:file "crv-fit" :trials 6000)
+  (destructuring-bind (ps ts pe te) (%cf11-biarc-case)
+    (agree (list :ps ps :ts ts :pe pe :te te)
+           (let ((pw (make-cpoint-array 40)) (ts1 (copy-seq ts)) (te1 (copy-seq te)))
+             (let ((n (batten::fit-arc-to-end-pts-and-tangents ps ts1 pe te1 pw)))
+               (list pw n ts1 te1)))
+           (with-foreign ((a ps :point) (b ts :point) (c pe :point) (d te :point))
+             (with-foreign-out ((pw :cpoint-array 40))
+               (with-scalars ((n :long))
+                 (let ((err (c-flag-error-p (c-fit-arc-to-end-pts-and-tangents a b c d pw n))))
+                   (values err (unless err (list (from-foreign pw :cpoint-array 40)
+                                                 (cffi:mem-ref n :long) ts te))))))))))

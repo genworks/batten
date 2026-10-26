@@ -1988,6 +1988,18 @@ end of the domain and :cal-err for a bad DIR.  The C's in-place case, surP =
 surQ, computes the same surface.
 NLib: N_SrfRemoveKnotConditional."
   (declare (type surface sur-p) (type double-float tt tol) (type fixnum nt dir))
+  (multiple-value-bind (rt sur-q err) (%srf-remove-knot-conditional sur-p tt nt tol dir)
+    (when err
+      (error err))
+    (values rt sur-q)))
+
+(defun %srf-remove-knot-conditional (sur-p tt nt tol dir)
+  "SRF-REMOVE-KNOT-CONDITIONAL returning (values rt sur-q err) instead of
+signaling the error flag the last failed N_BasisFindGlobalMax call left: ERR
+is that condition or NIL.  The C writes surQ completely before it returns
+that flag, so a caller that ignores the flag with surQ = surP (N_SrfJoin)
+keeps SUR-Q.  The other errors are signaled as before."
+  (declare (type surface sur-p) (type double-float tt tol) (type fixnum nt dir))
   (let* ((n (surface-n sur-p)) (m (surface-m sur-p))
          (pw (surface-cpoints sur-p))
          (p (surface-degree-u sur-p)) (q (surface-degree-v sur-p))
@@ -2155,12 +2167,10 @@ NLib: N_SrfRemoveKnotConditional."
                    (decf first)
                    (incf last)
                    (incf k))))
-             ;; the C returns the error flag as the last call left it
-             (when err
-               (error err))
-             ;; no knot removed
+             ;; no knot removed (ERR: the C's error flag as the last call
+             ;; left it, returned for the caller to signal)
              (when (= k 0)
-               (return-from srf-remove-knot-conditional (values 0 (%make-surface p q uq vq qw))))
+               (return-from %srf-remove-knot-conditional (values 0 (%make-surface p q uq vq qw) err)))
              ;; shift down the control points
              (let ((j fout) (i fout))
                (declare (type fixnum i j))
@@ -2180,7 +2190,7 @@ NLib: N_SrfRemoveKnotConditional."
                (dotimes (row (1+ (- n k)))
                  (dotimes (col (1+ m))
                    (%copy-c-pt-net qw row col qw2 row col)))
-               (values k (%make-surface p q (subseq uq 0 (1+ (- r k))) vq qw2)))))
+               (values k (%make-surface p q (subseq uq 0 (1+ (- r k))) vq qw2) err))))
           ;; remove in the v-direction
           (t
            (let ((fout (truncate (- (* 2 spn) mlt q) 2))
@@ -2287,12 +2297,10 @@ NLib: N_SrfRemoveKnotConditional."
                    (decf first)
                    (incf last)
                    (incf k))))
-             ;; the C returns the error flag as the last call left it
-             (when err
-               (error err))
-             ;; no knot removed
+             ;; no knot removed (ERR: the C's error flag as the last call
+             ;; left it, returned for the caller to signal)
              (when (= k 0)
-               (return-from srf-remove-knot-conditional (values 0 (%make-surface p q uq vq qw))))
+               (return-from %srf-remove-knot-conditional (values 0 (%make-surface p q uq vq qw) err)))
              ;; shift down the control points
              (let ((j fout) (i fout))
                (declare (type fixnum i j))
@@ -2312,4 +2320,154 @@ NLib: N_SrfRemoveKnotConditional."
                (dotimes (row (1+ n))
                  (dotimes (col (1+ (- m k)))
                    (%copy-c-pt-net qw row col qw2 row col)))
-               (values k (%make-surface p q uq (subseq vq 0 (1+ (- s k))) qw2))))))))))
+               (values k (%make-surface p q uq (subseq vq 0 (1+ (- s k))) qw2) err)))))))))
+
+;;; ------------------------------------------------------------- L11-g0
+
+(defun srf-join (sur1 sur2 dir tol)
+  "Join surfaces SUR1 and SUR2 at a common boundary: with DIR +udir+, SUR1's
+u = umax curve and SUR2's u = umin curve (the surfaces compatible in v);
+otherwise (+vdir+) SUR1's v = vmax curve and SUR2's v = vmin curve (the
+surfaces compatible in u).  The lower degree in DIR is raised to the higher
+one, SUR2's knots in DIR are shifted to follow SUR1's, the two boundary
+rows are averaged, and the junction knot (multiplicity the degree) is then
+removed as often as TOL allows (that removal's errors are ignored, as in the
+C).  When one surface is rational and the other not, the averaged row gets
+the mean weight and the missing weights are set to 1.  Returns the joined
+fresh surface.  Signals :inp-err when the highest indexes or degrees across
+the boundary differ, and as srf-elevate-degree does.  The C's in-place
+cases, surJ = sur1 or sur2, compute the same surface.
+NLib: N_SrfJoin."
+  (declare (type surface sur1 sur2) (type fixnum dir) (type double-float tol))
+  (let* ((rat1 (is-srf-rat sur1))
+         (rat2 (is-srf-rat sur2))
+         (s1 sur1) (s2 sur2)
+         (udir (= dir +udir+))
+         (nj 0) (mj 0) (rj 0) (sj 0) (pj 0) (qj 0))
+    (declare (type surface s1 s2) (type fixnum nj mj rj sj pj qj))
+    ;; check for errors, compute indexes and raise the degree if required
+    (if udir
+        (let ((p1 (surface-degree-u sur1)) (p2 (surface-degree-u sur2)))
+          (declare (type fixnum p1 p2))
+          (when (or (/= (surface-m sur1) (surface-m sur2))
+                    (/= (surface-degree-v sur1) (surface-degree-v sur2)))
+            (nurbs-error :inp-err 'srf-join))
+          (cond ((= p1 p2))
+                ((< p1 p2) (setf s1 (srf-elevate-degree sur1 (- p2 p1) +udir+)))
+                (t (setf s2 (srf-elevate-degree sur2 (- p1 p2) +udir+))))
+          (setf pj (if (< p1 p2) (surface-degree-u s1) (if (> p1 p2) (surface-degree-u s2) p1))
+                nj (+ (surface-n s1) (surface-n s2))
+                rj (+ nj pj 1)
+                mj (surface-m s1)
+                sj (1- (length (surface-knots-v s1)))
+                qj (surface-degree-v s1)))
+        (let ((q1 (surface-degree-v sur1)) (q2 (surface-degree-v sur2)))
+          (declare (type fixnum q1 q2))
+          (when (or (/= (surface-n sur1) (surface-n sur2))
+                    (/= (surface-degree-u sur1) (surface-degree-u sur2)))
+            (nurbs-error :inp-err 'srf-join))
+          (cond ((= q1 q2))
+                ((< q1 q2) (setf s1 (srf-elevate-degree sur1 (- q2 q1) +vdir+)))
+                (t (setf s2 (srf-elevate-degree sur2 (- q1 q2) +vdir+))))
+          (setf qj (if (< q1 q2) (surface-degree-v s1) (if (> q1 q2) (surface-degree-v s2) q1))
+                mj (+ (surface-m s1) (surface-m s2))
+                sj (+ mj qj 1)
+                nj (surface-n s1)
+                rj (1- (length (surface-knots-u s1)))
+                pj (surface-degree-u s1))))
+    (let* ((n1 (surface-n s1)) (m1 (surface-m s1))
+           (n2 (surface-n s2)) (m2 (surface-m s2))
+           (pw1 (surface-cpoints s1)) (pw2 (surface-cpoints s2))
+           (u1 (surface-knots-u s1)) (v1 (surface-knots-v s1))
+           (u2 (surface-knots-u s2)) (v2 (surface-knots-v s2))
+           (r1 (1- (length u1))) (ss1 (1- (length v1)))
+           (r2 (1- (length u2))) (ss2 (1- (length v2)))
+           (pwj (make-cpoint-net (1+ nj) (1+ mj)))
+           (uj (make-real-vector (1+ rj)))
+           (vj (make-real-vector (1+ sj)))
+           (a (make-cpoint)) (b (make-cpoint)) (c (make-cpoint))
+           (surj nil))
+      (declare (type fixnum n1 m1 n2 m2 r1 ss1 r2 ss2) (type cpoint-net pw1 pw2 pwj)
+               (type real-vector u1 v1 u2 v2 uj vj) (type cpoint a b c) (dynamic-extent a b c))
+      (flet ((mid (pi* pj* qi qj* oi oj)
+               ;; N_Combine2CPts( 0.5, Pw1[..], 0.5, Pw2[..], &PwJ[..] ), and
+               ;; the mean weight when the rationalities differ
+               (declare (type fixnum pi* pj* qi qj* oi oj))
+               (combine-2-c-pts 0.5d0 (%net-c-pt pw1 pi* pj* a) 0.5d0 (%net-c-pt pw2 qi qj* b) c)
+               (unless (eq rat1 rat2)
+                 (let ((w1 (c-pt-get-w a)) (w2 (c-pt-get-w b)))
+                   (declare (type double-float w1 w2))
+                   (when (= w1 +no-w+) (setf w1 1d0))
+                   (when (= w2 +no-w+) (setf w2 1d0))
+                   (c-pt-set-w (* 0.5d0 (+ w1 w2)) c)))
+               (%c-pt-net c pwj oi oj)))
+        ;; load the knots and control points
+        (if udir
+            (let ((jj 0) (dd 0d0))
+              (declare (type fixnum jj) (type double-float dd))
+              (dotimes (ii (1+ ss1))
+                (setf (aref vj ii) (aref v1 ii)))
+              (dotimes (ii r1)
+                (setf (aref uj ii) (aref u1 ii)))
+              (setf jj r1
+                    dd (- (aref u1 r1) (aref u2 0)))
+              (do ((ii (1+ pj) (1+ ii))) ((> ii r2))
+                (declare (type fixnum ii))
+                (setf (aref uj jj) (+ (aref u2 ii) dd))
+                (incf jj))
+              (dotimes (ii (1+ mj))
+                (dotimes (jj n1)
+                  (%copy-c-pt-net pw1 jj ii pwj jj ii))
+                (mid n1 ii 0 ii n1 ii)
+                (let ((kk (1+ n1)))
+                  (declare (type fixnum kk))
+                  (do ((jj 1 (1+ jj))) ((> jj n2))
+                    (declare (type fixnum jj))
+                    (%copy-c-pt-net pw2 jj ii pwj kk ii)
+                    (incf kk))))
+              (setf surj (%make-surface pj qj uj vj pwj))
+              ;; attempt knot removal; its errors are ignored
+              (handler-case
+                  (multiple-value-bind (rt sq err)
+                      (%srf-remove-knot-conditional surj (aref u1 r1) pj tol +udir+)
+                    (declare (ignore rt err))
+                    (setf surj sq))
+                (nurbs-error () nil)))
+            (let ((jj 0) (dd 0d0))
+              (declare (type fixnum jj) (type double-float dd))
+              (dotimes (ii (1+ r1))
+                (setf (aref uj ii) (aref u1 ii)))
+              (dotimes (ii ss1)
+                (setf (aref vj ii) (aref v1 ii)))
+              (setf jj ss1
+                    dd (- (aref v1 ss1) (aref v2 0)))
+              (do ((ii (1+ qj) (1+ ii))) ((> ii ss2))
+                (declare (type fixnum ii))
+                (setf (aref vj jj) (+ (aref v2 ii) dd))
+                (incf jj))
+              (dotimes (ii (1+ nj))
+                (dotimes (jj m1)
+                  (%copy-c-pt-net pw1 ii jj pwj ii jj))
+                (mid ii m1 ii 0 ii m1)
+                (let ((kk (1+ m1)))
+                  (declare (type fixnum kk))
+                  (do ((jj 1 (1+ jj))) ((> jj m2))
+                    (declare (type fixnum jj))
+                    (%copy-c-pt-net pw2 ii jj pwj ii kk)
+                    (incf kk))))
+              (setf surj (%make-surface pj qj uj vj pwj))
+              (handler-case
+                  (multiple-value-bind (rt sq err)
+                      (%srf-remove-knot-conditional surj (aref v1 ss1) qj tol +vdir+)
+                    (declare (ignore rt err))
+                    (setf surj sq))
+                (nurbs-error () nil)))))
+      ;; make sure the weights are set consistently
+      (unless (eq rat1 rat2)
+        (let ((pw (surface-cpoints surj)))
+          (declare (type cpoint-net pw))
+          (dotimes (ii (array-dimension pw 0))
+            (dotimes (jj (array-dimension pw 1))
+              (when (= (aref pw ii jj 3) +no-w+)
+                (setf (aref pw ii jj 3) 1d0))))))
+      surj)))

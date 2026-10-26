@@ -1368,3 +1368,75 @@ NLib: N_DistPtArc."
                         dif +undefined+))
                    (t +undefined+)))
             (t +undefined+)))))
+
+;;; ------------------------------------------------------------- L11-g0
+
+(defun dist-max-line-arc (c r alf bet ps pe p q)
+  "The maximum radial distance between the segment P Q and the circular arc
+of center C, radius R, start and end angles ALF and BET (degrees, sweeping
+less than 180) and end points PS and PE: the largest |dist(C, X) - R| over
+the part of the segment inside the arc's wedge (its ends, clipped to the
+wedge's radial lines, and C's projection onto it).  +undefined+ when the
+segment lies outside the wedge.  R = +infinite+ marks a straight segment
+PS PE: the larger perpendicular distance of P and Q from it, +undefined+
+where either does not project inside it (signals what dist-perp-pt-line-seg
+signals).  Signals :num-err as project-pt-line-param does.  Where a callee
+fails on the way the C leaves through EXIT returning no error and *d unset;
+the Lisp returns 0 there (dist-pt-arc's and isect-line-line's errors, e.g.
+C on PS or PE).
+NLib: N_DistMaxLineArc."
+  (declare (type point c ps pe p q) (type double-float r alf bet))
+  ;; the segment a line?
+  (when (= r +infinite+)
+    (let ((d1 (dist-perp-pt-line-seg p ps pe))
+          (d2 (dist-perp-pt-line-seg q ps pe)))
+      (declare (type double-float d1 d2))
+      (return-from dist-max-line-arc
+        (if (or (< d1 0d0) (< d2 0d0)) +undefined+ (nl-max d1 d2)))))
+  (let ((pp (make-point)) (qq (make-point)) (rr (make-point)) (m (make-point))
+        (lpq (%make-lineseg (make-point) (make-point) 0))
+        (lcs (%make-lineseg (make-point) (make-point) 0))
+        (lce (%make-lineseg (make-point) (make-point) 0))
+        (d1 0d0) (d2 0d0) (d3 0d0) (d 0d0))
+    (declare (type point pp qq rr m) (dynamic-extent pp qq rr m)
+             (type double-float d1 d2 d3 d))
+    ;; C passes P and Q by value and may overwrite its copies
+    (vector-copy p pp)
+    (vector-copy q qq)
+    (handler-case
+        (progn
+          ;; classify the points with respect to the wedge
+          (setf d1 (dist-pt-arc pp c r alf bet ps pe)
+                d2 (dist-pt-arc qq c r alf bet ps pe))
+          (when (and (= d1 +undefined+) (= d2 +undefined+))
+            (return-from dist-max-line-arc +undefined+))
+          ;; split the line segment if necessary
+          (create-line-pt-pt lpq pp qq +bounded+)
+          (create-line-pt-pt lcs c ps +unbounded+)
+          (create-line-pt-pt lce c pe +unbounded+)
+          (flet ((clip (end)
+                   ;; R: where the segment crosses a radial line of the wedge
+                   (let ((ifl (isect-line-line lpq lcs rr)))
+                     (declare (type fixnum ifl))
+                     (setf d3 (if (= ifl +true+) (dist-pt-pt rr end) +bigd+))
+                     (when (or (= ifl +false+) (< d3 *mtol*))
+                       (setf ifl (isect-line-line lpq lce rr))
+                       (when (= ifl +false+)
+                         (return-from dist-max-line-arc +undefined+))))))
+            (when (and (/= d1 +undefined+) (= d2 +undefined+))
+              (clip pp)
+              (vector-copy rr qq))
+            (when (and (= d1 +undefined+) (/= d2 +undefined+))
+              (clip qq)
+              (vector-copy rr pp))))
+      (nurbs-error () (return-from dist-max-line-arc 0d0)))
+    ;; the circle case
+    (setf d1 (abs (- (dist-pt-pt c pp) r))
+          d2 (abs (- (dist-pt-pt c qq) r))
+          d (nl-max d1 d2))
+    (let ((tt (project-pt-line-param c pp qq m)))
+      (declare (type double-float tt))
+      (if (and (>= tt 0d0) (<= tt 1d0))
+          (setf d3 (abs (- (dist-pt-pt c m) r)))
+          (setf d3 -1d0)))
+    (nl-max d d3)))

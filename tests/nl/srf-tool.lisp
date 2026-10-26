@@ -424,3 +424,85 @@ domains (exactly) and drawing interior knots from a shared pool."
                              (let ((out nil))
                                (dotimes (i (1+ k) (nreverse out))
                                  (push (from-foreign (cffi:mem-aref sp :pointer i) :surface) out))))))))))))
+
+;;; ------------------------------------------------------------- L11-g0
+
+(defun %sj-unrationalize (s)
+  "A non-rational copy of surface S: its Euclidean points, weights +no-w+."
+  (let* ((c (%copy-surface-deep s)) (pw (surface-cpoints c)))
+    (dotimes (i (array-dimension pw 0) c)
+      (dotimes (j (array-dimension pw 1))
+        (let ((w (aref pw i j 3)))
+          (unless (= w +no-w+)
+            (dotimes (k 3)
+              (unless (= (aref pw i j k) +no-z+)
+                (setf (aref pw i j k) (/ (aref pw i j k) w))))
+            (setf (aref pw i j 3) +no-w+)))))))
+
+(defun %sj-shift-knots (s vd dd)
+  "Surface S with its knots in v (VD) or u shifted by DD."
+  (let ((c (%copy-surface-deep s)))
+    (let ((kn (if vd (surface-knots-v c) (surface-knots-u c))))
+      (dotimes (i (length kn) c) (incf (aref kn i) dd)))))
+
+(defun %sj-surfaces (dir)
+  "Two surfaces for N_SrfJoin in direction DIR: the halves of a surface split
+in DIR (now and then elevated, perturbed, shifted or made non-rational), two
+unrelated surfaces sharing the knots across the boundary, or a mismatched
+pair."
+  (let* ((vd (/= dir +udir+))
+         (base (%srf-removable-surface))
+         (kn (if vd (surface-knots-v base) (surface-knots-u base)))
+         (lo (aref kn 0)) (hi (aref kn (1- (length kn)))))
+    (case (rnd 8)
+      ((0 1 2 3 4)
+       (let* ((inside (remove-if (lambda (x) (or (= x lo) (= x hi))) (coerce kn 'list)))
+              (x (if (and inside (zerop (rnd 2)))
+                     (nth (rnd (length inside)) inside)
+                     (+ lo (* (- hi lo) (rnd-range 0.1d0 0.9d0))))))
+         (multiple-value-bind (s1 s2) (batten::srf-split base x (if vd +vdir+ +udir+))
+           (when (zerop (rnd 4))          ; raise one side's degree
+             (let ((d (if vd +vdir+ +udir+)) (k (1+ (rnd 2))))
+               (if (zerop (rnd 2))
+                   (setf s1 (batten::srf-elevate-degree s1 k d))
+                   (setf s2 (batten::srf-elevate-degree s2 k d)))))
+           (when (zerop (rnd 4))          ; sur2's domain elsewhere
+             (setf s2 (%sj-shift-knots s2 vd (rnd-range -5d0 5d0))))
+           (when (zerop (rnd 5))          ; one side non-rational
+             (if (zerop (rnd 2)) (setf s1 (%sj-unrationalize s1)) (setf s2 (%sj-unrationalize s2))))
+           (when (zerop (rnd 4))          ; a gap across the boundary
+             (setf s2 (%copy-surface-deep s2))
+             (let ((pw (surface-cpoints s2)) (eps (expt 10d0 (- (rnd 8)))))
+               (dotimes (i (array-dimension pw 0))
+                 (dotimes (j (array-dimension pw 1))
+                   (incf (aref pw i j 0) (* eps (- (rnd 2d0) 1d0)))))))
+           (list s1 s2))))
+      ((5 6)
+       ;; an unrelated second surface with the same knots across the boundary
+       (let* ((other (random-surface :max-degree 4 :max-extra 4 :two-d (zerop (rnd 5))))
+              (pu (if vd (surface-degree-u base) (surface-degree-u other)))
+              (qv (if vd (surface-degree-v other) (surface-degree-v base)))
+              (ku (if vd (copy-seq (surface-knots-u base)) (surface-knots-u other)))
+              (kv (if vd (surface-knots-v other) (copy-seq (surface-knots-v base))))
+              (n+1 (- (length ku) pu 1)) (m+1 (- (length kv) qv 1))
+              (rat (zerop (rnd 2)))
+              (net (make-cpoint-net n+1 m+1)))
+         (dotimes (i n+1)
+           (dotimes (j m+1)
+             (let ((cp (random-cpoint :rational rat)))
+               (dotimes (k 4) (setf (aref net i j k) (aref cp k))))))
+         (list base (batten::%make-surface pu qv ku kv net))))
+      (t (list base (random-surface :max-degree 4 :max-extra 4))))))
+
+(define-oracle-test srf-join (:file "srf-tool" :trials 3000)
+  (let* ((dir (case (rnd 30) (0 3) (t (if (zerop (rnd 2)) +udir+ +vdir+))))
+         (pair (%sj-surfaces dir))
+         (tol (case (rnd 8) (0 0d0) (1 1d-9) (2 1d-6) (3 1d-3) (4 1d-1) (5 1d0) (6 30d0) (t 1d6))))
+    (destructuring-bind (s1 s2) pair
+      (agree (list :sur1 s1 :sur2 s2 :dir dir :tol tol)
+             (list (batten::srf-join s1 s2 dir tol))
+             (with-foreign ((a s1 :surface) (b s2 :surface))
+               (with-stacks (sg)
+                 (with-foreign-out ((j :surface))
+                   (let ((failed (c-flag-error-p (c-srf-join a b dir tol j sg))))
+                     (values failed (unless failed (list (from-foreign j :surface))))))))))))

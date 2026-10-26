@@ -998,3 +998,58 @@ or nearly so; three points a quarter of the time, now and then one or two."
                (with-scalars ((d :double))
                  (let ((err (c-flag-error-p (c-dist-pt-arc fp fc r alf bet fps fpe d))))
                    (values err (unless err (list (cffi:mem-ref d :double)))))))))))
+
+;;; ------------------------------------------------------------- L11-g0
+
+(defun %geom11-arc-case ()
+  "An arc for N_DistMaxLineArc as (c r alf bet ps pe): center, radius (or
++infinite+ for a straight segment), start and end angles in degrees
+sweeping less than 180, and the end points, in the xy plane (z the
+center's, now and then)."
+  (let* ((c (random-point 50d0))
+         (line (zerop (rnd 6)))
+         (r (if line +infinite+ (expt 10d0 (rnd-range -1d0 2d0))))
+         (rr (if line 10d0 r))
+         (alf (%arc-angle))
+         (bet (mod (+ alf (* (if (zerop (rnd 2)) 1 -1) (rnd-range 1d0 179d0))) 360d0))
+         (cz (if (zerop (rnd 3)) (aref c 2) 0d0))
+         (ps (make-point (+ (aref c 0) (* rr (cos (* alf (/ pi 180d0)))))
+                         (+ (aref c 1) (* rr (sin (* alf (/ pi 180d0))))) cz))
+         (pe (make-point (+ (aref c 0) (* rr (cos (* bet (/ pi 180d0)))))
+                         (+ (aref c 1) (* rr (sin (* bet (/ pi 180d0))))) cz)))
+    (setf (aref c 2) cz)
+    (when (and line (zerop (rnd 4)))
+      (setf ps (random-point) pe (if (zerop (rnd 5)) (copy-seq ps) (random-point))))
+    (list c r alf bet ps pe rr)))
+
+(defun %geom11-segment-point (c rr alf bet ps pe cz)
+  "One end of the segment for N_DistMaxLineArc: an arc end point, a point
+near the circle inside or outside the wedge, the center's offset, or a
+random point."
+  (flet ((polar (a d) (make-point (+ (aref c 0) (* d (cos (* a (/ pi 180d0)))))
+                                  (+ (aref c 1) (* d (sin (* a (/ pi 180d0))))) cz)))
+    (case (rnd 10)
+      (0 (copy-seq ps))
+      (1 (copy-seq pe))
+      ((2 3 4) (let* ((sw (- bet alf))
+                      (sw (cond ((> sw 180d0) (- sw 360d0)) ((< sw -180d0) (+ sw 360d0)) (t sw))))
+                 (polar (+ alf (* sw (rnd 1d0))) (* rr (rnd-range 0.8d0 1.2d0)))))
+      ((5 6 7) (polar (rnd 360d0) (* rr (rnd-range 0.2d0 2d0))))
+      (t (random-point 100d0)))))
+
+(define-oracle-test dist-max-line-arc (:file "geom" :trials 6000)
+  (destructuring-bind (c r alf bet ps pe rr) (%geom11-arc-case)
+    (let* ((cz (aref c 2))
+           (p (%geom11-segment-point c rr alf bet ps pe cz))
+           (q (if (zerop (rnd 15)) (copy-seq p) (%geom11-segment-point c rr alf bet ps pe cz))))
+      ;; P or Q at C (in x and y) is outside the C's domain: N_DistPtArc then
+      ;; reads an uninitialized angle
+      (unless (or (and (= (aref p 0) (aref c 0)) (= (aref p 1) (aref c 1)))
+                  (and (= (aref q 0) (aref c 0)) (= (aref q 1) (aref c 1))))
+        (agree (list :c c :r r :alf alf :bet bet :ps ps :pe pe :p p :q q)
+               (let ((p1 (copy-seq p)) (q1 (copy-seq q)))
+                 (list (batten::dist-max-line-arc c r alf bet ps pe p1 q1) p1 q1))
+               (with-foreign ((fc c :point) (fps ps :point) (fpe pe :point) (fp p :point) (fq q :point))
+                 (with-scalars ((d :double))
+                   (let ((err (c-flag-error-p (c-dist-max-line-arc fc r alf bet fps fpe fp fq d))))
+                     (values err (unless err (list (cffi:mem-ref d :double) p q)))))))))))
