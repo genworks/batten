@@ -77,3 +77,27 @@ digest-ccl:
   variables:
     LISP: /opt/gendl/gdl/program/gdl-ccl
     LISP_ARGS: --batch
+
+# The same digest on Linux/arm64 (the runner tagged arm64), in the bare
+# implementation images, so Batten is compiled from source by each arm64
+# compiler.  A CCL before f814a379 (2026-09-30) cannot compile
+# TESS-TRIMMED-SRF on arm64: its unboxed frame is over 512 bytes.
+digest-ccl-arm64:
+  extends: .digest
+  tags: [arm64]
+  image:
+    name: clfoundation/ccl:1.13.1-rc-trixie-slim
+    entrypoint: [""]
+  variables:
+    LISP: ccl
+    LISP_ARGS: --batch
+
+digest-sbcl-arm64:
+  extends: .digest
+  tags: [arm64]
+  image:
+    name: clfoundation/sbcl:2.6.9-trixie-slim
+    entrypoint: [""]
+  variables:
+    LISP: sbcl
+    LISP_ARGS: --non-interactive
