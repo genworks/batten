@@ -1440,3 +1440,74 @@ NLib: N_DistMaxLineArc."
           (setf d3 (abs (- (dist-pt-pt c m) r)))
           (setf d3 -1d0)))
     (nl-max d d3)))
+
+;;; ------------------------------------------------------------- L14-g0
+
+(defun vector-diff-c-pts (pw qw v)
+  "Write into V the vector from the Euclidean point of control point QW to
+that of PW (PW - QW).  Returns V.
+NLib: N_VectorDiffCPts."
+  (declare (type cpoint pw qw) (type point v))
+  (let ((p (make-point)) (q (make-point)))
+    (declare (type point p q) (dynamic-extent p q))
+    (c-pt-to-pt-euclid pw p)
+    (c-pt-to-pt-euclid qw q)
+    (vector-diff p q v)))
+
+(defun line-segs-2d-are-intersecting (x1 y1 x2 y2 x3 y3 x4 y4 tol)
+  "True when the 2D segments (X1,Y1)-(X2,Y2) and (X3,Y3)-(X4,Y4) intersect, to
+parameter tolerance TOL: a bounding box check, then the signs of the two
+segments' parameters scaled by the denominator.  Segments within *ltol* of
+parallel (collinear ones included) do not intersect.
+NLib: N_LineSegs2dAreIntersecting."
+  (declare (type double-float x1 y1 x2 y2 x3 y3 x4 y4 tol))
+  ;; bounding box check
+  (when (< (+ (nl-max x3 x4) tol) (- (nl-min x1 x2) tol))
+    (return-from line-segs-2d-are-intersecting nil))
+  (when (< (+ (nl-max x1 x2) tol) (- (nl-min x3 x4) tol))
+    (return-from line-segs-2d-are-intersecting nil))
+  (when (< (+ (nl-max y3 y4) tol) (- (nl-min y1 y2) tol))
+    (return-from line-segs-2d-are-intersecting nil))
+  (when (< (+ (nl-max y1 y2) tol) (- (nl-min y3 y4) tol))
+    (return-from line-segs-2d-are-intersecting nil))
+  ;; intersection
+  (let* ((ax (- x2 x1))
+         (ay (- y2 y1))
+         (bx (- x3 x4))
+         (by (- y3 y4))
+         (cx (- x1 x3))
+         (cy (- y1 y3))
+         (den (- (* ay bx) (* ax by))))
+    (declare (type double-float ax ay bx by cx cy den))
+    (when (< (abs den) (the double-float *ltol*))
+      (return-from line-segs-2d-are-intersecting nil))
+    (let ((numa (- (* by cx) (* bx cy)))
+          (denp (+ den tol))
+          (denm (- den tol)))
+      (declare (type double-float numa denp denm))
+      (if (> den 0d0)
+          (when (or (< numa (- tol)) (> numa denp))
+            (return-from line-segs-2d-are-intersecting nil))
+          (when (or (> numa tol) (< numa denm))
+            (return-from line-segs-2d-are-intersecting nil)))
+      (let ((numb (- (* ax cy) (* ay cx))))
+        (declare (type double-float numb))
+        (if (> den 0d0)
+            (when (or (< numb (- tol)) (> numb denp))
+              (return-from line-segs-2d-are-intersecting nil))
+            (when (or (> numb tol) (< numb denm))
+              (return-from line-segs-2d-are-intersecting nil)))
+        t))))
+
+(defun b-box-2d-calc-overlap (xl xr yb yt ul ur vb vt tol)
+  "The area of overlap of the 2D boxes [XL,XR]x[YB,YT] and [UL,UR]x[VB,VT]:
+-1 when they are apart by more than TOL in x or y, 0 when they overlap by
+less than TOL in x or y, else the area of the overlap.
+NLib: N_BBox2dCalcOverlap."
+  (declare (type double-float xl xr yb yt ul ur vb vt tol))
+  (let ((w (- (nl-min xr ur) (nl-max xl ul)))
+        (h (- (nl-min yt vt) (nl-max yb vb))))
+    (declare (type double-float w h))
+    (cond ((or (< w (- tol)) (< h (- tol))) -1d0)
+          ((or (< w tol) (< h tol)) 0d0)
+          (t (* w h)))))

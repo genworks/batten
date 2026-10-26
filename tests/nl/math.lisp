@@ -777,3 +777,149 @@ that N_RealMatrixTranspose never writes: storage the C leaves uninitialized."
                           (sp (make-real-vector (1+ n)) :real-vector))
              (let ((err (c-flag-error-p (c-real-matrix-lst-sq-solve rp bp sp))))
                (values err (unless err (list (from-foreign sp :real-vector (1+ n))))))))))
+
+;;; ------------------------------------------------------------- L14-g0
+
+(defun %math14-search-safe-p (a n tt)
+  "True when N_SearchInsertReal's interpolation search for TT in A[0..N]
+stays inside the C's domain: every probe made with l < r (l = r divides by
+zero and converts a NaN to an index) and landing in 0..N, and the search
+ending within a bounded number of probes (it can cycle).  The same
+arithmetic as the C."
+  (batten::with-c-float-environment
+    (let ((l 0) (r n))
+      (dotimes (step (+ 20 (* 4 n)) nil)
+        (when (< r l) (return t))
+        (when (>= l r) (return nil))
+        (let* ((f (/ (- tt (aref a l)) (- (aref a r) (aref a l))))
+               (x (+ (float l 1d0) (* f (- (float r 1d0) (float l 1d0))))))
+          (unless (and (= x x) (< -1d0 x (+ n 1d0))) (return nil))
+          (let ((m (truncate x)))
+            (when (< (abs (- (aref a m) tt)) batten::*ptol*) (return t))
+            (if (< tt (aref a m)) (setf r (- m 1)) (setf l (+ m 1)))))))))
+
+(defun %math14-search-case ()
+  "An ascending array A[0..N] of distinct reals and a value to look for:
+an element, one within or just beyond *ptol* of one, one between elements,
+or one outside; evenly spaced arrays now and then (where the first probe
+hits).  NIL when the C's search would leave its domain."
+  (let* ((n (+ 1 (rnd 12)))
+         (a (make-real-vector (1+ n)))
+         (x0 (rnd-range -50d0 50d0))
+         (even (zerop (rnd 3)))
+         (h (rnd-range 0.1d0 5d0)))
+    (dotimes (i (1+ n))
+      (setf (aref a i) (if (zerop i) x0
+                           (+ (aref a (1- i)) (if even h (rnd-range 0.01d0 5d0))))))
+    (let* ((j (rnd (1+ n)))
+           (tt (case (rnd 8)
+                 ((0 1 2) (aref a j))
+                 (3 (+ (aref a j) (* (if (zerop (rnd 2)) 0.5d0 -0.5d0) batten::*ptol*)))
+                 (4 (+ (aref a j) (* 2d0 batten::*ptol*)))
+                 (5 (rnd-range (aref a 0) (aref a n)))
+                 (6 (- (aref a 0) (rnd 0.01d0)))
+                 (t (+ (aref a n) (rnd 0.01d0))))))
+      (when (%math14-search-safe-p a n tt)
+        (list a n tt)))))
+
+(define-oracle-test search-insert-real (:file "math" :trials 5000)
+  (let ((input nil))
+    (do () (input) (setf input (%math14-search-case)))
+    (destructuring-bind (a n tt) input
+      (agree (list :a a :n n :t tt)
+             (list (batten::search-insert-real a n tt))
+             (with-foreign ((ap a :real-vector))
+               (with-scalars ((k :long))
+                 (c-search-insert-real ap n tt k)
+                 (values nil (list (cffi:mem-ref k :long)))))))))
+
+(defun %math14-read-hash (h n)
+  "NLib's real hash table H with slots 0..N as update-real-hash keeps it: a
+simple-vector of NIL (a NULL slot) or the slot's elements through the
+closing NL_BIGD."
+  (let ((out (make-array (1+ n) :initial-element nil)))
+    (dotimes (i (1+ n) out)
+      (let ((p (cffi:mem-aref h :pointer i)))
+        (unless (cffi:null-pointer-p p)
+          (let ((k 0))
+            (do () ((= (cffi:mem-aref p :double k) batten::+bigd+)) (incf k))
+            (setf (svref out i) (from-foreign p :real-vector (1+ k)))))))))
+
+(defun %math14-hash-values (us ue count)
+  "COUNT values to hash into [US, UE]: inside, at the ends, repeats of
+earlier ones (exactly, within *ptol*, or just beyond it), and now and then
+outside [US, UE] (:inp-err)."
+  (let ((vals nil))
+    (dotimes (i count (nreverse vals))
+      (push (case (rnd 12)
+              (0 us)
+              (1 ue)
+              ((2 3) (if vals (nth (rnd (length vals)) vals) us))
+              (4 (if vals (+ (nth (rnd (length vals)) vals) (* 0.5d0 batten::*ptol*)) ue))
+              (5 (if vals (+ (nth (rnd (length vals)) vals) (* 3d0 batten::*ptol*)) ue))
+              (6 (if (zerop (rnd 2)) (- us (rnd 1d0) 1d-9) (+ ue (rnd 1d0) 1d-9)))
+              (t (rnd-range us ue)))
+            vals))))
+
+(defun %math14-hash-case ()
+  "(n us ue values) for a run of N_UpdateRealHash."
+  (let* ((n (rnd 9))
+         (us (rnd-range -20d0 20d0))
+         (ue (+ us (if (zerop (rnd 5)) (rnd-range 1d-6 1d-3) (rnd-range 0.1d0 30d0)))))
+    (list n us ue (%math14-hash-values us ue (rnd 30)))))
+
+(defun %math14-lisp-hash (n us ue vals)
+  "Hash VALS into a fresh table with Batten: (values table m steps), STEPS a
+list of (error-p m) for each update."
+  (let ((h (batten::init-real-hash n)) (m 0) (steps nil))
+    (dolist (u vals)
+      (handler-case (progn (setf m (batten::update-real-hash h n us u ue m))
+                           (push (list nil m) steps))
+        (nurbs-error () (push (list t m) steps))))
+    (values h m (nreverse steps))))
+
+(defmacro %math14-with-c-hash ((h m steps) (n us ue vals) &body body)
+  "Hash VALS into a fresh table with NLib, binding H (the NL_REAL ** table),
+M (the final count) and STEPS as %math14-lisp-hash does, for BODY."
+  (let ((sg (gensym)) (hc (gensym)) (mc (gensym)) (u (gensym)))
+    `(with-stacks (,sg)
+       (with-scalars ((,hc :pointer) (,mc :long))
+         (when (c-flag-error-p (c-init-real-hash ,hc ,n ,sg)) (error "N_InitRealHash failed"))
+         (let ((,h (cffi:mem-ref ,hc :pointer)) (,steps nil))
+           (dolist (,u ,vals)
+             (let ((e (c-flag-error-p (c-update-real-hash ,h ,n ,us ,u ,ue ,mc ,sg))))
+               (push (list e (cffi:mem-ref ,mc :long)) ,steps)))
+           (setf ,steps (nreverse ,steps))
+           (let ((,m (cffi:mem-ref ,mc :long)))
+             (declare (ignorable ,m))
+             ,@body))))))
+
+(define-oracle-test init-real-hash (:file "math" :trials 500)
+  (let ((n (rnd 40)))
+    (agree (list :n n)
+           (list (batten::init-real-hash n))
+           (with-stacks (sg)
+             (with-scalars ((hc :pointer))
+               (let ((e (c-flag-error-p (c-init-real-hash hc n sg))))
+                 (values e (unless e (list (%math14-read-hash (cffi:mem-ref hc :pointer) n))))))))))
+
+(define-oracle-test update-real-hash (:file "math" :trials 3000)
+  (destructuring-bind (n us ue vals) (%math14-hash-case)
+    (agree (list :n n :us us :ue ue :vals vals)
+           (multiple-value-bind (h m steps) (%math14-lisp-hash n us ue vals)
+             (list h m steps))
+           (%math14-with-c-hash (h m steps) (n us ue vals)
+             (values nil (list (%math14-read-hash h n) m steps))))))
+
+(define-oracle-test retrieve-real-hash (:file "math" :trials 3000)
+  ;; U starts with the same random contents on both sides, longer than the
+  ;; elements, so entries left alone are compared too
+  (destructuring-bind (n us ue vals) (%math14-hash-case)
+    (let ((u0 (random-real-vector (+ 2 (length vals)))))
+      (agree (list :n n :us us :ue ue :vals vals)
+             (let ((h (%math14-lisp-hash n us ue vals)) (u (copy-seq u0)))
+               (list (batten::retrieve-real-hash h n u)))
+             (%math14-with-c-hash (h m steps) (n us ue vals)
+               (with-foreign ((u u0 :real-vector))
+                 (c-retrieve-real-hash h n u)
+                 (values nil (list (from-foreign u :real-vector (length u0))))))))))

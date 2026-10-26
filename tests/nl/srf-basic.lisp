@@ -366,3 +366,87 @@ or v, or with coincident corners (a degenerate corner plane)."
                (let ((rc (c-srf-is-flat-cheap sp eps flt dir)))
                  (values (c-flag-error-p rc)
                          (list (cffi:mem-ref flt :short) (cffi:mem-ref dir :short)))))))))
+
+;;; ------------------------------------------------------ level 14 (L14-g0)
+
+(define-oracle-test clamp-srf-at-params (:file "srf-basic" :trials 3000)
+  (let* ((s (%some-srf))
+         (ku (surface-knots-u s)) (kv (surface-knots-v s))
+         (pick (lambda (k)
+                 (let ((lo (aref k 0)) (hi (aref k (1- (length k)))))
+                   (case (rnd 6)
+                     (0 (- lo (rnd 5d0)))
+                     (1 (+ hi (rnd 5d0)))
+                     (t (random-parameter k))))))
+         (u (funcall pick ku)) (v (funcall pick kv)))
+    (agree (list :surface s :u u :v v)
+           (multiple-value-list (batten::clamp-srf-at-params s u v))
+           (with-foreign ((sp s :surface))
+             (with-scalars ((uc :double) (vc :double))
+               (setf (cffi:mem-ref uc :double) u (cffi:mem-ref vc :double) v)
+               (c-clamp-srf-at-params sp uc vc)
+               (values nil (list (cffi:mem-ref uc :double) (cffi:mem-ref vc :double))))))))
+
+(defun %sb14-set-euclid (net i j pt)
+  "Make NET[i][j] the Euclidean point PT (a list of 3) under its own weight."
+  (let* ((w0 (aref net i j 3)) (w (if (= w0 batten::+no-w+) 1d0 w0)))
+    (dotimes (c 3)
+      (unless (and (= c 2) (= (aref net i j 2) batten::+no-z+))
+        (setf (aref net i j c) (* w (nth c pt)))))))
+
+(defun %sb14-nudge (scale)
+  "A random offset of about SCALE (none a third of the time), as a list of 3."
+  (if (zerop (rnd 3))
+      (list 0d0 0d0 0d0)
+      (list (rnd-range (- scale) scale) (rnd-range (- scale) scale) (rnd-range (- scale) scale))))
+
+(defun %sb14-point-near (base scale)
+  (mapcar #'+ base (%sb14-nudge scale)))
+
+(defun %sb14-nudge-scale ()
+  "Offsets around NL_MTOL, or none."
+  (case (rnd 5) (0 0d0) (1 1d-8) (2 5d-8) (3 2d-7) (t 1d-6)))
+
+(define-oracle-test srf-is-degen (:file "srf-basic" :trials 3000)
+  (let* ((s (random-surface :two-d (zerop (rnd 5)) :max-extra 4))
+         (net (surface-cpoints s))
+         (rows (array-dimension net 0)) (cols (array-dimension net 1)))
+    ;; most of the time collapse the net to (about) one point
+    (when (plusp (rnd 4))
+      (let ((base (list (rnd-range -50d0 50d0) (rnd-range -50d0 50d0) (rnd-range -50d0 50d0)))
+            (scale (%sb14-nudge-scale)))
+        (dotimes (i rows)
+          (dotimes (j cols)
+            (%sb14-set-euclid net i j (%sb14-point-near base scale))))
+        (when (zerop (rnd 6))                 ; one stray point
+          (%sb14-set-euclid net (rnd rows) (rnd cols) (%sb14-point-near base 1d-3)))))
+    (agree (list :surface s)
+           (list (if (batten::srf-is-degen s) 1 0))
+           (with-foreign ((sp s :surface))
+             (values nil (list (c-srf-is-degen sp)))))))
+
+(define-oracle-test srf-is-singular (:file "srf-basic" :trials 4000)
+  (let* ((s (random-surface :two-d (zerop (rnd 5)) :max-extra 5))
+         (net (surface-cpoints s))
+         (n (surface-n s)) (m (surface-m s))
+         (side (case (rnd 12) (0 0) (1 5) (t (1+ (rnd 4)))))
+         (pole-side (if (zerop (rnd 4)) (1+ (rnd 4)) side)))
+    ;; most of the time make a pole, on SIDE or another boundary
+    (when (and (plusp (rnd 5)) (<= 1 pole-side 4))
+      (let ((base (list (rnd-range -50d0 50d0) (rnd-range -50d0 50d0) (rnd-range -50d0 50d0)))
+            (scale (%sb14-nudge-scale)))
+        (flet ((set-entry (k)
+                 (multiple-value-bind (i j)
+                     (ecase pole-side
+                       (1 (values 0 k)) (2 (values n k)) (3 (values k 0)) (4 (values k m)))
+                   (%sb14-set-euclid net i j (%sb14-point-near base scale)))))
+          (dotimes (k (1+ (if (<= pole-side 2) m n))) (set-entry k)))
+        (when (zerop (rnd 6))                 ; one stray point on that boundary
+          (let ((k (rnd (1+ (if (<= pole-side 2) m n)))))
+            (multiple-value-bind (i j)
+                (ecase pole-side (1 (values 0 k)) (2 (values n k)) (3 (values k 0)) (4 (values k m)))
+              (%sb14-set-euclid net i j (%sb14-point-near base 1d-3)))))))
+    (agree (list :surface s :side side)
+           (list (if (batten::srf-is-singular s side) 1 0))
+           (with-foreign ((sp s :surface))
+             (values nil (list (c-srf-is-singular sp side)))))))

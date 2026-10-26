@@ -11,6 +11,7 @@
            #:random-knots #:random-curve #:random-surface #:random-cfun #:random-sfun
            #:random-parameter #:random-point #:random-cpoint #:random-points
            #:random-real-vector #:random-real-matrix
+           #:random-triangulation #:random-index-lists
            #:evaluation-digest))
 
 (in-package :batten-random)
@@ -149,3 +150,65 @@ exactly a knot or an end."
 (defun random-real-matrix (rows cols &optional (scale 100d0))
   (let ((a (make-real-matrix rows cols)))
     (dotimes (i rows a) (dotimes (j cols) (setf (aref a i j) (- (rnd (* 2 scale)) scale))))))
+
+;;; NLib's tessellator keeps a triangulation as NL_INDEX **DT and NL_INDEX
+;;; *hd: DT[i] lists the neighbors of point i counterclockwise -- closed by
+;;; repeating the first for a point inside, from one boundary neighbor to the
+;;; other for a point on the boundary -- so that consecutive neighbors make a
+;;; triangle with i; DT[i][0] = -1 marks a point not in the triangulation;
+;;; hd[i] is the highest index in DT[i].  Batten: a simple-vector of
+;;; index-vectors and an index-vector.
+
+(defun random-triangulation (&key (max-cells 5) (unused 8))
+  "A random triangulation database (values dt hd m) over points 0..M: the
+grid of points of an a by b cell rectangle (1 <= a, b <= MAX-CELLS), each
+cell cut by a random diagonal, its points labeled in a random order; about
+one point in UNUSED (an integer, or NIL for none) marked not in the
+triangulation (DT[i] = #(-1))."
+  (let* ((a (1+ (rnd max-cells))) (b (1+ (rnd max-cells)))
+         (count (* (1+ a) (1+ b)))
+         (label (let ((v (make-array count)))
+                  (dotimes (i count) (setf (svref v i) i))
+                  (do ((i (1- count) (1- i))) ((< i 1) v)   ; Fisher-Yates
+                    (rotatef (svref v i) (svref v (rnd (1+ i)))))))
+         (next (make-array count :initial-element nil))) ; per point: ((p . q) ...)
+    (flet ((pt (r c) (svref label (+ (* r (1+ b)) c)))
+           (tri (x y z)                     ; counterclockwise
+             (push (cons y z) (svref next x))
+             (push (cons z x) (svref next y))
+             (push (cons x y) (svref next z))))
+      (dotimes (r a)
+        (dotimes (c b)
+          (let ((v00 (pt r c)) (v01 (pt r (1+ c))) (v10 (pt (1+ r) c)) (v11 (pt (1+ r) (1+ c))))
+            (if (zerop (rnd 2))
+                (progn (tri v00 v01 v11) (tri v00 v11 v10))
+                (progn (tri v00 v01 v10) (tri v01 v11 v10)))))))
+    (let ((dt (make-array count)) (hd (make-array count :element-type 'fixnum)))
+      (dotimes (v count)
+        (let* ((pairs (svref next v))
+               (start (or (car (find-if (lambda (pq) (not (find (car pq) pairs :key #'cdr))) pairs))
+                          (car (first pairs))))
+               (chain (list start)))
+          (do ((p start (cdr (assoc p pairs))))
+              ((null (assoc p pairs)))
+            (push (cdr (assoc p pairs)) chain)
+            (when (= (cdr (assoc p pairs)) start) (return)))
+          (let ((row (if (and unused (zerop (rnd unused)))
+                         (list -1)
+                         (nreverse chain))))
+            (setf (svref dt v) (make-array (length row) :element-type 'fixnum :initial-contents row)
+                  (aref hd v) (1- (length row))))))
+      (values dt hd (1- count)))))
+
+(defun random-index-lists (m &key (max-length 6) (unused 6))
+  "M+1 random index lists in the shape of a triangulation database (values
+dt hd): list i of 1..MAX-LENGTH indexes in 0..M (now and then -1), or #(-1)
+about one time in UNUSED; HD[i] its highest index."
+  (let ((dt (make-array (1+ m))) (hd (make-array (1+ m) :element-type 'fixnum)))
+    (dotimes (i (1+ m) (values dt hd))
+      (let* ((len (if (zerop (rnd unused)) 1 (1+ (rnd max-length))))
+             (row (make-array len :element-type 'fixnum)))
+        (dotimes (r len)
+          (setf (aref row r) (if (zerop (rnd 15)) -1 (rnd (1+ m)))))
+        (when (= len 1) (setf (aref row 0) (if (zerop (rnd 2)) -1 (aref row 0))))
+        (setf (svref dt i) row (aref hd i) (1- len))))))

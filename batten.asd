@@ -64,7 +64,9 @@ are then not found by M-. on Allegro; the source is plain to read."
                                            (:file "srf-adv")
                                            (:file "srf-approx")
                                            ;; wave 6
-                                           (:file "srf-offset")))
+                                           (:file "srf-offset")
+                                           ;; level 14: the tessellator
+                                           (:file "tessellate")))
                              (:file "api"))))
   :in-order-to ((test-op (test-op "batten/tests"))))
 
@@ -107,7 +109,7 @@ are then not found by M-. on Allegro; the source is plain to read."
                                            (:file "srf-fit") (:file "crv-approx")
                                            (:file "crv-offset") (:file "spiral")
                                            (:file "srf-adv") (:file "srf-approx")
-                                           (:file "srf-offset"))))))
+                                           (:file "srf-offset") (:file "tessellate"))))))
   :perform (test-op (o c) (uiop:symbol-call :batten-tests :run-all)))
 
 ;;; Timings of the Lisp routines alone: any implementation.
