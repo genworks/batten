@@ -356,3 +356,112 @@ replaced by unrelated curves on the same domain."
                                (unless failed
                                  (list (from-foreign sur :surface)
                                        (mapcar (lambda (c) (from-foreign c :curve)) fc)))))))))))))
+
+;;; ------------------------------------------------------------- L8-g0
+
+(defun %srf-adv-skin-sections (k)
+  "K+1 cross-sectional curves for skinning, as (values curves closed-p): a
+random base curve moved along a random direction with its control points
+jittered, or (now and then) unrelated random curves; mixed degrees,
+rationality and dimension now and then; half the time the last curve a copy
+of the first (a closed set)."
+  (let* ((rat (case (rnd 3) (0 nil) (1 t) (t :random)))
+         (two-d (case (rnd 6) (0 t) (1 :random) (t nil)))
+         (closed (zerop (rnd 2)))
+         (curves (make-array (1+ k))))
+    (if (zerop (rnd 5))
+        (dotimes (i (1+ k))
+          (setf (svref curves i) (random-curve :max-degree 3 :max-extra 4 :rational rat :two-d two-d)))
+        (let* ((base (random-curve :max-degree 3 :max-extra 4
+                                   :rational (if (eq rat :random) (zerop (rnd 2)) rat)
+                                   :two-d (if (eq two-d :random) (zerop (rnd 2)) two-d)))
+               (dir (random-point 30d0))
+               (jit (case (rnd 3) (0 0d0) (1 1d0) (t 10d0))))
+          (dotimes (i (1+ k))
+            (let* ((c (batten::crv-copy base))
+                   (pw (curve-cpoints c)))
+              (dotimes (j (array-dimension pw 0))
+                (let ((w (if (= (aref pw j 3) +no-w+) 1d0 (aref pw j 3))))
+                  (dotimes (d 3)
+                    (unless (= (aref pw j d) +no-z+)
+                      (incf (aref pw j d)
+                            (* w (+ (* i (aref dir d)) (- (rnd (* 2 jit)) jit))))))))
+              (setf (svref curves i) c)))
+          ;; now and then a section of another degree
+          (when (zerop (rnd 4))
+            (setf (svref curves (rnd (1+ k)))
+                  (random-curve :max-degree 4 :max-extra 3
+                                :rational (/= (aref (curve-cpoints base) 0 3) +no-w+) :two-d (= (aref (curve-cpoints base) 0 2) +no-z+))))))
+    (when closed
+      (setf (svref curves k) (batten::crv-copy (svref curves 0))))
+    (values curves closed)))
+
+(defun %srf-adv-skin-inputs ()
+  "Random arguments for N_CreateSkinSrf / N_CreateSkinSrfParams, as (values
+curves k cmp cld deg dir closed-p): K from 1 to 5, the degree at most K
+(the C's interpolation needs it); CMP +no+ only for curves made compatible
+beforehand; DIR now and then neither direction."
+  (let ((k (1+ (rnd 5))))
+    (multiple-value-bind (curves closed) (%srf-adv-skin-sections k)
+      (let ((cmp (if (zerop (rnd 4)) +no+ +yes+))
+            (cld (if (zerop (rnd 4)) +no+ +yes+))
+            ;; a closed set needs degree 2 or more (N_FitCrvKnotsAndDerivs)
+            (deg (if (and closed (> k 1) (plusp (rnd 8)))
+                     (+ 2 (rnd (1- (min k 4))))
+                     (1+ (rnd (min k 4)))))
+            (dir (case (rnd 30) (0 7) (t (if (zerop (rnd 2)) +udir+ +vdir+)))))
+        (when (= cmp +no+)
+          (handler-case (batten::with-c-float-environment (batten::crvs-make-compatible curves k))
+            (nurbs-error () (setf cmp +yes+))))
+        (values curves k cmp cld deg dir (and closed (= cld +yes+)))))))
+
+(define-oracle-test create-skin-srf (:file "srf-adv" :trials 1500)
+  (multiple-value-bind (curves k cmp cld deg dir) (%srf-adv-skin-inputs)
+    (let ((knot-tol (case (rnd 6) (0 1d-3) (1 1d-6) (2 0.05d0) (t 0d0))))
+      (agree (list :cur curves :k k :cmp cmp :cld cld :deg deg :dir dir :knot-tol knot-tol)
+             (let ((cs (map 'simple-vector #'batten::crv-copy curves)))
+               (list (batten::create-skin-srf cs k cmp cld deg dir knot-tol) (coerce cs 'list)))
+             (with-foreign ((dummy (make-real-vector 1) :real-vector))
+               (declare (ignore dummy))
+               (with-stacks (sc)
+                 (with-stacks (ss)
+                   (let ((fc (%srf-adv-curves-to-foreign curves)))
+                     (with-foreign-out ((sur :surface))
+                       (let ((failed (c-flag-error-p
+                                      (c-create-skin-srf fc k cmp cld deg dir knot-tol sur sc ss))))
+                         (values failed
+                                 (unless failed
+                                   (list (from-foreign sur :surface)
+                                         (%srf-adv-curves-from-foreign fc (1+ k)))))))))))))))
+
+(define-oracle-test create-skin-srf-params (:file "srf-adv" :trials 1500)
+  (multiple-value-bind (curves k cmp cld deg dir closed) (%srf-adv-skin-inputs)
+    ;; parameters ascending over [0,1] or another domain; the knots averaged
+    ;; from them (end-derivative knots for a closed set), now and then random
+    ;; clamped knots or the wrong count
+    (multiple-value-bind (lo hi) (if (zerop (rnd 3)) (values 0d0 1d0) (batten-random::random-domain))
+      (let* ((tt (%srf-adv-ascending lo hi k))
+             (count (case (rnd 15) (0 (+ k deg 3)) (1 (+ k deg 1)) (t (if closed (+ k deg 4) (+ k deg 2)))))
+             (knt (batten::with-c-float-environment
+                    (cond ((zerop (rnd 6))
+                           (random-knots deg (- count deg 1) :lo lo :hi hi))
+                          ((= count (+ k deg 4))
+                           (batten::fit-calc-knot-vector-end-derivs tt k deg (make-real-vector count)))
+                          (t (let ((kv (make-real-vector count)))
+                               (if (= count (+ k deg 2))
+                                   (batten::fit-crv-calc-knot-vector tt k deg kv)
+                                   (random-knots deg (- count deg 1) :lo lo :hi hi))))))))
+        (agree (list :cur curves :k k :cmp cmp :cld cld :deg deg :dir dir :t tt :knt knt)
+               (let ((cs (map 'simple-vector #'batten::crv-copy curves)))
+                 (list (batten::create-skin-srf-params cs k cmp cld deg dir tt knt) (coerce cs 'list)))
+               (with-foreign ((ft tt :real-vector) (fk knt :knots))
+                 (with-stacks (sc)
+                   (with-stacks (ss)
+                     (let ((fc (%srf-adv-curves-to-foreign curves)))
+                       (with-foreign-out ((sur :surface))
+                         (let ((failed (c-flag-error-p
+                                        (c-create-skin-srf-params fc k cmp cld deg dir ft fk sur sc ss))))
+                           (values failed
+                                   (unless failed
+                                     (list (from-foreign sur :surface)
+                                           (%srf-adv-curves-from-foreign fc (1+ k))))))))))))))))
