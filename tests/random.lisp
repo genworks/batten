@@ -12,6 +12,7 @@
            #:random-parameter #:random-point #:random-cpoint #:random-points
            #:random-real-vector #:random-real-matrix
            #:random-triangulation #:random-index-lists
+           #:line-curve #:loop-curves #:ellipse-curves
            #:evaluation-digest))
 
 (in-package :batten-random)
@@ -212,3 +213,94 @@ about one time in UNUSED; HD[i] its highest index."
           (setf (aref row r) (if (zerop (rnd 15)) -1 (rnd (1+ m)))))
         (when (= len 1) (setf (aref row 0) (if (zerop (rnd 2)) -1 (aref row 0))))
         (setf (svref dt i) row (aref hd i) (1- len))))))
+
+;;; Trimming loops in a surface's parameter space, as NLib's N_TessTrimmedSrf
+;;; takes them: 2D curves (wz = +no-z+) joined end to end into closed loops,
+;;; a loop being a simple-vector of its curves.  Joints are exact: a curve's
+;;; end control point carries weight 1 and the very doubles its neighbor's
+;;; start does.
+
+(defun %curve-2d (p knots xs ys ws)
+  "A 2D curve of degree P on KNOTS whose control points are (XS[i], YS[i])
+with weights WS[i] (NIL: nonrational)."
+  (let* ((n+1 (length xs)) (cp (make-cpoint-array n+1)))
+    (dotimes (i n+1)
+      (let ((w (if ws (elt ws i) 1d0)))
+        (setf (aref cp i 0) (* w (elt xs i))
+              (aref cp i 1) (* w (elt ys i))
+              (aref cp i 2) +no-z+
+              (aref cp i 3) (if ws w +no-w+))))
+    (%make-curve p knots cp)))
+
+(defun %curve-knots (p n+1 interior)
+  "Clamped knots for N+1 control points of degree P: on [0, 1] with evenly
+spaced interior knots unless INTERIOR is :random (random-knots on a random
+domain, which repeats some up to multiplicity P)."
+  (if (eq interior :random)
+      (multiple-value-bind (lo hi) (random-domain) (random-knots p n+1 :lo lo :hi hi))
+      (let ((k (make-array (+ n+1 p 1) :element-type 'double-float)) (inner (- n+1 p 1)))
+        (dotimes (i (+ n+1 p 1) k)
+          (setf (aref k i) (cond ((<= i p) 0d0)
+                                 ((>= i n+1) 1d0)
+                                 (t (/ (float (- i p) 1d0) (float (1+ inner) 1d0)))))))))
+
+(defun line-curve (x0 y0 x1 y1 &key (degree 1) (rational nil) (interior :even))
+  "A 2D NURBS curve tracing the segment (X0,Y0)-(X1,Y1) from end to end:
+DEGREE+1 control points evenly spaced on it, the inner ones with random
+weights when RATIONAL; the end points are exactly the given ones.  INTERIOR
+:random puts the knots on a random domain."
+  (let ((xs nil) (ys nil) (ws nil))
+    (dotimes (i (1+ degree))
+      (let ((s (/ (float i 1d0) degree)))
+        (push (cond ((= i 0) x0) ((= i degree) x1) (t (+ x0 (* s (- x1 x0))))) xs)
+        (push (cond ((= i 0) y0) ((= i degree) y1) (t (+ y0 (* s (- y1 y0))))) ys)
+        (push (if (or (= i 0) (= i degree)) 1d0 (+ 0.3d0 (rnd 2.7d0))) ws)))
+    (%curve-2d degree (%curve-knots degree (1+ degree) interior)
+               (nreverse xs) (nreverse ys) (and rational (nreverse ws)))))
+
+(defun loop-curves (cx cy rx ry &key clockwise (pieces 1) (degree 3) (points 8) (rational nil)
+                                  (wobble 0.1d0) (start 0d0) (interior :even))
+  "A closed loop around (CX, CY) inside the ellipse of radii RX, RY: a
+simple-vector of PIECES curves of DEGREE joined end to end, counterclockwise
+unless CLOCKWISE, starting at angle START.  Their control points lie on rays
+from the center, evenly spaced in angle, POINTS of them (at least DEGREE+1)
+on each curve, at between 1-WOBBLE and 1 of the ellipse's radius, so the
+control polygon is star-shaped and the loop simple.  RATIONAL gives the inner
+control points random weights; INTERIOR :random random knots (repeated now
+and then up to the degree, which makes C0 joints inside a curve)."
+  (let* ((nc (max (1+ degree) points))
+         (dir (if clockwise -1d0 1d0))
+         (two-pi (* 2d0 pi))
+         (joints (make-array (1+ pieces))))
+    (flet ((at (theta f) (cons (+ cx (* f rx (cos theta))) (+ cy (* f ry (sin theta))))))
+      (dotimes (k pieces)
+        (setf (svref joints k)
+              (at (+ start (* dir two-pi (/ (float k 1d0) pieces))) (- 1d0 (rnd wobble)))))
+      (setf (svref joints pieces) (svref joints 0))
+      (let ((curves (make-array pieces)))
+        (dotimes (k pieces curves)
+          (let ((xs nil) (ys nil) (ws nil))
+            (dotimes (i nc)
+              (let ((pt (cond ((= i 0) (svref joints k))
+                              ((= i (1- nc)) (svref joints (1+ k)))
+                              (t (at (+ start (* dir two-pi (/ (+ k (/ (float i 1d0) (1- nc))) pieces)))
+                                     (- 1d0 (rnd wobble)))))))
+                (push (car pt) xs) (push (cdr pt) ys)
+                (push (if (or (= i 0) (= i (1- nc))) 1d0 (+ 0.3d0 (rnd 2.7d0))) ws)))
+            (setf (svref curves k)
+                  (%curve-2d degree (%curve-knots degree nc interior)
+                             (nreverse xs) (nreverse ys) (and rational (nreverse ws))))))))))
+
+(defun ellipse-curves (cx cy rx ry &key clockwise)
+  "The ellipse of center (CX, CY) and radii RX, RY as one rational quadratic
+curve of nine control points (four quarter arcs, double interior knots),
+counterclockwise from angle 0 unless CLOCKWISE: a simple-vector of it."
+  (let* ((s (/ (sqrt 2d0) 2d0))
+         (dx '(1 1 0 -1 -1 -1 0 1 1)) (dy '(0 1 1 1 0 -1 -1 -1 0))
+         (dy (if clockwise (mapcar #'- dy) dy))
+         (k (make-array 12 :element-type 'double-float
+                           :initial-contents '(0d0 0d0 0d0 0.25d0 0.25d0 0.5d0 0.5d0 0.75d0 0.75d0 1d0 1d0 1d0))))
+    (vector (%curve-2d 2 k
+                       (mapcar (lambda (d) (+ cx (* d rx))) dx)
+                       (mapcar (lambda (d) (+ cy (* d ry))) dy)
+                       (list 1d0 s 1d0 s 1d0 s 1d0 s 1d0)))))

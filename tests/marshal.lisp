@@ -25,6 +25,10 @@
 ;;;;   :cnet NL_CNET* (a cpoint-net)  :index-matrix NL_INTEGER**  :real-3d NL_REAL***
 ;;;;   :index-lists NL_INDEX** over rows of their own lengths (a simple-vector of
 ;;;;     index-vectors, e.g. a triangulation's DT; a NIL row is a NULL pointer)
+;;;   :curve-tree NL_CURVE**, NL_CURVE***, NL_CURVE**** ... (to-foreign only): a
+;;;     simple-vector whose elements are curves (NL_CURVE* entries) or, one
+;;;     level up, simple-vectors of them, nested to any depth, e.g. the trimming
+;;;     loops cuo[i][j] and cui[i][j][k] of N_TessTrimmedSrf; NIL is NULL
 ;;;; Dimensions after the type give sizes where C does not record them:
 ;;;;   (from-foreign p :point-array n) (from-foreign p :real-matrix rows cols)
 ;;;;   (from-foreign p :basis-derivatives udr+1 vdr+1 p+1 q+1)
@@ -117,6 +121,13 @@ released by the enclosing WITH-FOREIGN."
                             (if (svref object i)
                                 (to-foreign (svref object i) :index-vector)
                                 (cffi:null-pointer))))))
+    (:curve-tree (let ((rp (falloc :pointer (length object))))
+                   (dotimes (i (length object) rp)
+                     (let ((e (svref object i)))
+                       (setf (cffi:mem-aref rp :pointer i)
+                             (cond ((null e) (cffi:null-pointer))
+                                   ((simple-vector-p e) (to-foreign e :curve-tree))
+                                   (t (to-foreign e :curve))))))))
     (:real-3d (real-3d-to-foreign object))
     ((:real-vector :point :cpoint :point-array :cpoint-array) (fill-doubles object))
     (:index-vector (let ((p (falloc :long (length object))))
