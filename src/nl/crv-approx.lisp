@@ -210,3 +210,195 @@ NLib: N_CrvIsPolygonWithinTol."
         (when (or (< dmax 0d0) (> dmax eps))
           (return-from crv-is-polygon-within-tol +no+))))
     +yes+))
+
+;;; ------------------------------------------------------------- L13-g0
+
+(defun %crv-approx-grow-reals (r new-size)
+  "A copy of real-vector R, NEW-SIZE long (N_Realloc1dRealArray)."
+  (declare (type real-vector r) (type fixnum new-size))
+  (let ((s (make-real-vector new-size)))
+    (replace s r)
+    s))
+
+(defun %crv-approx-biarcs (curp pp u k eps)
+  "The biarc fitting of N_ApproxContinuousCrvWithArcs for a curve CURP of
+degree above 1, whose polyline is PP[0..K] at parameters U[0..K]: returns
+(values curq n), CURQ a working curve of degree 2 whose control points
+0..N hold the biarcs (its arrays may be longer; the knots are unset)."
+  (declare (type curve curp) (type point-array pp) (type real-vector u)
+           (type fixnum k) (type double-float eps))
+  (let* ((tt (make-point-array (1+ k)))
+         (cl (make-point-array 2))
+         (cr (make-point-array 2))
+         (q (make-point-array 2))
+         (bw (make-cpoint-array 18))
+         (ps (make-point)) (ts (make-point)) (pe (make-point)) (te (make-point))
+         (std 20)
+         (ul (make-real-vector (1+ std)))
+         (ur (make-real-vector (1+ std)))
+         ;; initial size: two biarcs per polyline leg
+         (n (* 8 k))
+         (curq (%make-curve 2 (make-real-vector (+ n 4)) (make-cpoint-array (1+ n))))
+         (closed nil) (frt nil) (sbd nil)
+         (l 0) (le 0) (ks 0) (ke 0) (kl 0) (kr 0) (kd k) (top 0)
+         (um 0d0) (u1 0d0) (u2 0d0))
+    (declare (type point-array tt cl cr q) (type cpoint-array bw) (type point ps ts pe te)
+             (type fixnum std n l le ks ke kl kr kd top) (type real-vector ul ur)
+             (type double-float um u1 u2) (dynamic-extent ps ts pe te))
+    ;; the tangents at the polyline points
+    (dotimes (i (1+ k))
+      (crv-derivs curp (aref u i) +left+ 1 cl)
+      (%copy-pt-row cl 1 tt i))
+    ;; open or closed?
+    (setf closed (< (dist-pt-pt (%row-pt pp 0 ps) (%row-pt pp k pe)) *mtol*))
+    (setf n 0)
+    (flet ((emit ()
+             ;; Bw[0..l] into Pw[n..n+l], expanding the arrays as the C does
+             (let ((cur-n (curve-n curq)))
+               (declare (type fixnum cur-n))
+               (when (> (+ n l) cur-n)
+                 ;; the C expands to 2*cur_n and would write past it if that
+                 ;; were still short
+                 (let ((new-n (max (* 2 cur-n) (+ n l))))
+                   (declare (type fixnum new-n))
+                   (crv-expand curq new-n (+ new-n 3)))))
+             (let ((pw (curve-cpoints curq)))
+               (declare (type cpoint-array pw))
+               (dotimes (j (1+ l))
+                 (%copy-c-pt-row bw j pw (+ n j))))))
+      (do () ((not (< ks k)))
+        (setf ke (if closed (truncate k 2) (nl-min (+ ks kd) k)))
+        (setf kl ks kr ke frt t sbd nil)
+        (do () ((not (/= kl ke)))
+          ;; a biarc from P[ks] to P[ke]
+          (setf l (fit-arc-to-end-pts-and-tangents (%row-pt pp ks ps) (%row-pt tt ks ts)
+                                                   (%row-pt pp ke pe) (%row-pt tt ke te) bw))
+          (if (= (let ((poly (make-point-array (1+ (- ke ks)))))
+                   (dotimes (j (1+ (- ke ks)))
+                     (%copy-pt-row pp (+ ks j) poly j))
+                   (crv-is-polygon-within-tol bw l poly (- ke ks) eps))
+                 +yes+)
+              ;; success: keep it, and try further unless bisecting
+              (progn
+                (emit)
+                (setf kl ke le l)
+                (when (and frt (< ke k) (not closed))
+                  (setf ke (nl-min (+ ke kd) k)
+                        kr ke)))
+              (if (= (- ke ks) 1)
+                  ;; a single leg fails: subdivide the curve over it
+                  (progn
+                    (setf um (* 0.5d0 (+ (aref u ks) (aref u ke)))
+                          sbd t)
+                    (setf (aref ul 0) um (aref ur 0) (aref u ke)
+                          (aref ul 1) (aref u ks) (aref ur 1) um
+                          top 1)
+                    (do () ((not (>= top 0)))
+                      (setf u1 (aref ul top) u2 (aref ur top))
+                      (decf top)
+                      (crv-derivs curp u1 +left+ 1 cl)
+                      (crv-derivs curp u2 +left+ 1 cr)
+                      (setf l (fit-arc-to-end-pts-and-tangents (%row-pt cl 0 ps) (%row-pt cl 1 ts)
+                                                               (%row-pt cr 0 pe) (%row-pt cr 1 te) bw))
+                      (%copy-pt-row cl 0 q 0)
+                      (%copy-pt-row cr 0 q 1)
+                      (if (= (crv-is-polygon-within-tol bw l q 1 eps) +yes+)
+                          (progn
+                            (emit)
+                            (incf n l))
+                          (progn
+                            (setf um (* 0.5d0 (+ u1 u2)))
+                            (when (> (+ top 2) std)
+                              (setf ul (%crv-approx-grow-reals ul (1+ (+ std std)))
+                                    ur (%crv-approx-grow-reals ur (1+ (+ std std))))
+                              (incf std std))
+                            (setf (aref ul (+ top 1)) um (aref ur (+ top 1)) u2
+                                  (aref ul (+ top 2)) u1 (aref ur (+ top 2)) um)
+                            (incf top 2))))
+                    (setf kl ke))
+                  ;; several legs fail: bisect
+                  (setf kr ke
+                        frt nil)))
+          (unless frt
+            (setf ke (truncate (+ kl kr) 2))))
+        (unless sbd
+          (incf n le))
+        (setf kd (nl-max 1 (- ke ks)))
+        (setf ks ke
+              closed nil)))
+    (values curq n)))
+
+(defun approx-continuous-crv-with-arcs (curp tol)
+  "A fresh piecewise circular (biarc) curve approximating curve CURP, which
+must be xy-planar and C1 (interior knot multiplicities below its degree), to
+within the absolute tolerance TOL: a degree-2 curve whose control point
+triples are rational Bezier arcs, with double interior knots at chord-length
+parameters of its arc ends.  CURP is first replaced by a polyline within
+TOL/2; a degree-1 CURP gives the quadratic through the polyline points and
+leg midpoints, otherwise biarcs are fitted from point to point (with the
+polyline tangents), over as many legs as stay within TOL/2 of the polyline,
+subdividing the curve itself where a single leg fails.  Signals what
+approx-crv-with-polyline, crv-derivs, fit-arc-to-end-pts-and-tangents
+(:geo-err for coincident end points), crv-is-polygon-within-tol and
+fit-calc-crv-param-values signal.
+NLib: N_ApproxContinuousCrvWithArcs."
+  (declare (type curve curp) (type double-float tol))
+  (let ((p (curve-degree curp))
+        (eps (* 0.5d0 tol))
+        (curq nil)
+        (n 0))
+    (declare (type fixnum p n) (type double-float eps))
+    ;; the polyline
+    (multiple-value-bind (pp u k) (approx-crv-with-polyline curp eps +absolute+ +both+)
+      (declare (type point-array pp) (type real-vector u) (type fixnum k))
+      (if (= p 1)
+          ;; degree 1: the polyline points and the leg midpoints
+          (let ((a (make-point)) (b (make-point)) (pm (make-point)) (cw (make-cpoint))
+                (j 0))
+            (declare (type point a b pm) (type cpoint cw) (type fixnum j)
+                     (dynamic-extent a b pm cw))
+            (setf n (* 2 k))
+            (setf curq (%make-curve 2 (make-real-vector (+ n 4)) (make-cpoint-array (1+ n))))
+            (let ((pw (curve-cpoints curq)))
+              (declare (type cpoint-array pw))
+              (%c-pt-row (weight (%row-pt pp 0 a) 1d0 cw) pw 0)
+              (dotimes (i k)
+                (%row-pt pp i a)
+                (%row-pt pp (1+ i) b)
+                (combine-2-pts 0.5d0 a 0.5d0 b pm)
+                (%c-pt-row (weight pm 1d0 cw) pw (incf j))
+                (%c-pt-row (weight b 1d0 cw) pw (incf j)))))
+          (setf (values curq n) (%crv-approx-biarcs curp pp u k eps))))
+    ;; the knot vector: chord-length parameters of the arc ends
+    (let* ((l (truncate n 2))
+           (tv (make-real-vector (1+ l)))
+           (r (make-point-array (1+ l)))
+           (pw (curve-cpoints curq))
+           ;; the C writes 2l+4 knots (6 for l = 0)
+           (uq (make-real-vector (max (+ n 4) (+ (* 2 l) 4))))
+           (cw (make-cpoint)) (pt (make-point))
+           (m -1))
+      (declare (type fixnum l m) (type real-vector tv uq) (type point-array r)
+               (type cpoint-array pw) (type cpoint cw) (type point pt)
+               (dynamic-extent cw pt))
+      (dotimes (i (1+ l))
+        (c-pt-to-pt-euclid (%row-c-pt pw (* 2 i) cw) pt)
+        (%pt-row pt r i))
+      (fit-calc-crv-param-values r l +epoint+ +chordlength+ tv)
+      (dotimes (i 3)
+        (setf (aref uq (incf m)) (aref tv 0)))
+      (do ((i 1 (1+ i))) ((not (< i l)))
+        (declare (type fixnum i))
+        (setf (aref uq (incf m)) (aref tv i))
+        (setf (aref uq (incf m)) (aref tv i)))
+      (dotimes (i 3)
+        (setf (aref uq (incf m)) (aref tv l)))
+      ;; the output arrays at their exact sizes (N_CrvSetSizeIndices and
+      ;; N_CrvCompress)
+      (let ((qw (make-cpoint-array (1+ n)))
+            (v (make-real-vector (+ n 4))))
+        (declare (type cpoint-array qw) (type real-vector v))
+        (dotimes (i (1+ n))
+          (%copy-c-pt-row pw i qw i))
+        (replace v uq)
+        (%make-curve 2 v qw)))))
