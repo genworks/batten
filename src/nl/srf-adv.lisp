@@ -1338,3 +1338,326 @@ NLib: N_CreateSkinSrfParams."
              (setf (aref vs j) (aref knt j)))
            (srf-weights-are-valid (%make-surface p q us vs qw) 'create-skin-srf-params))))
       (t (nurbs-error :cal-err 'create-skin-srf-params)))))
+
+;;; ------------------------------------------------------------- L9-g0
+
+(defun create-skin-spine (profiles k cmp spine params align z0 subdiv deriv degree dir)
+  "A fresh surface skinned through the cross-sectional curves PROFILES[0..K]
+(a simple-vector of curves, changed in place) placed along curve SPINE at
+the parameters PARAMS[0..K].  With CMP +yes+ the profiles are first made
+compatible (crvs-make-compatible).  With ALIGN +yes+ each profile is moved
+from the global frame onto the spine's local frame at its parameter: origin
+the spine point, x the unit tangent, z the B vector create-b-vectors carries
+from Z0 over the parameters with SUBDIV (at least 1) extra steps between
+neighbours, y = z x x.  DERIV +noder+ skins with create-skin-srf (degree
+DEGREE <= K); +endder+ (2 <= DEGREE <= K+2) interpolates each row with end
+derivatives along the spine's end tangents, scaled by the ratio of the
+row's and the spine's end chords (their sums when PROFILES[0] and
+PROFILES[K] coincide); +allder+ (DEGREE 2 or 3) with a derivative at every
+profile, the spine tangent scaled by the ratio of the neighbouring chords.
+A rational set gets homogeneous derivatives from a weight function
+interpolating the row's weights.  DIR +udir+ skins in u (the profiles are
+v-curves), +vdir+ in v.  Chord-length parameters of the profiles' control
+points.  Signals :inp-err for a degree out of range, :cal-err for another
+DERIV or DIR, :wei-err for weights outside [*wmin*, *wmax*] (the C builds
+the surface all the same), and what the compatibility, frame, evaluation
+and interpolation routines signal.
+NLib: N_CreateSkinSpine."
+  (declare (type simple-vector profiles) (type fixnum k cmp align subdiv deriv degree dir)
+           (type curve spine) (type real-vector params) (type point z0))
+  ;; check some parameters
+  (cond ((= deriv +noder+)
+         (when (> degree k)
+           (nurbs-error :inp-err 'create-skin-spine)))
+        ((= deriv +endder+)
+         (when (or (< degree 2) (> degree (+ k 2)))
+           (nurbs-error :inp-err 'create-skin-spine)))
+        ((= deriv +allder+)
+         (when (or (< degree 2) (> degree 3))
+           (nurbs-error :inp-err 'create-skin-spine)))
+        (t (nurbs-error :cal-err 'create-skin-spine)))
+  ;; make curves compatible
+  (when (= cmp +yes+)
+    (crvs-make-compatible profiles k))
+  ;; align the profiles
+  (when (= align +yes+)
+    (let* ((rma (set-real-matrix (make-rmatrix) 3 3 +mt-full+ 3))
+           (sub (if (<= subdiv 0) 1 subdiv))
+           (ll (* k (1+ sub)))
+           (ap (make-real-vector (1+ ll)))
+           (bv (make-point-array (1+ ll))))
+      (declare (type rmatrix rma) (type fixnum sub ll) (type real-vector ap) (type point-array bv))
+      (dotimes (ii k)
+        (let ((incr (/ (- (aref params (1+ ii)) (aref params ii)) (+ (float sub 1d0) 1d0)))
+              (base (* ii (1+ sub))))
+          (declare (type double-float incr) (type fixnum base))
+          (dotimes (jj (1+ sub))
+            (setf (aref ap (+ base jj)) (+ (aref params ii) (* (float jj 1d0) incr))))))
+      (setf (aref ap ll) (aref params k))
+      (create-b-vectors spine z0 ap ll bv)
+      (let ((origin (make-point)) (xa (make-point)) (ya (make-point)) (za (make-point))
+            (zero (make-point 0d0 0d0 0d0))
+            (ux (make-point 1d0 0d0 0d0)) (uy (make-point 0d0 1d0 0d0)) (uz (make-point 0d0 0d0 1d0)))
+        (declare (type point origin xa ya za zero ux uy uz))
+        (dotimes (ii (1+ k))
+          (crv-eval-tangent spine (aref params ii) +left+ origin xa)
+          (%row-pt bv (* ii (1+ sub)) za)
+          (vector-cross za xa ya)
+          (create-transform-matrix-from-axes zero ux uy uz origin xa ya za rma)
+          (crv-transform (svref profiles ii) rma)))))
+  ;; simple skinning when no derivative is specified
+  (when (= deriv +noder+)
+    (return-from create-skin-spine
+      (create-skin-srf profiles k +no+ +no+ degree dir 0d0)))
+  ;; closed or rational curve set?
+  (let* ((closed (crvs-are-coincident (svref profiles 0) (svref profiles k) *mtol*))
+         (rational (is-crv-rat (svref profiles 0)))
+         (udir (cond ((= dir +udir+) t)
+                     ((= dir +vdir+) nil)
+                     (t (nurbs-error :cal-err 'create-skin-spine))))
+         (allder (= deriv +allder+))
+         (c0 (svref profiles 0))
+         (nc (curve-n c0))                        ; highest cross index
+         (cdeg (curve-degree c0))
+         (cknots (curve-knots c0))
+         (ns (if (= deriv +endder+) (+ k 2) (1+ (* 2 k)))) ; highest skin index
+         (all (if udir (make-cpoint-net (1+ k) (1+ nc)) (make-cpoint-net (1+ nc) (1+ k))))
+         (ps (make-real-vector (1+ k)))           ; skinning-direction parameters
+         (pc (make-real-vector (1+ nc)))
+         (net (if udir (make-cpoint-net (1+ ns) (1+ nc)) (make-cpoint-net (1+ nc) (1+ ns))))
+         (sknots (make-real-vector (+ ns degree 2)))
+         (prof (make-cpoint-array (1+ k)))
+         (weights (make-real-vector (1+ k)))
+         (spd (make-point-array (1+ k)))          ; spine points, then tangents
+         (sp-scaled (make-point-array (1+ k)))
+         (rat-derivs (make-cpoint-array (1+ k)))
+         (sdists (make-real-vector (+ k 2)))
+         (pdists (make-real-vector (+ k 2)))
+         (wvd (make-real-vector 2))
+         (tt (make-point-array 2))
+         (sp0 (make-point 0d0 0d0 0d0)) (sp1 (make-point)) (spkm1 (make-point))
+         (spk (make-point 0d0 0d0 0d0))
+         (sc0 (make-point)) (sck (make-point))
+         (rd0 (make-cpoint)) (rdk (make-cpoint))
+         (a (make-cpoint)) (b (make-cpoint)) (pt (make-point)) (pt2 (make-point))
+         (sdist1 0d0) (sdistk 0d0))
+    (declare (type fixnum nc cdeg ns) (type real-vector cknots ps pc sknots weights sdists pdists wvd)
+             (type cpoint-net all net) (type cpoint-array prof rat-derivs)
+             (type point-array spd sp-scaled tt)
+             (type point sp0 sp1 spkm1 spk sc0 sck pt pt2) (type cpoint rd0 rdk a b)
+             (type double-float sdist1 sdistk))
+    ;; control points of all profiles
+    (dotimes (ii (1+ k))
+      (let ((pw (curve-cpoints (svref profiles ii))))
+        (declare (type cpoint-array pw))
+        (dotimes (jj (1+ nc))
+          (%row-c-pt pw jj a)
+          (if udir
+              (%c-pt-net a all ii jj)
+              (%c-pt-net a all jj ii)))))
+    ;; parameters
+    (if udir
+        (fit-calc-srf-param-values all k nc +hpoint+ +chordlength+ ps pc)
+        (fit-calc-srf-param-values all nc k +hpoint+ +chordlength+ pc ps))
+    ;; distances and derivatives along the spine
+    (if allder
+        (progn
+          (crv-eval spine (aref params 0) +left+ pt)
+          (%pt-row pt spd 0)
+          (do ((ii 1 (1+ ii))) ((> ii k))
+            (declare (type fixnum ii))
+            (crv-eval spine (aref params ii) +left+ pt)
+            (%pt-row pt spd ii)
+            (%row-pt spd (1- ii) pt2)
+            (setf (aref sdists ii) (dist-pt-pt pt pt2)))
+          (if (not closed)
+              (setf (aref sdists 0) 0d0
+                    (aref sdists (1+ k)) 0d0)
+              (setf (aref sdists 0) (aref sdists k)
+                    (aref sdists (1+ k)) (aref sdists 1)))
+          ;; the spine tangents at the profiles
+          (dotimes (ii (1+ k))
+            (crv-derivs spine (aref params ii) +left+ 1 tt)
+            (%row-pt tt 1 pt)
+            (%pt-row pt spd ii)))
+        (progn
+          (crv-eval spine (aref params 0) +left+ sp0)
+          (crv-eval spine (aref params 1) +left+ sp1)
+          (crv-eval spine (aref params (1- k)) +left+ spkm1)
+          (crv-eval spine (aref params k) +left+ spk)
+          (setf sdist1 (dist-pt-pt sp1 sp0)
+                sdistk (dist-pt-pt spk spkm1))
+          (crv-derivs spine (aref params 0) +left+ 1 tt)
+          (%row-pt tt 1 sp0)
+          (crv-derivs spine (aref params k) +left+ 1 tt)
+          (%row-pt tt 1 spk)))
+    ;; the skinning knot vector
+    (if allder
+        (fit-calc-knots-derivs ps k degree sknots)
+        (fit-calc-knot-vector-end-derivs ps k degree sknots))
+    ;; the control points, one cross row at a time
+    (dotimes (jj (1+ nc))
+      (dotimes (ii (1+ k))
+        (%row-c-pt (curve-cpoints (svref profiles ii)) jj a)
+        (%c-pt-row a prof ii)
+        (when rational
+          (setf (aref weights ii) (c-pt-get-w a))))
+      (let ((wfn (when rational
+                   (fit-func-interp-given-params weights k (nl-min k degree) ps)))
+            (cur nil))
+        (if allder
+            (progn
+              (do ((ii 1 (1+ ii))) ((> ii k))
+                (declare (type fixnum ii))
+                (%row-c-pt prof ii a)
+                (%row-c-pt prof (1- ii) b)
+                (setf (aref pdists ii) (dist-cpt-cpt a b)))
+              (if (not closed)
+                  (setf (aref pdists 0) 0d0
+                        (aref pdists (1+ k)) 0d0)
+                  (setf (aref pdists 0) (aref pdists k)
+                        (aref pdists (1+ k)) (aref pdists 1)))
+              (dotimes (ii (1+ k))
+                (let ((fac (/ (+ (aref pdists (1+ ii)) (aref pdists ii))
+                              (+ (aref sdists (1+ ii)) (aref sdists ii)))))
+                  (declare (type double-float fac))
+                  (%row-pt spd ii pt)
+                  (scale-pt fac pt pt2)
+                  (%pt-row pt2 sp-scaled ii)
+                  (if rational
+                      (progn
+                        (c-func-derivs wfn (aref ps ii) +left+ 1 wvd)
+                        (%row-c-pt prof ii a)
+                        (c-pt-rat-deriv a pt2 (aref wvd 1) b))
+                      (pt-to-c-pt pt2 b))
+                  (%c-pt-row b rat-derivs ii)))
+              (setf cur (fit-crv-first-deriv-and-knots prof rat-derivs k +hpoint+ ps sknots degree)))
+            (let ((pd1 0d0) (pdk 0d0))
+              (declare (type double-float pd1 pdk))
+              (%row-c-pt prof 1 a)
+              (%row-c-pt prof 0 b)
+              (setf pd1 (dist-cpt-cpt a b))
+              (%row-c-pt prof k a)
+              (%row-c-pt prof (1- k) b)
+              (setf pdk (dist-cpt-cpt a b))
+              (if (not closed)
+                  (progn
+                    (scale-pt (/ pd1 sdist1) sp0 sc0)
+                    (scale-pt (/ pdk sdistk) spk sck))
+                  (let ((fac (/ (+ pd1 pdk) (+ sdist1 sdistk))))
+                    (declare (type double-float fac))
+                    (scale-pt fac sp0 sc0)
+                    (scale-pt fac spk sck)))
+              (if rational
+                  (progn
+                    (c-func-derivs wfn (aref ps 0) +left+ 1 wvd)
+                    (%row-c-pt prof 0 a)
+                    (c-pt-rat-deriv a sc0 (aref wvd 1) rd0)
+                    (c-func-derivs wfn (aref ps k) +left+ 1 wvd)
+                    (%row-c-pt prof k a)
+                    (c-pt-rat-deriv a sck (aref wvd 1) rdk))
+                  (progn
+                    (pt-to-c-pt sc0 rd0)
+                    (pt-to-c-pt sck rdk)))
+              (setf cur (fit-crv-knots-and-derivs prof k +hpoint+ ps sknots degree rd0 rdk))))
+        (let ((bw (curve-cpoints cur)))
+          (declare (type cpoint-array bw))
+          (dotimes (ii (1+ ns))
+            (%row-c-pt bw ii a)
+            (if udir
+                (%c-pt-net a net ii jj)
+                (%c-pt-net a net jj ii))))))
+    (srf-weights-are-valid
+     (if udir
+         (%make-surface degree cdeg sknots (copy-seq cknots) net)
+         (%make-surface cdeg degree (copy-seq cknots) sknots net))
+     'create-skin-spine)))
+
+(defun create-gordon-srf (cur-u v-prms l-num-u cur-v u-prms l-num-v
+                          deg-loft-u deg-loft-v deg-tensor-u deg-tensor-v preserve)
+  "A fresh Gordon surface interpolating the non-rational u-curves
+CUR-U[0..L-NUM-U] (C_i(u), assumed at v = V-PRMS[i]) and v-curves
+CUR-V[0..L-NUM-V] (C_j(v) at u = U-PRMS[j]), each set compatible: the
+u-lofting of the v-curves (degree DEG-LOFT-U) plus the v-lofting of the
+u-curves (DEG-LOFT-V) minus the tensor-product interpolant (DEG-TENSOR-U,
+DEG-TENSOR-V) of the points Q[j][i], the averages of C_i(u[j]) and C_j(v[i]),
+the three made compatible.  PRESERVE +yes+ lofts and interpolates at the
+given parameters (create-skin-srf-params, fit-srf-to-pts-knots, knots
+averaged from them), +no+ lets the routines choose chord-length parameters
+(create-skin-srf, fit-srf-to-pts).  The lofting may change the first and last
+curve of each set in place (crvs-are-coincident).  Signals :inp-err for a set
+that is not compatible or is rational, :cal-err for another PRESERVE (after
+the evaluations), and what the evaluation, lofting, interpolation and
+compatibility routines signal.
+NLib: N_CreateGordonSrf."
+  (declare (type simple-vector cur-u cur-v) (type real-vector v-prms u-prms)
+           (type fixnum l-num-u l-num-v deg-loft-u deg-loft-v deg-tensor-u deg-tensor-v preserve))
+  ;; check curves
+  (unless (crvs-are-combatible cur-u l-num-u)
+    (nurbs-error :inp-err 'create-gordon-srf))
+  (unless (crvs-are-combatible cur-v l-num-v)
+    (nurbs-error :inp-err 'create-gordon-srf))
+  (when (is-crv-rat (svref cur-u 0))
+    (nurbs-error :inp-err 'create-gordon-srf))
+  (when (is-crv-rat (svref cur-v 0))
+    (nurbs-error :inp-err 'create-gordon-srf))
+  (let ((q (make-point-net (1+ l-num-v) (1+ l-num-u)))
+        (cu (make-point)) (cv (make-point)) (cq (make-point))
+        (sur-u nil) (sur-v nil) (sur-t nil))
+    (declare (type point-net q) (type point cu cv cq))
+    ;; intersection points
+    (dotimes (ii (1+ l-num-u))
+      (dotimes (jj (1+ l-num-v))
+        (crv-eval (svref cur-u ii) (aref u-prms jj) +left+ cu)
+        (crv-eval (svref cur-v jj) (aref v-prms ii) +left+ cv)
+        (combine-2-pts 0.5d0 cu 0.5d0 cv cq)
+        (%pt-net cq q jj ii)))
+    ;; the various surfaces
+    (cond
+      ((= preserve +yes+)
+       (let ((knu (make-real-vector (+ l-num-v deg-loft-u 2)))
+             (knv (make-real-vector (+ l-num-u deg-loft-v 2))))
+         (declare (type real-vector knu knv))
+         ;; u-lofting
+         (fit-crv-calc-knot-vector u-prms l-num-v deg-loft-u knu)
+         (setf sur-u (create-skin-srf-params cur-v l-num-v +no+ +no+ deg-loft-u +udir+ u-prms knu))
+         ;; v-lofting
+         (fit-crv-calc-knot-vector v-prms l-num-u deg-loft-v knv)
+         (setf sur-v (create-skin-srf-params cur-u l-num-u +no+ +no+ deg-loft-v +vdir+ v-prms knv)))
+       ;; tensor product
+       (let ((knu (make-real-vector (+ l-num-v deg-tensor-u 2)))
+             (knv (make-real-vector (+ l-num-u deg-tensor-v 2))))
+         (declare (type real-vector knu knv))
+         (fit-crv-calc-knot-vector u-prms l-num-v deg-tensor-u knu)
+         (fit-crv-calc-knot-vector v-prms l-num-u deg-tensor-v knv)
+         (setf sur-t (fit-srf-to-pts-knots q l-num-v l-num-u +epoint+ u-prms v-prms knu knv
+                                           deg-tensor-u deg-tensor-v))))
+      ((= preserve +no+)
+       (setf sur-u (create-skin-srf cur-v l-num-v +no+ +no+ deg-loft-u +udir+ 0d0))
+       (setf sur-v (create-skin-srf cur-u l-num-u +no+ +no+ deg-loft-v +vdir+ 0d0))
+       (setf sur-t (fit-srf-to-pts q l-num-v l-num-u deg-tensor-u deg-tensor-v +chordlength+)))
+      (t (nurbs-error :cal-err 'create-gordon-srf)))
+    ;; make the surfaces compatible
+    (let ((sur-a (vector sur-u sur-v sur-t)))
+      (declare (type simple-vector sur-a))
+      (make-srfs-compatible-uv sur-a 2)
+      ;; the output surface
+      (let* ((s0 (svref sur-a 0))
+             (uw (surface-cpoints s0))
+             (vw (surface-cpoints (svref sur-a 1)))
+             (tw (surface-cpoints (svref sur-a 2)))
+             (n (surface-n s0)) (m (surface-m s0))
+             (ua (surface-knots-u s0)) (va (surface-knots-v s0))
+             (pw (make-cpoint-net (1+ n) (1+ m)))
+             (ca (make-cpoint)) (cb (make-cpoint)) (cc (make-cpoint)) (cd (make-cpoint)))
+        (declare (type cpoint-net uw vw tw pw) (type fixnum n m) (type real-vector ua va)
+                 (type cpoint ca cb cc cd))
+        (dotimes (ii (1+ n))
+          (dotimes (jj (1+ m))
+            (%net-c-pt uw ii jj ca)
+            (%net-c-pt vw ii jj cb)
+            (%net-c-pt tw ii jj cc)
+            (translate-sum-2-c-pts ca 1.0d0 cb -1.0d0 cc cd)
+            (%c-pt-net cd pw ii jj)))
+        (%make-surface (surface-degree-u s0) (surface-degree-v s0)
+                       (copy-seq ua) (copy-seq va) pw)))))

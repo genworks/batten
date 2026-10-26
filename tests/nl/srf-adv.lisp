@@ -465,3 +465,125 @@ beforehand; DIR now and then neither direction."
                                    (unless failed
                                      (list (from-foreign sur :surface)
                                            (%srf-adv-curves-from-foreign fc (1+ k))))))))))))))))
+
+;;; ------------------------------------------------------------- L9-g0
+
+(defun %srf-adv-spine-params (knots k)
+  "K+1 ascending spine parameters in the domain of KNOTS: usually from end to
+end, now and then over an interior stretch, some of them knots now and then."
+  (let* ((lo (aref knots 0)) (hi (aref knots (1- (length knots))))
+         (a (if (zerop (rnd 4)) (rnd-range lo (+ lo (* 0.3d0 (- hi lo)))) lo))
+         (b (if (zerop (rnd 4)) (rnd-range (- hi (* 0.3d0 (- hi lo))) hi) hi))
+         (ps (%srf-adv-ascending a b k)))
+    (when (zerop (rnd 4))
+      (let ((inside (remove-if (lambda (x) (or (<= x a) (>= x b))) (coerce knots 'list))))
+        (when (and inside (> k 1))
+          (let ((i (1+ (rnd (1- k)))) (x (nth (rnd (length inside)) inside)))
+            (when (and (< (aref ps (1- i)) x) (< x (aref ps (1+ i))))
+              (setf (aref ps i) x))))))
+    ps))
+
+(define-oracle-test create-skin-spine (:file "srf-adv" :trials 1200)
+  (let* ((k (1+ (rnd 5)))
+         (deriv (case (rnd 40) (0 7) (t (case (rnd 3) (0 +noder+) (1 +endder+) (t +allder+)))))
+         ;; the degree in range, now and then out of it
+         (degree (cond ((= deriv +noder+) (if (zerop (rnd 30)) (1+ k) (1+ (rnd (min k 3)))))
+                       ((= deriv +endder+) (case (rnd 40) (0 1) (1 (+ k 3)) (t (+ 2 (rnd (min (1+ k) 3))))))
+                       ((= deriv +allder+) (case (rnd 40) (0 1) (1 4) (t (+ 2 (rnd 2)))))
+                       (t 2)))
+         (dir (case (rnd 30) (0 7) (t (if (zerop (rnd 2)) +udir+ +vdir+))))
+         (spine (random-curve :max-degree 4 :max-extra 5 :two-d (zerop (rnd 10))))
+         (params (%srf-adv-spine-params (curve-knots spine) k))
+         (align (if (zerop (rnd 3)) +no+ +yes+))
+         (z0 (if (zerop (rnd 40)) (make-point 0d0 0d0 0d0) (random-point)))
+         (subdiv (- (rnd 7) 1))
+         (cmp (if (zerop (rnd 4)) +no+ +yes+)))
+    (multiple-value-bind (curves closed) (%srf-adv-skin-sections k)
+      (declare (ignore closed))
+      (when (= cmp +no+)
+        (handler-case (batten::with-c-float-environment (batten::crvs-make-compatible curves k))
+          (nurbs-error () (setf cmp +yes+))))
+      (agree (list :profiles curves :k k :cmp cmp :spine spine :params params :align align :z0 z0
+                   :subdiv subdiv :deriv deriv :degree degree :dir dir)
+             (let ((cs (map 'simple-vector #'batten::crv-copy curves)))
+               (list (batten::create-skin-spine cs k cmp spine params align (copy-seq z0) subdiv
+                                                deriv degree dir)
+                     (coerce cs 'list)))
+             (with-foreign ((sp spine :curve) (fp params :real-vector) (fz z0 :point))
+               (with-stacks (sc)
+                 (with-stacks (ss)
+                   (let ((fc (%srf-adv-curves-to-foreign curves)))
+                     (with-foreign-out ((sur :surface))
+                       (let ((failed (c-flag-error-p
+                                      (c-create-skin-spine fc k cmp sp fp align fz subdiv deriv degree
+                                                           dir sur sc ss))))
+                         (values failed
+                                 (unless failed
+                                   (list (from-foreign sur :surface)
+                                         (%srf-adv-curves-from-foreign fc (1+ k)))))))))))))))
+
+(defun %srf-adv-jitter (c amount)
+  "Curve C with its control points moved by up to AMOUNT (z left alone in 2D)."
+  (let ((pw (curve-cpoints c)))
+    (dotimes (i (array-dimension pw 0) c)
+      (dotimes (d 3)
+        (unless (= (aref pw i d) +no-z+)
+          (incf (aref pw i d) (- (rnd (* 2 amount)) amount)))))))
+
+(defun %srf-adv-gordon-network (k l)
+  "A curve network for N_CreateGordonSrf, as (values cur-u v-prms cur-v
+u-prms): the iso-curves of a random surface, K+1 u-curves at the ascending
+V-PRMS and L+1 v-curves at the ascending U-PRMS, now and then jittered off
+the surface (still compatible), the parameters now and then jittered off the
+curves' intersections; the surface rational (an input error) now and then."
+  (let* ((s (random-surface :max-degree 3 :max-extra 4 :rational (zerop (rnd 15))
+                            :two-d (zerop (rnd 10))))
+         (ku (surface-knots-u s)) (kv (surface-knots-v s))
+         (u-prms (%srf-adv-ascending (aref ku 0) (aref ku (1- (length ku))) l))
+         (v-prms (%srf-adv-ascending (aref kv 0) (aref kv (1- (length kv))) k))
+         (cur-u (make-array (1+ k))) (cur-v (make-array (1+ l)))
+         (jit (case (rnd 4) (0 1d0) (1 10d0) (t 0d0))))
+    (batten::with-c-float-environment
+      (dotimes (i (1+ k))
+        (setf (svref cur-u i) (%srf-adv-jitter (batten::srf-extract-iso-crv s (aref v-prms i) +udir+) jit)))
+      (dotimes (j (1+ l))
+        (setf (svref cur-v j) (%srf-adv-jitter (batten::srf-extract-iso-crv s (aref u-prms j) +vdir+) jit))))
+    (when (zerop (rnd 5))
+      (let ((up (copy-seq u-prms)) (vp (copy-seq v-prms)))
+        (do ((j 1 (1+ j))) ((>= j l)) (incf (aref up j) (* 0.2d0 (- (rnd 1d0) 0.5d0) (- (aref up (1+ j)) (aref up j)))))
+        (do ((i 1 (1+ i))) ((>= i k)) (incf (aref vp i) (* 0.2d0 (- (rnd 1d0) 0.5d0) (- (aref vp (1+ i)) (aref vp i)))))
+        (setf u-prms up v-prms vp)))
+    (values cur-u v-prms cur-v u-prms)))
+
+(define-oracle-test create-gordon-srf (:file "srf-adv" :trials 1500)
+  (let* ((k (1+ (rnd 5))) (l (1+ (rnd 5)))
+         ;; degrees in range (at most the highest curve index), now and then not
+         (deg (lambda (top) (if (zerop (rnd 40)) (1+ top) (1+ (rnd (min top 3))))))
+         (dlu (funcall deg l)) (dlv (funcall deg k))
+         (dtu (funcall deg l)) (dtv (funcall deg k))
+         (preserve (case (rnd 40) (0 7) (t (if (zerop (rnd 2)) +yes+ +no+)))))
+    (multiple-value-bind (cur-u v-prms cur-v u-prms) (%srf-adv-gordon-network k l)
+      ;; now and then a u-curve set that is not compatible
+      (when (zerop (rnd 30))
+        (setf (svref cur-u (rnd (1+ k)))
+              (batten::with-c-float-environment (batten::crv-elevate-degree (svref cur-u 0) 1))))
+      (agree (list :cur-u cur-u :v-prms v-prms :k k :cur-v cur-v :u-prms u-prms :l l
+                   :degs (list dlu dlv dtu dtv) :preserve preserve)
+             (let ((cu (map 'simple-vector #'batten::crv-copy cur-u))
+                   (cv (map 'simple-vector #'batten::crv-copy cur-v)))
+               (list (batten::create-gordon-srf cu v-prms k cv u-prms l dlu dlv dtu dtv preserve)
+                     (coerce cu 'list) (coerce cv 'list)))
+             (with-foreign ((fv v-prms :real-vector) (fu u-prms :real-vector))
+               (with-stacks (sc)
+                 (with-stacks (ss)
+                   (let ((au (%srf-adv-curves-to-foreign cur-u))
+                         (av (%srf-adv-curves-to-foreign cur-v)))
+                     (with-foreign-out ((sur :surface))
+                       (let ((failed (c-flag-error-p
+                                      (c-create-gordon-srf au fv k av fu l dlu dlv dtu dtv preserve
+                                                           sur sc ss))))
+                         (values failed
+                                 (unless failed
+                                   (list (from-foreign sur :surface)
+                                         (%srf-adv-curves-from-foreign au (1+ k))
+                                         (%srf-adv-curves-from-foreign av (1+ l)))))))))))))))
