@@ -9,14 +9,19 @@ A batten is the long flexible strip that shipwrights and loftsmen bent
 through weights to draw fair curves: the physical ancestor of the spline.
 
 **Status: not yet released.**  Every NLib routine the Gendl/GDL stack reaches
-is ported -- 406 routines across 28 NLib source files: basis functions, curve
-and surface evaluation, knot insertion and removal, Bezier decomposition,
-interpolation and approximation, offsets, conics, matrices and the rest
-(`tools/manifest.sexp` lists them).  377 differential tests cover them (the
-file-private statics through their callers), and all agree with NLib.  What remains
-before a release is integration into GDL and a performance pass; the readable
-exported API (`src/api.lisp`) covers only evaluation so far, and the ported
-routines are reached as `batten::name`.
+is ported, and NLib's tessellator -- 473 routines across 29 NLib source
+files: basis functions, curve and surface evaluation, knot insertion and
+removal, Bezier decomposition, interpolation and approximation, offsets,
+conics, matrices, triangulation of trimmed surfaces and the rest
+(`tools/manifest.sexp` lists them).  504 differential tests cover them and
+the API (the file-private statics through their callers), and all agree with
+NLib.
+
+Two packages: `batten` exports the readable API (`API.md`, `src/api/`) --
+construction, queries and operations on curves and surfaces, geometry
+utilities, tessellation -- and `batten.nlib` exports the port itself, NLib's
+own routines under their Lisp names (N_CrvEval is `crv-eval`), for anyone
+who wants NLib's interface.
 
 ## How it is held to NLib
 

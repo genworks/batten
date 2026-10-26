@@ -34,5 +34,28 @@
    ;; shared by curves and surfaces (src/api/generics.lisp)
    #:domain #:bounding-box #:copy #:transform #:translate #:insert-knots #:elevate-degree
    #:reparameterize #:split
+   ;; construction (src/api/construction.lisp)
+   #:make-surface #:line-segment #:circular-arc #:elliptical-arc #:conic-arc
+   #:interpolate-curve #:approximate-curve #:fit-arc #:fit-line
+   #:interpolate-surface #:approximate-surface #:ruled-surface #:extruded-surface
+   #:revolved-surface #:skinned-surface #:gordon-surface #:coons-surface #:sphere
+   ;; curve queries (src/api/curve-queries.lisp)
+   #:curve-tangent #:curve-curvature #:curve-frenet-frame #:curve-length #:curve-point-at-length
+   #:curve-closest-point #:curve-project-points #:curve-polyline
+   #:curve-closed-p #:curve-planar-p #:curve-line-p #:curve-degenerate-p #:curves-coincident-p
+   #:curve-type
+   ;; curve operations (src/api/curve-operations.lisp)
+   #:remove-knots #:subcurve #:bezier-segments #:reverse-curve #:extend-curve #:offset-curve
+   #:make-compatible #:curve-to-2d #:curve-to-3d #:curve-to-rational #:curve-to-polynomial
+   ;; surfaces (src/api/surfaces.lisp)
+   #:surface-normal #:surface-grid #:surface-closest-point #:isocurve #:subsurface
+   #:bezier-patches #:offset-surface #:surface-swap-uv #:surface-closed-p #:surface-flat-p
+   #:surface-type
+   ;; geometry and scalar functions (src/api/geometry.lisp)
+   #:distance #:dot #:cross #:normalize #:angle-between
+   #:project-point-to-line #:project-point-to-plane
+   #:intersect-lines #:intersect-line-plane #:intersect-planes
+   #:make-cfun #:cfun-value #:cfun-derivatives #:cfun-derivative #:cfun* #:cfun+ #:cfun-
+   #:make-sfun
    ;; tessellation
    #:tessellate-surface))
