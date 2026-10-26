@@ -8,8 +8,8 @@ Apache License 2.0.
 A batten is the long flexible strip that shipwrights and loftsmen bent
 through weights to draw fair curves: the physical ancestor of the spline.
 
-**Status: not yet released.**  Every NLib routine the Gendl/GDL stack reaches
-is ported, and NLib's tessellator -- 473 routines across 29 NLib source
+**Status: release 0.1.0 (October 2026).**  Every NLib routine the Gendl/GDL
+stack reaches is ported, and NLib's tessellator -- 473 routines across 29 NLib source
 files: basis functions, curve and surface evaluation, knot insertion and
 removal, Bezier decomposition, interpolation and approximation, offsets,
 conics, matrices, triangulation of trimmed surfaces and the rest
@@ -22,6 +22,33 @@ construction, queries and operations on curves and surfaces, geometry
 utilities, tessellation -- and `batten.nlib` exports the port itself, NLib's
 own routines under their Lisp names (N_CrvEval is `crv-eval`), for anyone
 who wants NLib's interface.
+
+## Getting started
+
+Batten is plain portable Common Lisp with no dependencies.  Clone it where
+ASDF or Quicklisp finds local projects (`~/common-lisp/`,
+`~/quicklisp/local-projects/`), then:
+
+```lisp
+(asdf:load-system "batten")          ; or (ql:quickload "batten")
+
+(defpackage :batten-example (:use :common-lisp :batten))
+(in-package :batten-example)
+
+;; a cubic through four points, chord-length parameterized
+(defparameter *c* (interpolate-curve '((0 0 0) (1 2 0) (3 3 0) (4 0 0))))
+(curve-point *c* 0.5)                 ; => #(2.417893218813452d0 2.892766952966369d0 0.0d0)
+(curve-length *c*)                    ; => 8.265825079520468d0
+(curve-closest-point *c* '(2 1 0))    ; => parameter, point, distance
+
+;; a ruled surface between two lines, and its triangles
+(defparameter *s* (ruled-surface (line-segment '(0 0 0) '(4 0 0))
+                                 (line-segment '(0 3 1) '(4 3 1))))
+(surface-point *s* 0.5 0.5)           ; => #(2.0d0 1.5d0 0.5d0)
+(tessellate-surface *s*)              ; => points, triangles, parameters
+```
+
+`API.md` lists the whole API; every function's docstring is its reference.
 
 ## How it is held to NLib
 

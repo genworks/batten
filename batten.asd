@@ -17,7 +17,7 @@ are then not found by M-. on Allegro; the source is plain to read."
 
 (defsystem "batten"
   :description "NURBS curves and surfaces in portable Common Lisp: a port of NLib from NVIDIA's open-source SMLib."
-  :version "0.0.1"
+  :version "0.1.0"
   :author "Genworks International"
   :license "Apache-2.0"
   :serial t

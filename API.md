@@ -82,7 +82,7 @@ methods of `insert-knots`, `elevate-degree` and `split` take
 Changed: `line-curve` became `line-segment` (a test helper of that name
 exists), and it ends exactly at END where NLib's START + (END − START) can
 miss by a bit.  Angles are in degrees, as in NLib.  `circular-arc` takes
-NLib's centre, radius and axes rather than a normal and a start point (which
+NLib's center, radius and axes rather than a normal and a start point (which
 would add arithmetic NLib does not do); Gordon takes the curves' parameters
 and Coons the four cross-boundary derivative curves, as NLib needs them.
 
