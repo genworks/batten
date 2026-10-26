@@ -136,3 +136,77 @@ NLib: N_ApproxNurbsWithNonRatCrv."
                     (create-interval iv (aref up 0) (aref up mp))
                     (crv-reparam-to-interval curq iv)))))
             curq))))))
+
+;;; ------------------------------------------------------------- L12-g0
+
+(defun crv-is-polygon-within-tol (pw n p k eps)
+  "Whether the polygon P[0..K] (a point-array) lies within EPS of the biarc
+curve whose control points are PW[0..N] (N even; each triple PW[2i],
+PW[2i+1], PW[2i+2] a circular arc, or a straight segment when collinear):
+every vertex must be within EPS of its closest arc, and every polygon leg
+within EPS of the arcs closest to its two ends.  Returns +yes+ or +no+.
+Signals what bez-center-radius-from-3-c-pts, dist-pt-arc and
+dist-max-line-arc signal.  Where dist-max-line-arc leaves its distance unset
+the C reads a stale local; the Lisp gets the 0 that dist-max-line-arc
+returns there.
+NLib: N_CrvIsPolygonWithinTol."
+  (declare (type cpoint-array pw) (type fixnum n k) (type point-array p)
+           (type double-float eps))
+  (let* ((n2 (truncate n 2))
+         (cs (make-array (max n2 0)))
+         (pss (make-array (max n2 0)))
+         (pes (make-array (max n2 0)))
+         (r (make-real-vector (max n2 0)))
+         (alf (make-real-vector (max n2 0)))
+         (bet (make-real-vector (max n2 0)))
+         (ind (make-index-vector (1+ k)))
+         (p0w (make-cpoint)) (p1w (make-cpoint)) (p2w (make-cpoint))
+         (pt (make-point)) (qt (make-point)))
+    (declare (type fixnum n2) (type simple-vector cs pss pes)
+             (type real-vector r alf bet) (type index-vector ind)
+             (type cpoint p0w p1w p2w) (type point pt qt)
+             (dynamic-extent p0w p1w p2w pt qt))
+    ;; center and radius of every arc; a straight segment has r = +infinite+
+    (dotimes (i n2)
+      (let ((j (* 2 i))
+            (c (make-point)) (ps (make-point)) (pe (make-point)))
+        (declare (type fixnum j) (type point c ps pe))
+        (setf (svref cs i) c (svref pss i) ps (svref pes i) pe)
+        (multiple-value-bind (ri ai bi)
+            (bez-center-radius-from-3-c-pts (%row-c-pt pw j p0w) (%row-c-pt pw (+ j 1) p1w)
+                                            (%row-c-pt pw (+ j 2) p2w) c ps pe)
+          (declare (type double-float ri ai bi))
+          (setf (aref r i) ri (aref alf i) ai (aref bet i) bi))))
+    ;; for each polygon vertex, the closest arc
+    (dotimes (i (1+ k))
+      (let ((dmin +bigd+))
+        (declare (type double-float dmin))
+        (setf (aref ind i) -1)
+        (%row-pt p i pt)
+        (dotimes (j n2)
+          (let ((d (dist-pt-arc pt (svref cs j) (aref r j) (aref alf j) (aref bet j)
+                                (svref pss j) (svref pes j))))
+            (declare (type double-float d))
+            (when (/= d +undefined+)
+              (when (< d dmin)
+                (setf dmin d
+                      (aref ind i) j)))))
+        (when (or (< (aref ind i) 0) (> dmin eps))
+          (return-from crv-is-polygon-within-tol +no+))))
+    ;; for each polygon leg, its distance from the arcs at its ends
+    (dotimes (i k)
+      (let ((dmax -1d0))
+        (declare (type double-float dmax))
+        (%row-pt p i pt)
+        (%row-pt p (1+ i) qt)
+        (dotimes (j n2)
+          (unless (and (/= j (aref ind i)) (/= j (aref ind (1+ i))))
+            (let ((d (dist-max-line-arc (svref cs j) (aref r j) (aref alf j) (aref bet j)
+                                        (svref pss j) (svref pes j) pt qt)))
+              (declare (type double-float d))
+              (when (/= d +undefined+)
+                (when (> d dmax)
+                  (setf dmax d))))))
+        (when (or (< dmax 0d0) (> dmax eps))
+          (return-from crv-is-polygon-within-tol +no+))))
+    +yes+))
