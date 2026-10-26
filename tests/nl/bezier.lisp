@@ -416,6 +416,36 @@ segment, where the bounds meet at once), or all coincident."
                (values nil (list (from-foreign alf :real-vector size) (from-foreign oma :real-vector size)
                                  (from-foreign bet :real-vector size) (from-foreign omb :real-vector size))))))))
 
+;;; ------------------------------------------------------------- L11-g0
+
+(define-oracle-test bez-reduce-degree (:file "bezier" :trials 4000)
+  ;; p >= 2: for p = 1 the C reads alf[0] and Qw[-1].  The coefficients are
+  ;; N_BezDegreeReduceCoefs' now and then random ones, the same on both sides.
+  (let* ((p (+ 2 (rnd 20)))
+         (pw (%bezier-random-cpoints (1+ p)))
+         (size (+ p 2))
+         (coefs (if (zerop (rnd 6))
+                    (list (random-real-vector size 2d0) (random-real-vector size 2d0)
+                          (random-real-vector size 2d0) (random-real-vector size 2d0))
+                    (let ((c (list (make-real-vector size) (make-real-vector size)
+                                   (make-real-vector size) (make-real-vector size))))
+                      (apply #'batten::bez-degree-reduce-coefs p c)
+                      c))))
+    (when (zerop (rnd 10))                ; a straight-line or repeated polygon
+      (dotimes (i (1+ p)) (dotimes (k 4) (setf (aref pw i k) (aref pw 0 k)))))
+    (destructuring-bind (alf oma bet omb) coefs
+      (agree (list :p p :pw pw :coefs coefs)
+             (let ((qw (make-cpoint-array p)))
+               (let ((e (batten::bez-reduce-degree pw p alf oma bet omb qw)))
+                 (list qw e)))
+             (with-foreign ((a pw :cpoint-array) (fa alf :real-vector) (fo oma :real-vector)
+                            (fb bet :real-vector) (fm omb :real-vector))
+               (with-foreign-out ((qw :cpoint-array p))
+                 (with-scalars ((e :double))
+                   (let ((failed (c-flag-error-p (c-bez-reduce-degree a p fa fo fb fm qw e))))
+                     (values failed (unless failed (list (from-foreign qw :cpoint-array p)
+                                                         (cffi:mem-ref e :double))))))))))))
+
 (defun %bezier-circle-cpoints ()
   "Three control points for N_BezCenterRadiusFrom3CPts: a true circular arc
 in the xy-plane (rational, the middle weight cos of half the sweep, scaled

@@ -613,6 +613,63 @@ NLib: N_BezDegreeReduceCoefs."
             (aref omb i) (- 1d0 (aref bet i)))))
   alf)
 
+;;; ------------------------------------------------------------- L11-g0
+
+(defun bez-reduce-degree (pw p alf oma bet omb qw)
+  "Reduce the degree-P Bezier curve with control points PW by one, writing
+the P new control points into the caller's QW, with the reduction
+coefficients ALF OMA BET OMB precomputed by bez-degree-reduce-coefs.  Returns
+the maximum error of the reduction.  Signals as bez-eval-one-basis does.
+NLib: N_BezReduceDegree."
+  (declare (type cpoint-array pw qw) (type fixnum p) (type real-vector alf oma bet omb))
+  (let ((pl (make-cpoint)) (pr (make-cpoint)) (aw (make-cpoint)) (bw (make-cpoint))
+        (r (truncate (- p 1) 2))
+        (fp (float p 1d0)))
+    (declare (type cpoint pl pr aw bw) (dynamic-extent pl pr aw bw)
+             (type fixnum r) (type double-float fp))
+    ;; end points
+    (%copy-c-pt-row pw 0 qw 0)
+    (%copy-c-pt-row pw p qw (- p 1))
+    (cond
+      ((oddp p)
+       ;; from the left
+       (do ((i 1 (1+ i))) ((> i (- r 1)))
+         (declare (type fixnum i))
+         (%combine-2-c-pt-rows (aref alf i) pw i (aref oma i) qw (- i 1) qw i))
+       ;; from the right
+       (do ((i (- p 2) (1- i))) ((< i (+ r 1)))
+         (declare (type fixnum i))
+         (%combine-2-c-pt-rows (aref bet i) pw (+ i 1) (aref omb i) qw (+ i 1) qw i))
+       ;; middle control point
+       (combine-2-c-pts (aref alf r) (%row-c-pt pw r aw) (aref oma r) (%row-c-pt qw (- r 1) bw) pl)
+       (combine-2-c-pts (aref bet r) (%row-c-pt pw (+ r 1) aw) (aref omb r) (%row-c-pt qw (+ r 1) bw) pr)
+       (combine-2-c-pts 0.5d0 pl 0.5d0 pr aw)
+       (%c-pt-row aw qw r)
+       ;; the error
+       (let* ((u (* 0.5d0 (- 1d0 (c-sqrt (/ 1d0 fp)))))
+              (b (bez-eval-one-basis p r u))
+              (b1 (bez-eval-one-basis p (+ r 1) u))
+              (dw (dist-cpt-cpt-homo pl pr))
+              (a (/ (* 0.5d0 (- fp (float r 1d0))) fp))
+              (bb (abs (- b b1))))
+         (declare (type double-float u b b1 dw a bb))
+         (* (* a bb) dw)))
+      (t
+       ;; from the left
+       (do ((i 1 (1+ i))) ((> i r))
+         (declare (type fixnum i))
+         (%combine-2-c-pt-rows (aref alf i) pw i (aref oma i) qw (- i 1) qw i))
+       ;; from the right
+       (do ((i (- p 2) (1- i))) ((< i (+ r 1)))
+         (declare (type fixnum i))
+         (%combine-2-c-pt-rows (aref bet i) pw (+ i 1) (aref omb i) qw (+ i 1) qw i))
+       ;; the error
+       (let* ((u (/ (+ (float r 1d0) 1d0) fp))
+              (b1 (bez-eval-one-basis p (+ r 1) u)))
+         (declare (type double-float u b1))
+         (combine-2-c-pts 0.5d0 (%row-c-pt qw r aw) 0.5d0 (%row-c-pt qw (+ r 1) bw) pl)
+         (* b1 (dist-cpt-cpt-homo (%row-c-pt pw (+ r 1) aw) pl)))))))
+
 (defun bez-center-radius-from-3-c-pts (p0w p1w p2w c ps pe)
   "The center, radius and start and end angles of the 2D circular arc whose
 Bezier control points are P0W P1W P2W (assumed to make a circle).  The

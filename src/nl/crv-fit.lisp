@@ -2496,3 +2496,183 @@ NLib: N_FitArcToPts."
                 (when (> as 360.0d0) (decf as 360.0d0))
                 (when (> ae 360.0d0) (decf ae 360.0d0))))
           (values (create-circ-arc cc xx yy rr as ae cit) +ncircle+ cea cem))))))
+
+;;; ------------------------------------------------------------- L11-g0
+
+(defun crv-fit--st-calc-c-pts-circle (p0 p1 p2 pw)
+  "Write into rows 0..2 of cpoint-array PW the control points of the
+quadratic rational Bezier arc on P0 P1 P2: P0 and P2 with weight 1, P1 with
+weight half the chord |P0 P2| over the mean of |P0 P1| and |P1 P2|.  Returns
+PW.
+NLib: ST_CalcCPtsCircle (NL_CrvFit.cpp)."
+  (declare (type point p0 p1 p2) (type cpoint-array pw))
+  (let* ((e (dist-pt-pt p0 p2))
+         (fl (dist-pt-pt p0 p1))
+         (fr (dist-pt-pt p1 p2))
+         (fa (* 0.5d0 (+ fl fr)))
+         (w (/ (* 0.5d0 e) fa))
+         (cw (make-cpoint)))
+    (declare (type double-float e fl fr fa w) (type cpoint cw) (dynamic-extent cw))
+    (%c-pt-row (weight p0 1d0 cw) pw 0)
+    (%c-pt-row (weight p1 w cw) pw 1)
+    (%c-pt-row (weight p2 1d0 cw) pw 2)
+    pw))
+
+(defun %fit-arc-to-end-pts-and-tangents (ps ts0 pe te0 pw off)
+  "N_FitArcToEndPtsAndTangents writing its control points from row OFF of PW
+on (the C's recursive calls pass &Pw[k]); returns n, the highest index
+written relative to OFF.  TS0 and TE0 are not modified."
+  (declare (type point ps ts0 pe te0) (type cpoint-array pw) (type fixnum off))
+  (let ((ts (make-point)) (te (make-point)) (v (make-point)) (pm (make-point))
+        (a* (make-point)) (b* (make-point)) (j (make-point)) (k* (make-point))
+        (qw (make-cpoint-array 3))
+        (d 0d0) (zero-tangent nil))
+    (declare (type point ts te v pm a* b* j k*) (type cpoint-array qw)
+             (dynamic-extent ts te v pm a* b* j k* qw)
+             (type double-float d))
+    ;; C passes Ts and Te by value and normalizes its copies
+    (vector-copy ts0 ts)
+    (vector-copy te0 te)
+    (macrolet ((circle (p0 p1 p2) `(crv-fit--st-calc-c-pts-circle ,p0 ,p1 ,p2 qw))
+               (put (src dst) `(%copy-c-pt-row qw ,src pw (+ off ,dst)))
+               (wt (p dst) `(let ((cw (make-cpoint)))
+                              (declare (dynamic-extent cw))
+                              (%c-pt-row (weight ,p 1d0 cw) pw (+ off ,dst)))))
+      ;; chord vector, chord mid point
+      (vector-diff pe ps v)
+      (combine-2-pts 0.5d0 ps 0.5d0 pe pm)
+      (setf d (vector-normalize v v))
+      ;; normalize the tangents; a zero tangent is not an error
+      (handler-case (vector-normalize-ref ts)
+        (nurbs-error () (setf zero-tangent t)))
+      (handler-case (vector-normalize-ref te)
+        (nurbs-error () (setf zero-tangent t)))
+      (when zero-tangent
+        (vector-pt-along-vector ps (* 0.5d0 d) ts a*)
+        (vector-pt-along-vector pm (* 0.5d0 d) ts j)
+        (vector-pt-along-vector pe (* -0.5d0 d) te b*)
+        (circle ps a* j)
+        (put 0 0) (put 1 1) (put 2 2)
+        (circle j b* pe)
+        (put 1 3) (put 2 4)
+        (return-from %fit-arc-to-end-pts-and-tangents 4))
+      ;; parallel tangents?
+      (let ((tste (vector-dot ts te)))
+        (declare (type double-float tste))
+        (vector-cross ts te a*)
+        (multiple-value-bind (a b c) (pt-to-xyz a*)
+          (declare (ignore a b) (type double-float c))
+          (when (or (< (abs c) *ltol*) (< (abs (- tste 1d0)) *ltol*))
+            ;; the end tangents are parallel: are they parallel to the chord?
+            (vector-cross ts v a*)
+            (multiple-value-bind (a b c) (pt-to-xyz a*)
+              (declare (ignore a b) (type double-float c))
+              (if (< (abs c) *ltol*)
+                  (progn
+                    (vector-pt-along-vector ps (* 0.5d0 d) ts a*)
+                    (vector-pt-along-vector pe (* -0.5d0 d) te b*)
+                    (let ((dis (dist-pt-pt a* b*)))
+                      (declare (type double-float dis))
+                      (if (< dis (* (+ 1d0 dis) *mtol*))
+                          ;; collinear end tangents: three collinear points
+                          (progn
+                            (wt ps 0) (wt pm 1) (wt pe 2)
+                            (return-from %fit-arc-to-end-pts-and-tangents 2))
+                          (let ((vts (vector-dot v ts))
+                                (vte (vector-dot v te))
+                                (aa 1d0))
+                            (declare (type double-float vts vte aa))
+                            (vector-perpendicular v a*)
+                            (when (and (< vts 0d0) (> vte 0d0))
+                              (vector-reverse a* a*)
+                              (setf aa -1d0))
+                            (vector-pt-along-vector pm (* (* aa 0.5d0) d) a* j)
+                            (let* ((kk (%fit-arc-to-end-pts-and-tangents ps ts j a* pw off))
+                                   (ll (%fit-arc-to-end-pts-and-tangents j a* pe te pw (+ off kk))))
+                              (declare (type fixnum kk ll))
+                              (return-from %fit-arc-to-end-pts-and-tangents (+ kk ll)))))))
+                  (let ((dot (vector-dot ts te)))
+                    (declare (type double-float dot))
+                    (if (< dot 0d0)
+                        ;; antiparallel tangents
+                        (progn
+                          (vector-pt-along-vector ps (* 0.5d0 d) ts a*)
+                          (vector-pt-along-vector pm (* 0.5d0 d) ts j)
+                          (vector-pt-along-vector pe (* -0.5d0 d) te b*)
+                          (circle ps a* j)
+                          (put 0 0) (put 1 1) (put 2 2)
+                          (circle j b* pe)
+                          (put 1 3) (put 2 4)
+                          (return-from %fit-arc-to-end-pts-and-tangents 4))
+                        ;; parallel tangents: an S shape
+                        (progn
+                          (combine-2-pts 0.5d0 ps 0.5d0 pm k*)
+                          (vector-pt-along-vector ps (* 0.25d0 d) ts a*)
+                          (vector-pt-along-vector k* (* 0.25d0 d) ts j)
+                          (vector-pt-along-vector pm (* 0.25d0 d) ts b*)
+                          (circle ps a* j)
+                          (put 0 0) (put 1 1) (put 2 2)
+                          (circle j b* pm)
+                          (put 1 3) (put 2 4)
+                          (combine-2-pts 0.5d0 pm 0.5d0 pe k*)
+                          (vector-pt-along-vector pm (* -0.25d0 d) te a*)
+                          (vector-pt-along-vector k* (* -0.25d0 d) te j)
+                          (vector-pt-along-vector pe (* -0.25d0 d) te b*)
+                          (circle pm a* j)
+                          (put 1 5) (put 2 6)
+                          (circle j b* pe)
+                          (put 1 7) (put 2 8)
+                          (return-from %fit-arc-to-end-pts-and-tangents 8)))))))
+          ;; the tangents are not parallel
+          (vector-sum ts te a*)
+          (let ((dot (vector-dot a* v)))
+            (declare (type double-float dot))
+            (when (< (abs dot) *ltol*)
+              ;; the tangent sum is perpendicular to the chord: split
+              (vector-reverse a* a*)
+              (let* ((kk (%fit-arc-to-end-pts-and-tangents ps ts pm a* pw off))
+                     (ll (%fit-arc-to-end-pts-and-tangents pm a* pe te pw (+ off kk))))
+                (declare (type fixnum kk ll))
+                (return-from %fit-arc-to-end-pts-and-tangents (+ kk ll)))))
+          ;; the biarc: solve 2(Te.Ts-1) alf^2 + 2(v.Te+v.Ts) alf + v.v = 0
+          (vector-diff ps pe v)
+          (let* ((vv (vector-dot v v))
+                 (vts (vector-dot v ts))
+                 (vte (vector-dot v te))
+                 (a (* 2d0 (- tste 1d0)))
+                 (b (* 2d0 (+ vts vte)))
+                 (c vv)
+                 (disc (- (* b b) (* (* 4d0 a) c))))
+            (declare (type double-float vv vts vte a b c disc))
+            (setf disc (c-sqrt disc))
+            (let ((alf (/ (- (- b) disc) (* 2d0 a))))
+              (declare (type double-float alf))
+              (vector-pt-along-vector ps alf ts a*)
+              (vector-pt-along-vector pe (- alf) te b*)
+              (combine-2-pts 0.5d0 a* 0.5d0 b* j)
+              ;; distances of A, B and J from the line Ps Pe
+              (let* ((da (dist-pt-line-seg a* ps pe))
+                     (db (dist-pt-line-seg b* ps pe))
+                     (dc (dist-pt-line-seg j ps pe)))
+                (declare (type double-float da db dc))
+                (when (and (< da *mtol*) (< db *mtol*) (< dc *mtol*))
+                  ;; a line segment
+                  (wt ps 0) (wt pm 1) (wt pe 2)
+                  (return-from %fit-arc-to-end-pts-and-tangents 2)))
+              (circle ps a* j)
+              (put 0 0) (put 1 1) (put 2 2)
+              (circle j b* pe)
+              (put 1 3) (put 2 4)
+              4)))))))
+
+(defun fit-arc-to-end-pts-and-tangents (ps ts pe te pw)
+  "Fit a G1 biarc (two or more quadratic rational Bezier circular arcs) to
+the end points PS and PE and end tangents TS and TE, all in the xy-plane.
+The control points go into the caller's cpoint-array PW (room for 18 rows);
+returns n, the highest index written.  Parallel and antiparallel tangents,
+collinear data and zero tangents have their own constructions, and a
+tangent sum perpendicular to the chord splits the span at its midpoint.
+Signals :geo-err for coincident end points, and as dist-pt-line-seg does.
+NLib: N_FitArcToEndPtsAndTangents."
+  (declare (type point ps ts pe te) (type cpoint-array pw))
+  (%fit-arc-to-end-pts-and-tangents ps ts pe te pw 0))
