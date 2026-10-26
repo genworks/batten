@@ -1,0 +1,79 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 Genworks International
+# SPDX-License-Identifier: Apache-2.0
+#
+# Batten's CI: build the oracle (NLib's own C, from NVIDIA's usd-brep at a
+# pinned release), run every differential test against it, and check that
+# each implementation computes the same evaluation digest.  The jobs run in
+# containers (a docker executor); the tests run directly in the public Gendl
+# SBCL image (BATTEN_TEST_LISP), not in a container of their own.
+
+stages: [oracle, test, digest]
+
+variables:
+  USD_BREP_REPO: https://github.com/NVIDIA-Omniverse/usd-brep.git
+  USD_BREP_REF: 3fd5b9548d19aa8c12c29bc9637a96d42a06f8a5   # Release 1.0.1
+  # every implementation must produce it (README); a change in evaluation
+  # order anywhere in the evaluators changes it
+  BATTEN_DIGEST: 5B7AEAE8709A4A70
+
+default:
+  tags: [amd64-docker]
+
+oracle:
+  stage: oracle
+  image: debian:bookworm
+  script:
+    - apt-get update -qq && apt-get install -y -qq g++ python3 git binutils > /dev/null
+    - git clone -q --filter=blob:none "$USD_BREP_REPO" /tmp/usd-brep
+    - git -C /tmp/usd-brep checkout -q "$USD_BREP_REF"
+    # SMLib compiles once, a few minutes; capped so a shared runner keeps room
+    - JOBS=8 tools/build-oracle.sh /tmp/usd-brep/source/SMLib oracle
+    # the committed bindings must be the ones the manifest generates
+    - git diff --exit-code tests/oracle-bindings.lisp
+  artifacts:
+    paths: [oracle/libnlib-oracle.so, oracle/libnlib-oracle-shims.so]
+    expire_in: 1 week
+
+tests:
+  stage: test
+  needs: [oracle]
+  image:
+    name: genworks/gendl:devo-sbcl
+    entrypoint: [""]
+  variables:
+    BATTEN_TEST_LISP: /opt/gendl/gdl/program/gdl-sbcl
+    BATTEN_ORACLE_DIR: $CI_PROJECT_DIR/oracle
+  script:
+    - tools/run-tests.sh all
+
+# The digest on each implementation the Gendl images carry; others (Allegro,
+# ECL, CLISP, dotcl, EGCL) are checked by hand for now.
+.digest:
+  stage: digest
+  needs: []
+  script:
+    - >
+      $LISP $LISP_ARGS --eval '(require "asdf")' --eval '(progn (push (pathname (concatenate (quote string) (uiop:getenv "CI_PROJECT_DIR") "/")) asdf:*central-registry*)
+      (asdf:load-system "batten/random")
+      (let* ((hex (format nil "~X" (uiop:symbol-call :batten-random :evaluation-digest)))
+             (digest (concatenate (quote string) (make-string (max 0 (- 16 (length hex))) :initial-element #\0) hex)))
+        (format t "~&digest ~a, expected ~a~%" digest (uiop:getenv "BATTEN_DIGEST"))
+        (uiop:quit (if (string-equal digest (uiop:getenv "BATTEN_DIGEST")) 0 1))))'
+
+digest-sbcl:
+  extends: .digest
+  image:
+    name: genworks/gendl:devo-sbcl
+    entrypoint: [""]
+  variables:
+    LISP: /opt/gendl/gdl/program/gdl-sbcl
+    LISP_ARGS: --non-interactive
+
+digest-ccl:
+  extends: .digest
+  image:
+    name: genworks/gendl:devo-ccl
+    entrypoint: [""]
+  variables:
+    LISP: /opt/gendl/gdl/program/gdl-ccl
+    LISP_ARGS: --batch

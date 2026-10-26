@@ -89,7 +89,7 @@
    :callees ("N_BezGetDegreeElevationMatrix" "N_CopyCPt" "N_EndNurbs" "N_GetRealMatrixPtr" "N_InitNurbs" "N_RealMatrixIsNULL" "N_VectorBlendCPt"))
  (:c "N_BezEvalOneBasis" :lisp "bez-eval-one-basis" :file "NL_Bezier.cpp" :line 1925 :lines 47 :wave 0 :status :done
    :callees ("N_AllocReal1dArray" "N_EndNurbs" "N_InitNurbs"))
- (:c "N_BezEvalBasis" :lisp "bez-eval-basis" :file "NL_Bezier.cpp" :line 2040 :lines 38 :wave 0 :status :port
+ (:c "N_BezEvalBasis" :lisp "bez-eval-basis" :file "NL_Bezier.cpp" :line 2040 :lines 38 :wave 0 :status :done
    :callees ())
  (:c "N_BezDegreeReduceCoefs" :lisp "bez-degree-reduce-coefs" :file "NL_Bezier.cpp" :line 2476 :lines 15 :wave 0 :status :done
    :callees ())
@@ -111,7 +111,7 @@
    :callees ("N_AllocCPt1dArray" "N_BezSplit" "N_DistCPolygon" "N_DistCptCpt" "N_EndNurbs" "N_InitNurbs"))
  (:c "N_BezCalcLength" :lisp "bez-calc-length" :file "NL_Bezier.cpp" :line 4832 :lines 23 :wave 0 :status :done
    :callees ("N_BezCalcArcLength" "N_EndNurbs" "N_InitNurbs"))
- (:c "N_BezInterp4Pts" :lisp "bez-interp-4-pts" :file "NL_Bezier.cpp" :line 5173 :lines 53 :wave 0 :status :port
+ (:c "N_BezInterp4Pts" :lisp "bez-interp-4-pts" :file "NL_Bezier.cpp" :line 5173 :lines 53 :wave 0 :status :done
    :callees ("N_BezEvalBasis" "N_DistPtPt" "N_EndNurbs" "N_FloatOpIsBad" "N_GetRealMatrixPtr" "N_InitNurbs" "N_RealMatrixForBack" "N_RealMatrixLuDecompose" "N_SetRealMatrix"))
  (:c "N_BezCenterRadiusFrom3CPts" :lisp "bez-center-radius-from-3-c-pts" :file "NL_Bezier.cpp" :line 5781 :lines 61 :wave 0 :status :done
    :callees ("N_CPtToPtEuclid" "N_Combine2Pts" "N_CopyPt" "N_DistPtLineSeg" "N_DistPtPt" "N_FloatOpIsBad" "N_PtFromXYZ" "N_VectorCreate" "N_VectorDiff" "N_VectorDirectedAngle" "N_VectorDot" "N_VectorNormalizeRef" "N_VectorPerpendicular" "N_VectorPtAlongVector" "N_VectorReverseInPlace"))
@@ -549,7 +549,7 @@
    :callees ())
  (:c "N_VectorDiff" :lisp "vector-diff" :file "NL_Geom.cpp" :line 483 :lines 9 :wave 0 :status :done
    :callees ())
- (:c "N_VectorDiffCPts" :lisp "vector-diff-c-pts" :file "NL_Geom.cpp" :line 524 :lines 7 :wave 0 :status :port
+ (:c "N_VectorDiffCPts" :lisp "vector-diff-c-pts" :file "NL_Geom.cpp" :line 524 :lines 7 :wave 0 :status :done
    :callees ("N_CPtToPtEuclid" "N_VectorDiff"))
  (:c "N_VectorDir" :lisp "vector-dir" :file "NL_Geom.cpp" :line 566 :lines 9 :wave 0 :status :done
    :callees ())
@@ -575,7 +575,7 @@
    :callees ("N_ErrSet" "N_FloatOpIsBad" "N_VectorDot" "N_VectorMagnitude" "N_VectorPerpendicular"))
  (:c "N_IsectLineLine" :lisp "isect-line-line" :file "NL_Geom.cpp" :line 1215 :lines 67 :wave 0 :status :done
    :callees ("N_Combine2Pts" "N_ErrSet" "N_FloatOpIsBad" "N_LineGetData" "N_VectorDir" "N_VectorDot" "N_VectorNormalize" "N_VectorPtAlongVector"))
- (:c "N_LineSegs2dAreIntersecting" :lisp "line-segs-2d-are-intersecting" :file "NL_Geom.cpp" :line 1449 :lines 46 :wave 0 :status :port
+ (:c "N_LineSegs2dAreIntersecting" :lisp "line-segs-2d-are-intersecting" :file "NL_Geom.cpp" :line 1449 :lines 46 :wave 0 :status :done
    :callees ())
  (:c "N_IsectLinePlane" :lisp "isect-line-plane" :file "NL_Geom.cpp" :line 1552 :lines 47 :wave 0 :status :done
    :callees ("N_ErrSet" "N_FloatOpIsBad" "N_LineGetData" "N_PlaneGetData" "N_VectorDir" "N_VectorDot" "N_VectorNormalize" "N_VectorPtAlongVector"))
@@ -621,7 +621,7 @@
    :callees ("N_BBoxGetDiagonal" "N_ENetFromPts" "N_ENetGetBBox"))
  (:c "N_BBoxGetDiagonal" :lisp "b-box-get-diagonal" :file "NL_Geom.cpp" :line 3644 :lines 9 :wave 0 :status :done
    :callees ("N_DistPtPt" "N_GetBBoxData" "N_PtFromXYZ"))
- (:c "N_BBox2dCalcOverlap" :lisp "b-box-2d-calc-overlap" :file "NL_Geom.cpp" :line 3780 :lines 12 :wave 0 :status :port
+ (:c "N_BBox2dCalcOverlap" :lisp "b-box-2d-calc-overlap" :file "NL_Geom.cpp" :line 3780 :lines 12 :wave 0 :status :done
    :callees ())
  (:c "N_CreateLinePtPt" :lisp "create-line-pt-pt" :file "NL_Geom.cpp" :line 3832 :lines 6 :wave 0 :status :done
    :callees ("N_CreateLineStartDirVector" "N_VectorDir"))
@@ -749,7 +749,7 @@
    :callees ())
  (:c "N_ShellSortReal" :lisp "shell-sort-real" :file "NL_Math.cpp" :line 2983 :lines 20 :wave 0 :status :done
    :callees ())
- (:c "N_SearchInsertReal" :lisp "search-insert-real" :file "NL_Math.cpp" :line 3042 :lines 22 :wave 0 :status :port
+ (:c "N_SearchInsertReal" :lisp "search-insert-real" :file "NL_Math.cpp" :line 3042 :lines 22 :wave 0 :status :done
    :callees ())
  (:c "N_SwapCPts" :lisp "swap-c-pts" :file "NL_Math.cpp" :line 3394 :lines 7 :wave 0 :status :done
    :callees ("N_CopyCPt"))
@@ -769,11 +769,11 @@
    :callees ())
  (:c "N_RealMatrixIsNULL" :lisp "real-matrix-is-null" :file "NL_Math.cpp" :line 4707 :lines 15 :wave 0 :status :done
    :callees ("N_GetRealMatrixData"))
- (:c "N_InitRealHash" :lisp "init-real-hash" :file "NL_Math.cpp" :line 4872 :lines 14 :wave 0 :status :port
+ (:c "N_InitRealHash" :lisp "init-real-hash" :file "NL_Math.cpp" :line 4872 :lines 14 :wave 0 :status :done
    :callees ("N_AllocRealPtr1dArray"))
- (:c "N_UpdateRealHash" :lisp "update-real-hash" :file "NL_Math.cpp" :line 4948 :lines 43 :wave 0 :status :port
+ (:c "N_UpdateRealHash" :lisp "update-real-hash" :file "NL_Math.cpp" :line 4948 :lines 43 :wave 0 :status :done
    :callees ("N_AllocReal1dArray" "N_Realloc1dRealArray"))
- (:c "N_RetrieveRealHash" :lisp "retrieve-real-hash" :file "NL_Math.cpp" :line 5060 :lines 14 :wave 0 :status :port
+ (:c "N_RetrieveRealHash" :lisp "retrieve-real-hash" :file "NL_Math.cpp" :line 5060 :lines 14 :wave 0 :status :done
    :callees ())
  (:c "N_SetRealMatrix" :lisp "set-real-matrix" :file "NL_Math.cpp" :line 5190 :lines 25 :wave 0 :status :done
    :callees ("N_AllocReal2dArray" "N_CreateRealMatrix"))
@@ -891,7 +891,7 @@
    :callees ())
  (:c "N_SrfCompress" :lisp "srf-compress" :file "NL_SrfBasic.cpp" :line 1842 :lines 35 :wave 0 :status :done
    :callees ("N_AllocCPt2dArray" "N_AllocReal1dArray" "N_CopyCPt" "N_FreeCPt2dArray" "N_FreeReal1dArray" "N_SrfGetArraySizes" "N_SrfGetCPtsAndKnots" "N_SrfSetCPtsAndKnots"))
- (:c "N_ClampSrfAtParams" :lisp "clamp-srf-at-params" :file "NL_SrfBasic.cpp" :line 1932 :lines 14 :wave 0 :status :port
+ (:c "N_ClampSrfAtParams" :lisp "clamp-srf-at-params" :file "NL_SrfBasic.cpp" :line 1932 :lines 14 :wave 0 :status :done
    :callees ("N_SrfGetKnots"))
  (:c "N_SrfSetSizeIndices" :lisp "srf-set-size-indices" :file "NL_SrfBasic.cpp" :line 1983 :lines 9 :wave 0 :status :vanish
    :callees ())
@@ -903,15 +903,15 @@
    :callees ("N_SrfGetNetAndKnotVectors"))
  (:c "N_IsSrfRat" :lisp "is-srf-rat" :file "NL_SrfBasic.cpp" :line 2188 :lines 16 :wave 0 :status :done :root t
    :callees ("N_CPtGetW" "N_SrfGetCPts"))
- (:c "N_SrfIsDegen" :lisp "srf-is-degen" :file "NL_SrfBasic.cpp" :line 2240 :lines 39 :wave 0 :status :port
+ (:c "N_SrfIsDegen" :lisp "srf-is-degen" :file "NL_SrfBasic.cpp" :line 2240 :lines 39 :wave 0 :status :done
    :callees ("N_CPtToPtEuclid" "N_CopyPt" "N_DistPtPt" "N_ScalePt" "N_SrfGetCPts" "N_Sum2Pts"))
  (:c "N_SrfIsClosed" :lisp "srf-is-closed" :file "NL_SrfBasic.cpp" :line 2323 :lines 41 :wave 0 :status :done
    :callees ("N_CPtToPtEuclid" "N_DistPtPt" "N_SrfGetCPts"))
  (:c "N_1dPtSetIsClosed" :lisp "1d-pt-set-is-closed" :file "NL_SrfBasic.cpp" :line 2420 :lines 25 :wave 0 :status :done
    :callees ("N_DistCptCptHomo" "N_DistPtPt"))
- (:c "N_SrfIsSingular" :lisp "srf-is-singular" :file "NL_SrfBasic.cpp" :line 2858 :lines 126 :wave 0 :status :port
+ (:c "N_SrfIsSingular" :lisp "srf-is-singular" :file "NL_SrfBasic.cpp" :line 2858 :lines 126 :wave 0 :status :done
    :callees ("N_CPtToPtEuclid" "N_DistPtPt" "N_ScalePt" "N_SrfGetCPts" "N_Sum2Pts"))
- (:c "N_SrfIsFlat" :lisp "srf-is-flat" :file "NL_SrfBasic.cpp" :line 3069 :lines 292 :wave 0 :status :port
+ (:c "N_SrfIsFlat" :lisp "srf-is-flat" :file "NL_SrfBasic.cpp" :line 3069 :lines 292 :wave 0 :status :done
    :callees ("N_AllocPt2dArray" "N_AllocReal2dArray" "N_CPtToPtEuclid" "N_Combine4Pts" "N_CrvInitArrays" "N_CrvIsLine" "N_DistCptCpt" "N_DistPtLineSeg" "N_DistPtPt" "N_DistSignedPtPlane" "N_EndNurbs" "N_InitNurbs" "N_PtToXYZ" "N_SrfEvalPtPtDerivNormalFast" "N_SrfExtractIsoCrv" "N_SrfGetCPts" "N_SrfGetParameterBounds" "N_SrfIsClosed" "N_SrfIsDegen" "N_SrfIsSingular" "N_VectorCross" "N_VectorDiff" "N_VectorDot" "N_VectorMagnitude" "N_VectorNormalizeRef" "N_VectorScale"))
  (:c "N_AllocSrfArrays" :lisp "alloc-srf-arrays" :file "NL_SrfBasic.cpp" :line 3518 :lines 24 :wave 0 :status :vanish
    :callees ("N_AllocCNetAndArrays" "N_AllocKnotVectorAndArray" "N_SrfFromCNetAndKnotVectors"))
@@ -979,7 +979,7 @@
    :callees ("N_BasisFindSpan" "N_ComputeBasisFunctions" "N_ComputeDerivatives" "N_ErrSet" "N_FloatOpIsBad" "N_IsSrfRat"))
  (:c "N_SrfEvalPt" :lisp "srf-eval-pt" :file "NL_SrfNurb.cpp" :line 1533 :lines 27 :wave 0 :status :done :root t
    :callees ())
- (:c "N_SrfEvalPtCrvOnSrf" :lisp "srf-eval-pt-crv-on-srf" :file "NL_SrfNurb.cpp" :line 1602 :lines 19 :wave 0 :status :port
+ (:c "N_SrfEvalPtCrvOnSrf" :lisp "srf-eval-pt-crv-on-srf" :file "NL_SrfNurb.cpp" :line 1602 :lines 19 :wave 0 :status :done
    :callees ("N_ClampSrfAtParams" "N_CrvEval" "N_EndNurbs" "N_InitNurbs" "N_PtToXYZ" "N_SrfEvalPt"))
  (:c "N_ComputeDerivativeMatrixSpec" :lisp "compute-derivative-matrix-spec" :file "NL_SrfNurb.cpp" :line 1699 :lines 44 :wave 0 :status :done
    :callees ())
@@ -1035,75 +1035,75 @@
    :callees ("N_Alloc1dArrayKnotVectPtrs" "N_EndNurbs" "N_GetCompatibleKnotArray" "N_InitNurbs" "N_KnotVectorGetKnots" "N_MakeSrfsRatCompatible" "N_SrfElevateDegree" "N_SrfGetDegrees" "N_SrfGetKnotVectors" "N_SrfGetParameterBounds" "N_SrfInsertKnots" "N_SrfReparam" "N_SrfReparamToInterval"))
  (:c "N_SrfJoin" :lisp "srf-join" :file "NL_SrfTool.cpp" :line 6504 :lines 186 :wave 1 :status :done :root t
    :callees ("N_AllocSrfArrays" "N_CPtGetW" "N_CPtSetW" "N_Combine2CPts" "N_CopyCPt" "N_EndNurbs" "N_FreeSrf" "N_InitNurbs" "N_IsSrfRat" "N_SrfElevateDegree" "N_SrfGetCPtsAndKnots" "N_SrfGetCPtsDegreesAndKnots" "N_SrfInitArrays" "N_SrfRemoveKnotConditional" "N_SrfSizeArrays"))
- (:c "N_TessTrimmedSrf" :lisp "tess-trimmed-srf" :file "NL_Tessellate.cpp" :line 248 :lines 729 :wave 2 :status :port :root t
+ (:c "N_TessTrimmedSrf" :lisp "tess-trimmed-srf" :file "NL_Tessellate.cpp" :line 248 :lines 729 :wave 2 :status :done :root t
    :callees ("N_AllocInt1dArray" "N_AllocIntPtr1dArray" "N_AllocReal1dArray" "N_AllocRealPtr1dArray" "N_AllocRealPtr3dArray" "N_CPtToPtEuclid" "N_CrvDecomposeContinuity" "N_CrvEval" "N_CrvGetCPts" "N_CrvGetParamBounds" "N_DistCPolygon" "N_EndNurbs" "N_FloatOpIsBad" "N_FreeReal1dArray" "N_InitNurbs" "N_PtToXYZ" "N_Realloc1dFlagArray" "N_Realloc1dRealArray" "N_SrfGetParameterBounds" "N_SrfIsClosed" "N_TessSrfArea" "ST_TessIsOnBoundary" "ST_TessPolygonizeTrimCrv" "ST_TessRegionOfRectangles" "ST_TessSubdivideSrf"))
- (:c "ST_TessIsOnBoundary" :lisp "tessellate--st-tess-is-on-boundary" :file "NL_Tessellate.cpp" :line 1196 :lines 55 :wave 2 :status :port :static t
+ (:c "ST_TessIsOnBoundary" :lisp "tessellate--st-tess-is-on-boundary" :file "NL_Tessellate.cpp" :line 1196 :lines 55 :wave 2 :status :done :static t
    :callees ("N_CPtToPtEuclid" "N_CrvGetCPts" "N_CrvIsLine" "N_PtToXYZ"))
- (:c "N_TessGetTriangleEdges" :lisp "tess-get-triangle-edges" :file "NL_Tessellate.cpp" :line 1317 :lines 47 :wave 2 :status :port :root t
+ (:c "N_TessGetTriangleEdges" :lisp "tess-get-triangle-edges" :file "NL_Tessellate.cpp" :line 1317 :lines 47 :wave 2 :status :done :root t
    :callees ("N_AllocInt1dArray" "N_EndNurbs" "N_InitNurbs"))
- (:c "N_TessGetTriangles" :lisp "tess-get-triangles" :file "NL_Tessellate.cpp" :line 1519 :lines 54 :wave 2 :status :port :root t
+ (:c "N_TessGetTriangles" :lisp "tess-get-triangles" :file "NL_Tessellate.cpp" :line 1519 :lines 54 :wave 2 :status :done :root t
    :callees ("N_AllocInt1dArray" "N_EndNurbs" "N_InitNurbs"))
- (:c "ST_TessIsInsideLoop" :lisp "tessellate--st-tess-is-inside-loop" :file "NL_Tessellate.cpp" :line 1657 :lines 42 :wave 2 :status :port :static t
+ (:c "ST_TessIsInsideLoop" :lisp "tessellate--st-tess-is-inside-loop" :file "NL_Tessellate.cpp" :line 1657 :lines 42 :wave 2 :status :done :static t
    :callees ("ST_TessIsInsidePolygon"))
- (:c "ST_TessIsInsidePolygon" :lisp "tessellate--st-tess-is-inside-polygon" :file "NL_Tessellate.cpp" :line 1761 :lines 229 :wave 2 :status :port :static t
+ (:c "ST_TessIsInsidePolygon" :lisp "tessellate--st-tess-is-inside-polygon" :file "NL_Tessellate.cpp" :line 1761 :lines 229 :wave 2 :status :done :static t
    :callees ("N_LineSegs2dAreIntersecting"))
- (:c "ST_TessIsInsideTrim" :lisp "tessellate--st-tess-is-inside-trim" :file "NL_Tessellate.cpp" :line 2106 :lines 46 :wave 2 :status :port :static t
+ (:c "ST_TessIsInsideTrim" :lisp "tessellate--st-tess-is-inside-trim" :file "NL_Tessellate.cpp" :line 2106 :lines 46 :wave 2 :status :done :static t
    :callees ("ST_TessIsInsidePolygon"))
- (:c "ST_TessFindBBoxIndices" :lisp "tessellate--st-tess-find-b-box-indices" :file "NL_Tessellate.cpp" :line 2375 :lines 25 :wave 2 :status :port :static t
+ (:c "ST_TessFindBBoxIndices" :lisp "tessellate--st-tess-find-b-box-indices" :file "NL_Tessellate.cpp" :line 2375 :lines 25 :wave 2 :status :done :static t
    :callees ("N_EndNurbs" "N_InitNurbs"))
- (:c "ST_TessRegionOfRectangles" :lisp "tessellate--st-tess-region-of-rectangles" :file "NL_Tessellate.cpp" :line 2984 :lines 734 :wave 2 :status :port :static t
+ (:c "ST_TessRegionOfRectangles" :lisp "tessellate--st-tess-region-of-rectangles" :file "NL_Tessellate.cpp" :line 2984 :lines 734 :wave 2 :status :done :static t
    :callees ("N_AllocFlag1dArray" "N_AllocInt1dArray" "N_AllocInt2dArray" "N_AllocIntPtr1dArray" "N_AllocIntPtr2dArray" "N_EndNurbs" "N_FreeInt1dArray" "N_FreeIntPtr1dArray" "N_InitNurbs" "N_Realloc1dFlagArray" "N_Realloc1dIntArray" "N_Realloc2dIntArray" "N_Realloc2dIntPtrArray" "ST_TessBBoxXTrim" "ST_TessCosine" "ST_TessEdgeTouch" "ST_TessFindBBoxIndices" "ST_TessInitArray" "ST_TessIsEdgeOnBoundary" "ST_TessIsInsideLoop" "ST_TessLineXPolygon" "ST_TessPtInSpan" "ST_TessSideTest"))
- (:c "ST_TessInitArray" :lisp "tessellate--st-tess-init-array" :file "NL_Tessellate.cpp" :line 4048 :lines 6 :wave 2 :status :port :static t
+ (:c "ST_TessInitArray" :lisp "tessellate--st-tess-init-array" :file "NL_Tessellate.cpp" :line 4048 :lines 6 :wave 2 :status :done :static t
    :callees ())
- (:c "ST_TessSideTest" :lisp "tessellate--st-tess-side-test" :file "NL_Tessellate.cpp" :line 4060 :lines 9 :wave 2 :status :port :static t
+ (:c "ST_TessSideTest" :lisp "tessellate--st-tess-side-test" :file "NL_Tessellate.cpp" :line 4060 :lines 9 :wave 2 :status :done :static t
    :callees ())
- (:c "ST_TessPtInSpan" :lisp "tessellate--st-tess-pt-in-span" :file "NL_Tessellate.cpp" :line 4076 :lines 25 :wave 2 :status :port :static t
+ (:c "ST_TessPtInSpan" :lisp "tessellate--st-tess-pt-in-span" :file "NL_Tessellate.cpp" :line 4076 :lines 25 :wave 2 :status :done :static t
    :callees ())
- (:c "ST_TessCosine" :lisp "tessellate--st-tess-cosine" :file "NL_Tessellate.cpp" :line 4113 :lines 19 :wave 2 :status :port :static t
+ (:c "ST_TessCosine" :lisp "tessellate--st-tess-cosine" :file "NL_Tessellate.cpp" :line 4113 :lines 19 :wave 2 :status :done :static t
    :callees ("N_FloatOpIsBad"))
- (:c "ST_TessIsEdgeOnBoundary" :lisp "tessellate--st-tess-is-edge-on-boundary" :file "NL_Tessellate.cpp" :line 4146 :lines 22 :wave 2 :status :port :static t
+ (:c "ST_TessIsEdgeOnBoundary" :lisp "tessellate--st-tess-is-edge-on-boundary" :file "NL_Tessellate.cpp" :line 4146 :lines 22 :wave 2 :status :done :static t
    :callees ())
- (:c "ST_TessEdgeTouch" :lisp "tessellate--st-tess-edge-touch" :file "NL_Tessellate.cpp" :line 4177 :lines 55 :wave 2 :status :port :static t
+ (:c "ST_TessEdgeTouch" :lisp "tessellate--st-tess-edge-touch" :file "NL_Tessellate.cpp" :line 4177 :lines 55 :wave 2 :status :done :static t
    :callees ())
- (:c "ST_TessLineXPolygon" :lisp "tessellate--st-tess-line-x-polygon" :file "NL_Tessellate.cpp" :line 4256 :lines 72 :wave 2 :status :port :static t
+ (:c "ST_TessLineXPolygon" :lisp "tessellate--st-tess-line-x-polygon" :file "NL_Tessellate.cpp" :line 4256 :lines 72 :wave 2 :status :done :static t
    :callees ())
- (:c "N_TessSrfArea" :lisp "tess-srf-area" :file "NL_Tessellate.cpp" :line 4389 :lines 50 :wave 2 :status :port
+ (:c "N_TessSrfArea" :lisp "tess-srf-area" :file "NL_Tessellate.cpp" :line 4389 :lines 50 :wave 2 :status :done
    :callees ("N_AllocPt1dArray" "N_CPtToPtEuclid" "N_DistPtPt" "N_EndNurbs" "N_InitNurbs" "N_SrfGetCPts"))
- (:c "ST_IsectLineWith2dPolygon" :lisp "tessellate--st-isect-line-with-2d-polygon" :file "NL_Tessellate.cpp" :line 4538 :lines 551 :wave 2 :status :port :static t
+ (:c "ST_IsectLineWith2dPolygon" :lisp "tessellate--st-isect-line-with-2d-polygon" :file "NL_Tessellate.cpp" :line 4538 :lines 551 :wave 2 :status :done :static t
    :callees ("N_AllocFlag1dArray" "N_AllocInt1dArray" "N_AllocReal1dArray" "N_EndNurbs" "N_InitNurbs" "ST_ReallocArrays" "ST_TessLineXLine2d" "ST_TessOverlap" "ST_TessSideTest2d"))
- (:c "ST_TessSideTest2d" :lisp "tessellate--st-tess-side-test-2d" :file "NL_Tessellate.cpp" :line 5280 :lines 13 :wave 2 :status :port :static t
+ (:c "ST_TessSideTest2d" :lisp "tessellate--st-tess-side-test-2d" :file "NL_Tessellate.cpp" :line 5280 :lines 13 :wave 2 :status :done :static t
    :callees ())
- (:c "ST_TessOverlap" :lisp "tessellate--st-tess-overlap" :file "NL_Tessellate.cpp" :line 5301 :lines 47 :wave 2 :status :port :static t
+ (:c "ST_TessOverlap" :lisp "tessellate--st-tess-overlap" :file "NL_Tessellate.cpp" :line 5301 :lines 47 :wave 2 :status :done :static t
    :callees ())
- (:c "ST_ReallocArrays" :lisp "tessellate--st-realloc-arrays" :file "NL_Tessellate.cpp" :line 5360 :lines 34 :wave 2 :status :port :static t
+ (:c "ST_ReallocArrays" :lisp "tessellate--st-realloc-arrays" :file "NL_Tessellate.cpp" :line 5360 :lines 34 :wave 2 :status :done :static t
    :callees ("N_Realloc1dFlagArray" "N_Realloc1dIntArray" "N_Realloc1dRealArray"))
- (:c "ST_TessLineXLine2d" :lisp "tessellate--st-tess-line-x-line-2d" :file "NL_Tessellate.cpp" :line 5454 :lines 52 :wave 2 :status :port :static t
+ (:c "ST_TessLineXLine2d" :lisp "tessellate--st-tess-line-x-line-2d" :file "NL_Tessellate.cpp" :line 5454 :lines 52 :wave 2 :status :done :static t
    :callees ("N_FloatOpIsBad"))
- (:c "ST_TessCheckTrim" :lisp "tessellate--st-tess-check-trim" :file "NL_Tessellate.cpp" :line 5570 :lines 60 :wave 2 :status :port :static t
+ (:c "ST_TessCheckTrim" :lisp "tessellate--st-tess-check-trim" :file "NL_Tessellate.cpp" :line 5570 :lines 60 :wave 2 :status :done :static t
    :callees ("N_BezInterp4Pts" "N_CPtToPtEuclid" "N_ClampSrfAtParams" "N_Combine4Pts" "N_CrvEval" "N_DistPtLineSeg" "N_DistPtPt" "N_EndNurbs" "N_InitNurbs" "N_PtToXYZ" "N_SrfEvalPt"))
- (:c "ST_TessBBoxXTrim" :lisp "tessellate--st-tess-b-box-x-trim" :file "NL_Tessellate.cpp" :line 5751 :lines 1311 :wave 2 :status :port :static t
+ (:c "ST_TessBBoxXTrim" :lisp "tessellate--st-tess-b-box-x-trim" :file "NL_Tessellate.cpp" :line 5751 :lines 1311 :wave 2 :status :done :static t
    :callees ("N_AllocFlag1dArray" "N_AllocFlagPtr1dArray" "N_AllocInt1dArray" "N_AllocIntPtr1dArray" "N_AllocReal1dArray" "N_AllocRealPtr1dArray" "N_BBox2dCalcOverlap" "N_EndNurbs" "N_InitNurbs" "ST_IsPtInPoly" "ST_IsPtInPolygon" "ST_IsectLineWith2dPolygon" "ST_TessAppendPolygonVertex" "ST_TessAppendPt" "ST_TessBuffer" "ST_TessFindCrossingPt" "ST_TessFindUnused" "ST_TessIsPtBBoxCorner" "ST_TessIsPtInBBox"))
- (:c "ST_TessAppendPt" :lisp "tessellate--st-tess-append-pt" :file "NL_Tessellate.cpp" :line 7568 :lines 29 :wave 2 :status :port :static t
+ (:c "ST_TessAppendPt" :lisp "tessellate--st-tess-append-pt" :file "NL_Tessellate.cpp" :line 7568 :lines 29 :wave 2 :status :done :static t
    :callees ("N_Realloc1dRealArray"))
- (:c "ST_TessBuffer" :lisp "tessellate--st-tess-buffer" :file "NL_Tessellate.cpp" :line 7615 :lines 47 :wave 2 :status :port :static t
+ (:c "ST_TessBuffer" :lisp "tessellate--st-tess-buffer" :file "NL_Tessellate.cpp" :line 7615 :lines 47 :wave 2 :status :done :static t
    :callees ("N_Realloc1dIntArray"))
- (:c "ST_TessFindUnused" :lisp "tessellate--st-tess-find-unused" :file "NL_Tessellate.cpp" :line 7685 :lines 137 :wave 2 :status :port :static t
+ (:c "ST_TessFindUnused" :lisp "tessellate--st-tess-find-unused" :file "NL_Tessellate.cpp" :line 7685 :lines 137 :wave 2 :status :done :static t
    :callees ())
- (:c "ST_TessAppendPolygonVertex" :lisp "tessellate--st-tess-append-polygon-vertex" :file "NL_Tessellate.cpp" :line 7841 :lines 22 :wave 2 :status :port :static t
+ (:c "ST_TessAppendPolygonVertex" :lisp "tessellate--st-tess-append-polygon-vertex" :file "NL_Tessellate.cpp" :line 7841 :lines 22 :wave 2 :status :done :static t
    :callees ("N_Realloc1dIntArray"))
- (:c "ST_TessIsPtInBBox" :lisp "tessellate--st-tess-is-pt-in-b-box" :file "NL_Tessellate.cpp" :line 7878 :lines 8 :wave 2 :status :port :static t
+ (:c "ST_TessIsPtInBBox" :lisp "tessellate--st-tess-is-pt-in-b-box" :file "NL_Tessellate.cpp" :line 7878 :lines 8 :wave 2 :status :done :static t
    :callees ())
- (:c "ST_TessIsPtBBoxCorner" :lisp "tessellate--st-tess-is-pt-b-box-corner" :file "NL_Tessellate.cpp" :line 7893 :lines 23 :wave 2 :status :port :static t
+ (:c "ST_TessIsPtBBoxCorner" :lisp "tessellate--st-tess-is-pt-b-box-corner" :file "NL_Tessellate.cpp" :line 7893 :lines 23 :wave 2 :status :done :static t
    :callees ())
- (:c "ST_IsPtInPolygon" :lisp "tessellate--st-is-pt-in-polygon" :file "NL_Tessellate.cpp" :line 7925 :lines 24 :wave 2 :status :port :static t
+ (:c "ST_IsPtInPolygon" :lisp "tessellate--st-is-pt-in-polygon" :file "NL_Tessellate.cpp" :line 7925 :lines 24 :wave 2 :status :done :static t
    :callees ())
- (:c "ST_IsPtInPoly" :lisp "tessellate--st-is-pt-in-poly" :file "NL_Tessellate.cpp" :line 7960 :lines 25 :wave 2 :status :port :static t
+ (:c "ST_IsPtInPoly" :lisp "tessellate--st-is-pt-in-poly" :file "NL_Tessellate.cpp" :line 7960 :lines 25 :wave 2 :status :done :static t
    :callees ())
- (:c "ST_TessFindCrossingPt" :lisp "tessellate--st-tess-find-crossing-pt" :file "NL_Tessellate.cpp" :line 7996 :lines 179 :wave 2 :status :port :static t
+ (:c "ST_TessFindCrossingPt" :lisp "tessellate--st-tess-find-crossing-pt" :file "NL_Tessellate.cpp" :line 7996 :lines 179 :wave 2 :status :done :static t
    :callees ())
- (:c "ST_TessPolygonizeTrimCrv" :lisp "tessellate--st-tess-polygonize-trim-crv" :file "NL_Tessellate.cpp" :line 8265 :lines 277 :wave 2 :status :port :static t
+ (:c "ST_TessPolygonizeTrimCrv" :lisp "tessellate--st-tess-polygonize-trim-crv" :file "NL_Tessellate.cpp" :line 8265 :lines 277 :wave 2 :status :done :static t
    :callees ("N_AllocReal1dArray" "N_BBoxGetDiagonal" "N_CPtToPtEuclid" "N_ClampSrfAtParams" "N_CopyPt" "N_CrvDecomposeContinuity" "N_CrvEval" "N_CrvGetBBox" "N_CrvGetCPts" "N_CrvGetDegree" "N_CrvGetKnots" "N_DistPtPt" "N_EndNurbs" "N_FloatOpIsBad" "N_InitNurbs" "N_PtToXYZ" "N_Realloc1dRealArray" "N_SrfEvalPtCrvOnSrf" "N_SrfGetCPts" "N_SrfGetParameterBounds" "N_VectorDiffCPts" "N_VectorDot" "ST_TessCheckTrim"))
- (:c "ST_TessSubdivideSrf" :lisp "tessellate--st-tess-subdivide-srf" :file "NL_Tessellate.cpp" :line 8749 :lines 441 :wave 2 :status :port :static t
+ (:c "ST_TessSubdivideSrf" :lisp "tessellate--st-tess-subdivide-srf" :file "NL_Tessellate.cpp" :line 8749 :lines 441 :wave 2 :status :done :static t
    :callees ("N_AllocFlag1dArray" "N_AllocFlag2dArray" "N_AllocInt1dArray" "N_AllocInt2dArray" "N_AllocReal1dArray" "N_AllocSrfArrays" "N_CreateRectangle" "N_EndNurbs" "N_InitNurbs" "N_InitRealHash" "N_Realloc1dFlagArray" "N_Realloc1dIntArray" "N_Realloc1dRealArray" "N_RetrieveRealHash" "N_SearchInsertReal" "N_SrfExtractPatch" "N_SrfGetArraySizes" "N_SrfGetDegrees" "N_SrfIsFlat" "N_SrfReparamToInterval" "N_SrfSetSizeIndices" "N_UpdateRealHash" "ST_TessIsInsideTrim"))
  (:c "N_InitNurbs" :lisp "init-nurbs" :file "NL_Util.cpp" :line 52 :lines 55 :wave 0 :status :vanish :root t
    :callees ("N_FileClose" "N_FileOpen"))
