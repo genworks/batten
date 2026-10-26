@@ -721,3 +721,42 @@ NLib: N_BezCenterRadiusFrom3CPts."
     (vector-diff p2 c v)
     (setf bet (vector-directed-angle rr v))
     (values r alf bet)))
+
+;;; ------------------------------------------------------------- L14-g0
+
+(defun bez-eval-basis (p u b)
+  "Write the values at U in [0, 1] of all P+1 Bernstein polynomials of degree
+P into B[0..P] (a real-vector the caller allocates), by the triangular
+scheme.  Signals :par-err for U outside [0, 1].  Returns B.
+NLib: N_BezEvalBasis."
+  (declare (type fixnum p) (type double-float u) (type real-vector b))
+  (when (or (< u 0d0) (> u 1d0))
+    (nurbs-error :par-err 'bez-eval-basis))
+  (cond
+    ((= u 0d0)
+     (setf (aref b 0) 1d0)
+     (do ((i 1 (1+ i))) ((> i p))
+       (declare (type fixnum i))
+       (setf (aref b i) 0d0)))
+    ((= u 1d0)
+     (do ((i 0 (1+ i))) ((>= i p))
+       (declare (type fixnum i))
+       (setf (aref b i) 0d0))
+     (setf (aref b p) 1d0))
+    (t
+     (let ((omu (- 1d0 u)))
+       (declare (type double-float omu))
+       (setf (aref b 0) 1d0)
+       (fast
+         (do ((i 1 (1+ i))) ((> i p))
+           (declare (type fixnum i))
+           (let ((saved 0d0))
+             (declare (type double-float saved))
+             (do ((j 0 (1+ j))) ((>= j i))
+               (declare (type fixnum j))
+               (let ((temp (aref b j)))
+                 (declare (type double-float temp))
+                 (setf (aref b j) (+ saved (* omu temp))
+                       saved (* u temp))))
+             (setf (aref b i) saved)))))))
+  b)

@@ -503,3 +503,27 @@ ones, or random ones."
                              (list (from-foreign c :point) (cffi:mem-ref r :double)
                                    (cffi:mem-ref alf :double) (cffi:mem-ref bet :double)
                                    (from-foreign ps :point) (from-foreign pe :point)))))))))))
+
+;;; ------------------------------------------------------------- L14-g0
+
+(define-oracle-test bez-eval-basis (:file "bezier" :trials 6000)
+  ;; B starts with the same random contents on both sides, one longer than
+  ;; the C writes, so entries left alone are compared too
+  (let* ((p (rnd 25))
+         (u (case (rnd 12)
+              (0 0d0)
+              (1 1d0)
+              (2 (rnd-range -0.5d0 0d0))
+              (3 (rnd-range 1.000001d0 1.5d0))
+              (4 0.5d0)
+              (5 (rnd 1d-6))
+              (6 (- 1d0 (rnd 1d-6)))
+              (t (rnd 1d0))))
+         (b0 (random-real-vector (+ p 2))))
+    (agree (list :p p :u u)
+           (let ((b (copy-seq b0)))
+             (batten::bez-eval-basis p u b)
+             (list b))
+           (with-foreign ((b b0 :real-vector))
+             (let ((failed (c-flag-error-p (c-bez-eval-basis p u b))))
+               (values failed (unless failed (list (from-foreign b :real-vector (+ p 2))))))))))

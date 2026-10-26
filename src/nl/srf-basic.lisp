@@ -377,3 +377,85 @@ NLib: N_SrfIsFlatCheap."
                   (return-from scan))))))
         (setf dir (if (> lu lv) +vdir+ +udir+))
         (values flt dir)))))
+
+;;; ------------------------------------------------------------ level 14, group 0
+
+(defun clamp-srf-at-params (sur u v)
+  "U and V clamped to the knot rectangle of surface SUR: (values u v).
+NLib: N_ClampSrfAtParams."
+  (declare (type surface sur) (type double-float u v))
+  (let* ((ku (surface-knots-u sur)) (kv (surface-knots-v sur))
+         (r (1- (length ku))) (s (1- (length kv))))
+    (declare (type real-vector ku kv) (type fixnum r s))
+    (when (< u (aref ku 0)) (setf u (aref ku 0)))
+    (when (> u (aref ku r)) (setf u (aref ku r)))
+    (when (< v (aref kv 0)) (setf v (aref kv 0)))
+    (when (> v (aref kv s)) (setf v (aref kv s)))
+    (values u v)))
+
+(defun srf-is-degen (sur)
+  "True when surface SUR is degenerate to a point: every Euclidean control
+point within *mtol* of their centroid.
+NLib: N_SrfIsDegen."
+  (declare (type surface sur))
+  (let* ((n (surface-n sur)) (m (surface-m sur))
+         (pw (surface-cpoints sur))
+         (fac (/ 1d0 (* (+ (float n 1d0) 1d0) (+ (float m 1d0) 1d0))))
+         (mtol *mtol*)
+         (cw (make-cpoint)) (q (make-point)) (mm (make-point)))
+    (declare (type fixnum n m) (type cpoint-net pw) (type double-float fac mtol)
+             (type cpoint cw) (type point q mm) (dynamic-extent cw q mm))
+    (copy-pt (make-point) mm)
+    (dotimes (i (1+ n))
+      (dotimes (j (1+ m))
+        (c-pt-to-pt-euclid (%net-c-pt pw i j cw) q)
+        (sum-2-pts mm q mm)))
+    (scale-pt fac mm mm)
+    (dotimes (i (1+ n) t)
+      (dotimes (j (1+ m))
+        (c-pt-to-pt-euclid (%net-c-pt pw i j cw) q)
+        (when (> (dist-pt-pt q mm) mtol)
+          (return-from srf-is-degen nil))))))
+
+(defun srf-is-singular (sur side)
+  "True when surface SUR has a pole on boundary SIDE: +left+ (u = umin),
++right+ (u = umax), +bottom+ (v = vmin) or +top+ (v = vmax).  The boundary's
+first control point must lie within *mtol* of the one past its middle, and
+every control point of the boundary within *mtol* of their centroid.  False
+for any other SIDE.
+NLib: N_SrfIsSingular."
+  (declare (type surface sur) (type fixnum side))
+  (let* ((n (surface-n sur)) (m (surface-m sur))
+         (pw (surface-cpoints sur))
+         (mtol *mtol*)
+         (cw (make-cpoint)) (q (make-point)) (mm (make-point)))
+    (declare (type fixnum n m) (type cpoint-net pw) (type double-float mtol)
+             (type cpoint cw) (type point q mm) (dynamic-extent cw q mm))
+    (flet ((pole (fixed k mid)
+             ;; FIXED: the fixed index (a row for u, a column for v); K the
+             ;; highest index along the boundary, MID the probe index
+             (flet ((entry (s)
+                      (if (or (= side +left+) (= side +right+))
+                          (%net-c-pt pw fixed s cw)
+                          (%net-c-pt pw s fixed cw))))
+               (c-pt-to-pt-euclid (entry 0) mm)
+               (c-pt-to-pt-euclid (entry mid) q)
+               (when (> (dist-pt-pt mm q) mtol)
+                 (return-from srf-is-singular nil))
+               (let ((fac (/ 1d0 (+ (float k 1d0) 1d0))))
+                 (declare (type double-float fac))
+                 (do ((s 1 (1+ s))) ((> s k))
+                   (declare (type fixnum s))
+                   (c-pt-to-pt-euclid (entry s) q)
+                   (sum-2-pts mm q mm))
+                 (scale-pt fac mm mm))
+               (do ((s 0 (1+ s))) ((> s k) t)
+                 (declare (type fixnum s))
+                 (c-pt-to-pt-euclid (entry s) q)
+                 (when (> (dist-pt-pt q mm) mtol)
+                   (return-from srf-is-singular nil))))))
+      (cond ((= side +left+) (pole 0 m (1+ (truncate m 2))))
+            ((= side +right+) (pole n m (1+ (truncate m 2))))
+            ((= side +bottom+) (pole 0 n (1+ (truncate n 2))))
+            ((= side +top+) (pole m n (1+ (truncate n 2))))
+            (t nil)))))

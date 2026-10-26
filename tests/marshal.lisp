@@ -23,10 +23,14 @@
 ;;;;   :basis-derivatives NL_BASISDERIVATIVES (fixed [5][5][18][18])
 ;;;;   :rmatrix NL_RMATRIX* (batten::rmatrix; nil storage is RM NULL)
 ;;;;   :cnet NL_CNET* (a cpoint-net)  :index-matrix NL_INTEGER**  :real-3d NL_REAL***
+;;;;   :index-lists NL_INDEX** over rows of their own lengths (a simple-vector of
+;;;;     index-vectors, e.g. a triangulation's DT; a NIL row is a NULL pointer)
 ;;;; Dimensions after the type give sizes where C does not record them:
 ;;;;   (from-foreign p :point-array n) (from-foreign p :real-matrix rows cols)
 ;;;;   (from-foreign p :basis-derivatives udr+1 vdr+1 p+1 q+1)
 ;;;;   (from-foreign p :index-matrix rows cols) (from-foreign p :real-3d a b c)
+;;;;   (from-foreign p :index-lists lengths) -- LENGTHS a list, one per row (NIL
+;;;;     for a row to read as NIL without touching its pointer)
 ;;;;   (from-foreign p :rmatrix [rows cols]) -- storage size; by default n+1 rows
 ;;;;     and m+1 columns, or bw columns (2 when bw is 1) for a banded matrix
 ;;;;   (empty-foreign :rmatrix) is N_InitRealMatrix's NULL matrix;
@@ -107,6 +111,12 @@ released by the enclosing WITH-FOREIGN."
     (:rmatrix (rmatrix-to-foreign object))
     (:cnet (cnet-to-foreign object))
     (:index-matrix (index-matrix-to-foreign object))
+    (:index-lists (let ((rp (falloc :pointer (length object))))
+                    (dotimes (i (length object) rp)
+                      (setf (cffi:mem-aref rp :pointer i)
+                            (if (svref object i)
+                                (to-foreign (svref object i) :index-vector)
+                                (cffi:null-pointer))))))
     (:real-3d (real-3d-to-foreign object))
     ((:real-vector :point :cpoint :point-array :cpoint-array) (fill-doubles object))
     (:index-vector (let ((p (falloc :long (length object))))
@@ -267,6 +277,12 @@ released by the enclosing WITH-FOREIGN."
          (let ((row (cffi:mem-aref ptr :pointer r)))
            (dotimes (c (second dims))
              (setf (aref a r c) (cffi:mem-aref row :long c)))))))
+    (:index-lists
+     (let* ((lengths (first dims))
+            (out (make-array (length lengths) :initial-element nil)))
+       (dotimes (i (length lengths) out)
+         (when (nth i lengths)
+           (setf (svref out i) (from-foreign (cffi:mem-aref ptr :pointer i) :index-vector (nth i lengths)))))))
     (:real-3d
      (destructuring-bind (a b c) dims
        (let ((out (make-array dims :element-type 'double-float)))

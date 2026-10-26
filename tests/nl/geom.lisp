@@ -1053,3 +1053,68 @@ random point."
                  (with-scalars ((d :double))
                    (let ((err (c-flag-error-p (c-dist-max-line-arc fc r alf bet fps fpe fp fq d))))
                      (values err (unless err (list (cffi:mem-ref d :double) p q)))))))))))
+
+;;; ------------------------------------------------------------- L14-g0
+
+(define-oracle-test vector-diff-c-pts (:file "geom" :trials 3000)
+  (let* ((two-d (zerop (rnd 5)))
+         (pw (random-cpoint :two-d two-d))
+         (qw (if (zerop (rnd 10)) (copy-seq pw) (random-cpoint :two-d two-d))))
+    (agree (list :pw pw :qw qw)
+           (list (batten::vector-diff-c-pts pw qw (make-point)))
+           (with-foreign ((a pw :cpoint) (b qw :cpoint))
+             (with-foreign-out ((v :point))
+               (c-vector-diff-c-pts a b v)
+               (values nil (list (from-foreign v :point))))))))
+
+(defun %geom14-segments ()
+  "Two 2D segments as (x1 y1 x2 y2 x3 y3 x4 y4): random, crossing, meeting
+at or near an end, parallel or collinear, or one degenerate; on a small
+integer grid now and then, so that exact touches and zero denominators come
+up."
+  (let* ((grid (zerop (rnd 4)))
+         (c (lambda () (if grid (float (- (rnd 9) 4) 1d0) (rnd-range -10d0 10d0))))
+         (x1 (funcall c)) (y1 (funcall c)) (x2 (funcall c)) (y2 (funcall c)))
+    (case (rnd 8)
+      ((0 1)                                ; a segment through a point of the first
+       (let* ((s (case (rnd 4) (0 0d0) (1 1d0) (t (rnd 1d0))))
+              (px (+ x1 (* s (- x2 x1)))) (py (+ y1 (* s (- y2 y1))))
+              (dx (funcall c)) (dy (funcall c))
+              (a (rnd-range 0d0 1.2d0)) (b (rnd-range 0d0 1.2d0)))
+         (list x1 y1 x2 y2 (- px (* a dx)) (- py (* a dy)) (+ px (* b dx)) (+ py (* b dy)))))
+      (2                                    ; parallel or collinear
+       (let ((k (case (rnd 3) (0 0d0) (t (rnd-range -3d0 3d0))))
+             (s (rnd-range -1.5d0 1.5d0)) (e (rnd-range -1.5d0 2.5d0)))
+         (list x1 y1 x2 y2
+               (+ x1 (* s (- x2 x1)) (* k (- y1 y2))) (+ y1 (* s (- y2 y1)) (* k (- x2 x1)))
+               (+ x1 (* e (- x2 x1)) (* k (- y1 y2))) (+ y1 (* e (- y2 y1)) (* k (- x2 x1))))))
+      (3                                    ; the second segment a point
+       (let ((x3 (funcall c)) (y3 (funcall c))) (list x1 y1 x2 y2 x3 y3 x3 y3)))
+      (4                                    ; sharing an end
+       (list x1 y1 x2 y2 x2 y2 (funcall c) (funcall c)))
+      (t (list x1 y1 x2 y2 (funcall c) (funcall c) (funcall c) (funcall c))))))
+
+(define-oracle-test line-segs-2d-are-intersecting (:file "geom" :trials 8000)
+  (let ((xs (%geom14-segments))
+        (tol (case (rnd 6) (0 0d0) (1 1d-12) (2 1d-6) (3 0.1d0) (4 (rnd 2d0)) (t 1d-9))))
+    (agree (list :xs xs :tol tol)
+           (list (if (apply #'batten::line-segs-2d-are-intersecting (append xs (list tol))) 1 0))
+           (values nil (list (apply #'c-line-segs-2d-are-intersecting (append xs (list tol))))))))
+
+(define-oracle-test b-box-2d-calc-overlap (:file "geom" :trials 6000)
+  (let* ((grid (zerop (rnd 3)))
+         (c (lambda () (if grid (float (- (rnd 9) 4) 1d0) (rnd-range -10d0 10d0))))
+         (box (lambda ()
+                (let ((a (funcall c)) (b (funcall c)) (d (funcall c)) (e (funcall c)))
+                  ;; ordered usually, inverted now and then
+                  (if (zerop (rnd 8))
+                      (list a b d e)
+                      (list (min a b) (max a b) (min d e) (max d e))))))
+         (b1 (funcall box))
+         (b2 (if (zerop (rnd 10)) (copy-list b1) (funcall box)))
+         (tol (case (rnd 5) (0 0d0) (1 1d-9) (2 0.5d0) (3 (rnd 3d0)) (t 1d-6))))
+    (agree (list :b1 b1 :b2 b2 :tol tol)
+           (list (apply #'batten::b-box-2d-calc-overlap (append b1 b2 (list tol))))
+           (with-scalars ((a :double))
+             (apply #'c-b-box-2d-calc-overlap (append b1 b2 (list tol a)))
+             (values nil (list (cffi:mem-ref a :double)))))))

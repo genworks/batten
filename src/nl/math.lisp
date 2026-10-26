@@ -1537,3 +1537,102 @@ NLib: N_RealMatrixLstSqSolve."
         (real-matrix-lu-decompose-pivot rmta ind)
         (real-matrix-for-back-pivot rmta ind sol))))
   sol)
+
+;;; ------------------------------------------------------------------ L14-g0
+
+(defun search-insert-real (a n tt)
+  "The index in the ascending real-vector A[0..N] of an element within
+*ptol* of TT, found by interpolation search, or -1 when there is none.
+The C is only safe where the search finds TT, or rules it out, without
+narrowing to a single element or interpolating outside A[0..N] (it divides
+by zero or reads out of bounds there); the Lisp then signals a type or
+bounds error instead.
+NLib: N_SearchInsertReal."
+  (declare (type real-vector a) (type fixnum n) (type double-float tt))
+  (let ((l 0) (r n) (k -1) (ptol *ptol*))
+    (declare (type fixnum l r k) (type double-float ptol))
+    (do () ((< r l))
+      (let* ((f (/ (- tt (aref a l)) (- (aref a r) (aref a l))))
+             (m (truncate (+ (float l 1d0) (* f (- (float r 1d0) (float l 1d0)))))))
+        (declare (type double-float f) (type fixnum m))
+        (when (< (abs (- (aref a m) tt)) ptol)
+          (setf k m)
+          (return))
+        (if (< tt (aref a m))
+            (setf r (- m 1))
+            (setf l (+ m 1)))))
+    k))
+
+(defun init-real-hash (n)
+  "A new, empty hash table for reals with slots 0..N: a simple-vector of N+1
+NILs (NULL pointers).  See update-real-hash.
+NLib: N_InitRealHash."
+  (declare (type fixnum n))
+  (make-array (1+ n) :initial-element nil))
+
+(defun update-real-hash (h n us u ue m)
+  "Add U, in [US, UE], to the hash table H with slots 0..N (made by
+init-real-hash): U hashes to slot i = (U-US)/(UE-US)*N truncated, whose list
+is a real-vector of the slot's elements in ascending order closed by +bigd+.
+U is ignored when the slot already holds an element within *ptol* of it;
+otherwise it is inserted, in a fresh real-vector one longer, and the counter
+M incremented.  Signals :inp-err for U outside [US, UE].  Returns M, the
+counter after the update.
+NLib: N_UpdateRealHash."
+  (declare (type simple-vector h) (type fixnum n m) (type double-float us u ue))
+  (when (or (< u us) (> u ue))
+    (nurbs-error :inp-err 'update-real-hash))
+  (let* ((fac (/ (- u us) (- ue us)))
+         (i (truncate (* fac (float n 1d0))))
+         (ptol *ptol*))
+    (declare (type double-float fac ptol) (type fixnum i))
+    ;; no element at i: add u
+    (when (null (svref h i))
+      (let ((s (make-real-vector 2)))
+        (setf (aref s 0) u
+              (aref s 1) +bigd+
+              (svref h i) s))
+      (return-from update-real-hash (1+ m)))
+    ;; the slot is occupied: find its highest index, and U if it is there
+    (let ((hi (svref h i))
+          (k 0))
+      (declare (type real-vector hi) (type fixnum k))
+      (do () ((= (aref hi k) +bigd+))
+        (when (< (abs (- (aref hi k) u)) ptol)
+          (return-from update-real-hash m))
+        (incf k))
+      ;; U must be added: reallocate, keeping the elements in order
+      (let ((s1d (make-real-vector (+ k 2)))
+            (s 0))
+        (declare (type real-vector s1d) (type fixnum s))
+        (dotimes (j (1+ k)) (setf (aref s1d j) (aref hi j)))
+        (setf (svref h i) s1d)
+        (do () ((>= s k))
+          (when (< u (aref s1d s)) (return))
+          (incf s))
+        (do ((j k (1- j))) ((<= j s))
+          (declare (type fixnum j))
+          (setf (aref s1d j) (aref s1d (1- j))))
+        (setf (aref s1d s) u
+              (aref s1d (1+ k)) +bigd+)
+        (1+ m)))))
+
+(defun retrieve-real-hash (h n u)
+  "Write every element of the hash table H with slots 0..N (see
+update-real-hash) into U, a real-vector the caller allocates: slot by slot,
+each slot's elements in order.  Returns U.
+NLib: N_RetrieveRealHash."
+  (declare (type simple-vector h) (type fixnum n) (type real-vector u))
+  (let ((k 0))
+    (declare (type fixnum k))
+    (do ((i 0 (1+ i))) ((> i n))
+      (declare (type fixnum i))
+      (let ((hi (svref h i)))
+        (when hi
+          (let ((hi hi) (j 0))
+            (declare (type real-vector hi) (type fixnum j))
+            (do () ((= (aref hi j) +bigd+))
+              (setf (aref u k) (aref hi j))
+              (incf k)
+              (incf j)))))))
+  u)
