@@ -579,3 +579,30 @@ NLib: N_CrvsAreCoincident."
           (when (> dw dwmax)
             (setf dwmax dw))))
       (< dwmax tol))))
+
+;;; ------------------------------------------------------------ level 10, group 1
+
+(defun crv-expand (cur new-n new-m)
+  "Give curve CUR (modified in place) fresh control point and knot arrays of
+highest indexes NEW-N and NEW-M, holding copies of its first
+min(n, NEW-N) + 1 control points and min(m, NEW-M) + 1 knots.  Entries past
+those are zero (the C leaves them uninitialized).  Returns CUR.
+NLib: N_CrvExpand."
+  (declare (type curve cur) (type fixnum new-n new-m))
+  (let* ((pw (curve-cpoints cur))
+         (u (curve-knots cur))
+         (n (curve-n cur))
+         (m (curve-m cur))
+         (min-n (nl-min n new-n))
+         (min-m (nl-min m new-m))
+         (qw (make-cpoint-array (1+ new-n)))
+         (v (make-real-vector (1+ new-m))))
+    (declare (type cpoint-array pw qw) (type real-vector u v) (type fixnum n m min-n min-m))
+    (fast
+      (do ((i 0 (1+ i))) ((> i min-n))
+        (declare (type fixnum i))
+        (%copy-c-pt-row pw i qw i))
+      (do ((i 0 (1+ i))) ((> i min-m))
+        (declare (type fixnum i))
+        (setf (aref v i) (aref u i))))
+    (crv-set-c-pts-and-knots cur qw v)))

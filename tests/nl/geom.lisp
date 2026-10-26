@@ -949,3 +949,52 @@ or nearly so; three points a quarter of the time, now and then one or two."
                                  (list (cffi:mem-ref era :double) (cffi:mem-ref erm :double)
                                        (cffi:mem-ref cfl :short)
                                        (from-foreign pp :point-array (1+ n)))))))))))))
+
+;;; ------------------------------------------------------------- L10-g1
+
+(defun %arc-angle ()
+  "An arc end angle in degrees: usually in [0, 360), now and then 0, 90, 180,
+270 or 360 exactly."
+  (case (rnd 8)
+    (0 (float (* 90 (rnd 5)) 1d0))
+    (t (rnd 360d0))))
+
+(define-oracle-test dist-pt-arc (:file "geom" :trials 6000)
+  (let* ((c (random-point 50d0))
+         (line (zerop (rnd 6)))
+         (r (if line +infinite+ (expt 10d0 (rnd-range -1d0 2d0))))
+         (rr (if line 10d0 r))
+         (alf (%arc-angle))
+         (bet (case (rnd 10)
+                (0 alf)
+                (1 (mod (+ alf 180d0) 360d0))
+                (2 (mod (+ alf (rnd-range -179d0 179d0)) 360d0))
+                (t (%arc-angle))))
+         (two-d (zerop (rnd 3)))
+         (cz (if two-d 0d0 (aref c 2)))
+         (ps (make-point (+ (aref c 0) (* rr (cos (* alf (/ pi 180d0)))))
+                         (+ (aref c 1) (* rr (sin (* alf (/ pi 180d0))))) cz))
+         (pe (make-point (+ (aref c 0) (* rr (cos (* bet (/ pi 180d0)))))
+                         (+ (aref c 1) (* rr (sin (* bet (/ pi 180d0))))) cz))
+         (p (case (rnd 10)
+              ;; on or near an end point
+              (0 (let ((e (if (zerop (rnd 2)) ps pe)) (eps (case (rnd 3) (0 0d0) (1 5d-8) (t 2d-7))))
+                   (make-point (+ (aref e 0) eps) (aref e 1) (aref e 2))))
+              ;; near the circle, in some direction
+              ((1 2 3 4 5) (let ((a (if (zerop (rnd 3)) (%arc-angle) (rnd 360d0)))
+                                 (d (* rr (rnd-range 0.2d0 2d0))))
+                             (make-point (+ (aref c 0) (* d (cos (* a (/ pi 180d0)))))
+                                         (+ (aref c 1) (* d (sin (* a (/ pi 180d0)))))
+                                         (+ cz (if two-d 0d0 (rnd-range -1d0 1d0))))))
+              (t (random-point 100d0)))))
+    (when (and line (zerop (rnd 4)))
+      ;; random, possibly degenerate, segments
+      (setf ps (random-point) pe (if (zerop (rnd 5)) (make-point (aref ps 0) (aref ps 1) (aref ps 2)) (random-point))))
+    ;; P = C is outside the C's domain: it reads an uninitialized angle
+    (unless (and (= (aref p 0) (aref c 0)) (= (aref p 1) (aref c 1)))
+      (agree (list :p p :c c :r r :alf alf :bet bet :ps ps :pe pe)
+             (list (batten::dist-pt-arc p c r alf bet ps pe))
+             (with-foreign ((fp p :point) (fc c :point) (fps ps :point) (fpe pe :point))
+               (with-scalars ((d :double))
+                 (let ((err (c-flag-error-p (c-dist-pt-arc fp fc r alf bet fps fpe d))))
+                   (values err (unless err (list (cffi:mem-ref d :double)))))))))))
