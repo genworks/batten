@@ -9,6 +9,31 @@
 
 (in-package :batten)
 
+;;; What every API function accepts: any real for a parameter or a length,
+;;; any sequence of three reals for a point or a vector (a Batten point is
+;;; passed through, not copied).
+
+(declaim (inline %real))
+(defun %real (x)
+  "X as a double-float."
+  (float x 1d0))
+
+(defun %point (p)
+  "P, a point or any sequence of three reals, as a Batten point."
+  (if (typep p 'point)
+      p
+      (make-point (float (elt p 0) 1d0) (float (elt p 1) 1d0) (float (elt p 2) 1d0))))
+
+(defun %point-array (points)
+  "POINTS, a sequence of points (as %point takes them), as a point-array."
+  (let* ((n (length points)) (array (make-point-array n)) (i 0))
+    (map nil #'(lambda (p)
+                 (let ((p (%point p)))
+                   (setf (aref array i 0) (aref p 0) (aref array i 1) (aref p 1) (aref array i 2) (aref p 2)))
+                 (incf i))
+         points)
+    array))
+
 (defgeneric domain (object)
   (:documentation "The parameter domain: (values u0 u1) for a curve, (values u0 u1 v0 v1)
 for a surface."))
