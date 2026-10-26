@@ -513,6 +513,53 @@ control points, as the C then reads the third."
                    (let ((failed (c-flag-error-p (c-crv-extend-by-dist cp dist flg end cont q sp sq))))
                      (values failed (unless failed (list (from-foreign q :curve))))))))))))
 
+;;; ------------------------------------------------------------- L10-g0
+
+(defun %crv-adv-extend-target (c end)
+  "A point to extend curve C to at END: random near the curve, on the end
+tangent line ahead of or behind the end, at the end point itself, or off the
+plane z = 0 for a 2D curve now and then (z = 0 otherwise, as a 2D point)."
+  (let* ((knots (curve-knots c))
+         (u (if (= end +start+) (aref knots 0) (aref knots (1- (length knots)))))
+         (d (make-point-array 2))
+         (two-d (= (aref (curve-cpoints c) 0 2) +no-z+)))
+    (batten::crv-derivs c u (if (= end +start+) +left+ +right+) 1 d)
+    (let ((pt (case (rnd 12)
+                ((0 1)                        ; on the tangent line
+                 (let ((s (* (if (zerop (rnd 2)) 1d0 -1d0) (rnd-range 0.05d0 2d0))))
+                   (make-point (+ (aref d 0 0) (* s (aref d 1 0)))
+                               (+ (aref d 0 1) (* s (aref d 1 1)))
+                               (+ (aref d 0 2) (* s (aref d 1 2))))))
+                (2 (make-point (aref d 0 0) (aref d 0 1) (aref d 0 2)))
+                (t (let ((q (random-point)))
+                     (dotimes (k 3 q)
+                       (setf (aref q k) (+ (aref d 0 k) (* 0.5d0 (aref q k))))))))))
+      (when two-d
+        (setf (aref pt 2) (if (zerop (rnd 6)) (rnd-range -50d0 50d0) 0d0)))
+      pt)))
+
+(define-oracle-test crv-extend-to-pt (:file "crv-adv" :trials 3000)
+  (let* ((c (%crv-adv-extend-curve))
+         (end (if (zerop (rnd 2)) +start+ +end+))
+         (cont (if (zerop (rnd 2)) +g-1+ +cmax+))
+         (knots (curve-knots c))
+         (m (1- (length knots))))
+    ;; degree 1 with uniform knots now and then (parametrized uniformly)
+    (when (and (= (curve-degree c) 1) (> m 3) (zerop (rnd 2)))
+      (let ((lo (aref knots 0)) (h (rnd-range 0.1d0 2d0)))
+        (do ((i 1 (1+ i))) ((>= i m))
+          (setf (aref knots i) (+ lo (* h (float (1- i) 1d0)))))
+        (setf (aref knots m) (aref knots (1- m)))))
+    (let ((pt (%crv-adv-extend-target c end)))
+     (agree (list :curve c :pt pt :end end :cont cont)
+           (list (batten::crv-extend-to-pt c pt end cont))
+           (with-foreign ((cp c :curve) (pp pt :point))
+             (with-stacks (sp)
+               (with-stacks (sq)
+                 (with-foreign-out ((q :curve))
+                   (let ((failed (c-flag-error-p (c-crv-extend-to-pt cp pp end cont q sp sq))))
+                     (values failed (unless failed (list (from-foreign q :curve)))))))))))))
+
 (define-oracle-test crv-remove-all-knots-arc-len (:file "crv-adv" :trials 400)
   (let ((c (if (zerop (rnd 2)) (%crv-adv-piecewise-curve) (%crv-adv-removable-curve)))
         (tol (case (rnd 8) (0 0d0) (1 1d-9) (2 1d-6) (3 1d-3) (4 1d-1) (5 1d0) (6 30d0) (t 1d6))))

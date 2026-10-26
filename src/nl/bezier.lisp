@@ -564,3 +564,103 @@ NLib: N_BezCalcLength."
     (multiple-value-bind (e total) (bez-calc-arc-length pw p eps 0.0d0)
       (declare (ignore e) (type double-float total))
       (* 0.5d0 total))))
+
+;;; ------------------------------------------------------------- L10-g0
+
+(defun bez-eval-one-basis (p i u)
+  "The value at U in [0, 1] of the I-th Bernstein polynomial of degree P, by
+the recursive definition.  Signals :ind-err for I outside 0..P and :par-err
+for U outside [0, 1].
+NLib: N_BezEvalOneBasis."
+  (declare (type fixnum p i) (type double-float u))
+  (when (or (< i 0) (> i p))
+    (nurbs-error :ind-err 'bez-eval-one-basis))
+  (when (or (< u 0d0) (> u 1d0))
+    (nurbs-error :par-err 'bez-eval-one-basis))
+  (cond
+    ((= u 0d0) (if (= i 0) 1d0 0d0))
+    ((= u 1d0) (if (= i p) 1d0 0d0))
+    (t
+     (let ((tmp (make-array (1+ p) :element-type 'double-float :initial-element 0d0))
+           (omu (- 1d0 u)))
+       (declare (type real-vector tmp) (dynamic-extent tmp) (type double-float omu))
+       (setf (aref tmp (- p i)) 1d0)
+       (fast
+         (do ((k 1 (1+ k))) ((> k p))
+           (declare (type fixnum k))
+           (do ((j p (1- j))) ((< j k))
+             (declare (type fixnum j))
+             (setf (aref tmp j) (+ (* omu (aref tmp j)) (* u (aref tmp (1- j))))))))
+       (aref tmp p)))))
+
+(defun bez-degree-reduce-coefs (p alf oma bet omb)
+  "Write the coefficients for reducing a degree-P Bezier curve by one into
+the caller's real-vectors: ALF[1..r] and OMA[1..r] (1 - ALF) from the left,
+BET[r..p-2] and OMB[r..p-2] (1 - BET) from the right, r = (p-1)/2 truncated.
+Returns ALF.
+NLib: N_BezDegreeReduceCoefs."
+  (declare (type fixnum p) (type real-vector alf oma bet omb))
+  (let ((r (truncate (- p 1) 2))
+        (fp (float p 1d0)))
+    (declare (type fixnum r) (type double-float fp))
+    (do ((i 1 (1+ i))) ((> i r))
+      (declare (type fixnum i))
+      (setf (aref alf i) (/ fp (- fp (float i 1d0)))
+            (aref oma i) (- 1d0 (aref alf i))))
+    (do ((i (- p 2) (1- i))) ((< i r))
+      (declare (type fixnum i))
+      (setf (aref bet i) (/ fp (+ (float i 1d0) 1d0))
+            (aref omb i) (- 1d0 (aref bet i)))))
+  alf)
+
+(defun bez-center-radius-from-3-c-pts (p0w p1w p2w c ps pe)
+  "The center, radius and start and end angles of the 2D circular arc whose
+Bezier control points are P0W P1W P2W (assumed to make a circle).  The
+Euclidean end points go into PS and PE and the center into C; returns
+(values r alf bet), the radius and the start and end angles in degrees.
+When the control points are collinear (P1 within *mtol* of segment P0 P2) C
+is (+infinite+ +infinite+ +infinite+), r +infinite+ and the angles
++undefined+.  Signals :inp-err when the radius' division fails, and as
+dist-pt-line-seg, vector-normalize-ref and vector-directed-angle do.
+NLib: N_BezCenterRadiusFrom3CPts."
+  (declare (type cpoint p0w p1w p2w) (type point c ps pe))
+  (let ((p0 (make-point)) (p1 (make-point)) (p2 (make-point)) (m (make-point))
+        (n (make-point)) (v (make-point)) (rr (make-point))
+        (r 0d0) (alf 0d0) (bet 0d0))
+    (declare (type point p0 p1 p2 m n v rr) (dynamic-extent p0 p1 p2 m n v rr)
+             (type double-float r alf bet))
+    ;; Euclidean points and the end points
+    (c-pt-to-pt-euclid p0w p0)
+    (c-pt-to-pt-euclid p1w p1)
+    (c-pt-to-pt-euclid p2w p2)
+    (copy-pt p0 ps)
+    (copy-pt p2 pe)
+    ;; is the arc a line?
+    (let ((d (dist-pt-line-seg p1 p0 p2)))
+      (declare (type double-float d))
+      (when (< d *mtol*)
+        (pt-from-xyz +infinite+ +infinite+ +infinite+ c)
+        (return-from bez-center-radius-from-3-c-pts
+          (values +infinite+ +undefined+ +undefined+))))
+    ;; radius, center and angles
+    (combine-2-pts 0.5d0 p0 0.5d0 p2 m)
+    (let ((a (dist-pt-pt p0 m))
+          (b (dist-pt-pt m p1))
+          (cc (dist-pt-pt p1 p0)))
+      (declare (type double-float a b cc))
+      (when (float-op-is-bad (* a cc) b +division+)
+        (nurbs-error :inp-err 'bez-center-radius-from-3-c-pts))
+      (setf r (/ (* a cc) b)))
+    (vector-diff p0 p1 v)
+    (vector-perpendicular v n)
+    (vector-diff p2 p0 v)
+    (when (< (vector-dot n v) 0d0)
+      (vector-reverse-in-place n))
+    (vector-normalize-ref n)
+    (vector-pt-along-vector p0 r n c)
+    (vector-create 1d0 0d0 0d0 rr)
+    (vector-diff p0 c v)
+    (setf alf (vector-directed-angle rr v))
+    (vector-diff p2 c v)
+    (setf bet (vector-directed-angle rr v))
+    (values r alf bet)))
