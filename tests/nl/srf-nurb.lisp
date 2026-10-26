@@ -313,3 +313,34 @@ swapped."
                                        (cffi:mem-ref ac :double) (cffi:mem-ref al :double)
                                        (cffi:mem-ref h :double)
                                        (cffi:mem-ref stp :short) (cffi:mem-ref dir :short)))))))))))))
+
+;;; ------------------------------------------------------------- L15-g0
+
+(defun %sn15-domain-curve (s)
+  "A random curve whose x and y lie in (or now and then a little outside)
+the knot rectangle of surface S: 2D a third of the time, rational half."
+  (let* ((c (random-curve :two-d (zerop (rnd 3))))
+         (pw (curve-cpoints c))
+         (ku (surface-knots-u s)) (kv (surface-knots-v s))
+         (ul (aref ku 0)) (ur (aref ku (1- (length ku))))
+         (vb (aref kv 0)) (vt (aref kv (1- (length kv))))
+         (spill (if (zerop (rnd 3)) 0.2d0 0d0)))
+    (dotimes (i (array-dimension pw 0) c)
+      (let ((w (if (= (aref pw i 3) +no-w+) 1d0 (aref pw i 3))))
+        (setf (aref pw i 0) (* w (rnd-range (- ul (* spill (- ur ul))) (+ ur (* spill (- ur ul)))))
+              (aref pw i 1) (* w (rnd-range (- vb (* spill (- vt vb))) (+ vt (* spill (- vt vb))))))))))
+
+(define-oracle-test srf-eval-pt-crv-on-srf (:file "srf-nurb" :trials 4000)
+  (let* ((s (some-surface))
+         (c (%sn15-domain-curve s))
+         (k (curve-knots c))
+         (tt (case (rnd 20)
+               (0 (- (aref k 0) (rnd 1d0)))                 ; outside the curve
+               (1 (+ (aref k (1- (length k))) (rnd 1d0)))
+               (t (random-parameter k)))))
+    (agree (list :surface s :curve c :t tt)
+           (list (batten::srf-eval-pt-crv-on-srf s c tt (make-point)))
+           (with-foreign ((sp s :surface) (cp c :curve))
+             (with-foreign-out ((pt :point))
+               (let ((failed (c-flag-error-p (c-srf-eval-pt-crv-on-srf sp cp tt pt))))
+                 (values failed (unless failed (list (from-foreign pt :point))))))))))

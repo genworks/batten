@@ -527,3 +527,31 @@ ones, or random ones."
            (with-foreign ((b b0 :real-vector))
              (let ((failed (c-flag-error-p (c-bez-eval-basis p u b))))
                (values failed (unless failed (list (from-foreign b :real-vector (+ p 2))))))))))
+
+;;; ------------------------------------------------------------- L15-g0
+
+(define-oracle-test bez-interp-4-pts (:file "bezier" :trials 6000)
+  ;; random points, now and then with coincident neighbors (a zero chord: a
+  ;; repeated parameter, a singular matrix) or all four equal (the 1/3, 2/3
+  ;; fallback), or tiny or collinear ones
+  (let* ((q (random-points 4 (case (rnd 6) (0 1d-6) (1 1d4) (t 100d0))))
+         (pw0 (let ((a (make-cpoint-array 4)))
+                (dotimes (i 4 a) (dotimes (k 4) (setf (aref a i k) (- (rnd 20d0) 10d0)))))))
+    (flet ((same (i j) (dotimes (k 3) (setf (aref q j k) (aref q i k)))))
+      (case (rnd 12)
+        (0 (same 0 1)) (1 (same 1 2)) (2 (same 2 3))
+        (3 (same 0 1) (same 0 2) (same 0 3))
+        (4 (same 0 1) (same 2 3))
+        (5 (let ((s1 (rnd 1d0)) (s2 (rnd 1d0)))   ; collinear
+             (dolist (pr (list (cons 1 s1) (cons 2 s2)))
+               (dotimes (k 3)
+                 (setf (aref q (car pr) k)
+                       (+ (* (- 1 (cdr pr)) (aref q 0 k)) (* (cdr pr) (aref q 3 k))))))))))
+    (agree (list :q q)
+           (let ((pw (make-cpoint-array 4)))
+             (dotimes (i 4) (dotimes (k 4) (setf (aref pw i k) (aref pw0 i k))))
+             (batten::bez-interp-4-pts q pw)
+             (list pw))
+           (with-foreign ((qp q :point-array) (pp pw0 :cpoint-array))
+             (let ((failed (c-flag-error-p (c-bez-interp-4-pts qp pp))))
+               (values failed (unless failed (list (from-foreign pp :cpoint-array 4)))))))))

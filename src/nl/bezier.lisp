@@ -760,3 +760,52 @@ NLib: N_BezEvalBasis."
                        saved (* u temp))))
              (setf (aref b i) saved)))))))
   b)
+
+;;; ------------------------------------------------------------- L15-g0
+
+(defun bez-interp-4-pts (q pw)
+  "Write into PW[0..3] (a cpoint-array the caller allocates) the control
+points of the non-rational cubic Bezier curve interpolating the points
+Q[0..3] (a point-array) at chord-length parameters (1/3 and 2/3 when a
+division by the total chord length fails).  Returns PW.  Signals as
+bez-eval-basis, real-matrix-lu-decompose and real-matrix-for-back do.
+NLib: N_BezInterp4Pts."
+  (declare (type point-array q) (type cpoint-array pw))
+  (let ((u (make-real-vector 4)) (dist (make-real-vector 4)) (b (make-real-vector 4))
+        (sum 0d0) (pa (make-point)) (pb (make-point)))
+    (declare (type real-vector u dist b) (type double-float sum)
+             (dynamic-extent u dist b pa pb))
+    ;; parameters
+    (setf (aref u 0) 0d0
+          (aref u 3) 1d0)
+    (do ((i 1 (1+ i))) ((> i 3))
+      (declare (type fixnum i))
+      (%row-pt q (1- i) pa)
+      (%row-pt q i pb)
+      (setf (aref dist i) (dist-pt-pt pa pb))
+      (setf sum (+ sum (aref dist i))))
+    (if (or (float-op-is-bad (aref dist 1) sum +division+)
+            (float-op-is-bad (aref dist 2) sum +division+))
+        (setf (aref u 1) (/ 1d0 3d0)
+              (aref u 2) (/ 2d0 3d0))
+        (progn
+          (setf (aref u 1) (+ (aref u 0) (/ (aref dist 1) sum)))
+          (setf (aref u 2) (+ (aref u 1) (/ (aref dist 2) sum)))))
+    ;; coefficient matrix
+    (let* ((cm (set-real-matrix (make-rmatrix) 3 3 +mt-full+ 3))
+           (a (rmatrix-rm cm)))
+      (declare (type real-matrix a))
+      (dotimes (j 4)
+        (setf (aref a 3 j) 0d0
+              (aref a 0 j) 0d0))
+      (setf (aref a 0 0) 1d0
+            (aref a 3 3) 1d0)
+      (do ((i 1 (1+ i))) ((>= i 3))
+        (declare (type fixnum i))
+        (bez-eval-basis 3 (aref u i) b)
+        (dotimes (j 4)
+          (setf (aref a i j) (aref b j))))
+      ;; control points
+      (real-matrix-lu-decompose cm)
+      (real-matrix-for-back cm q +epoint+ pw))
+    pw))
