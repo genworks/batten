@@ -450,3 +450,88 @@ or v, or with coincident corners (a degenerate corner plane)."
            (list (if (batten::srf-is-singular s side) 1 0))
            (with-foreign ((sp s :surface))
              (values nil (list (c-srf-is-singular sp side)))))))
+
+;;; ------------------------------------------------------ level 15 (L15-g0)
+
+(defun %sb15-line-points (k scale)
+  "K+1 points as lists of 3: on a random segment (its ends first and last,
+the rest inside it, nudged by SCALE) half the time, random otherwise."
+  (let ((a (list (rnd-range -50d0 50d0) (rnd-range -50d0 50d0) (rnd-range -50d0 50d0)))
+        (b (list (rnd-range -50d0 50d0) (rnd-range -50d0 50d0) (rnd-range -50d0 50d0)))
+        (line (zerop (rnd 2))))
+    (let (out)
+      (dotimes (s (1+ k) (nreverse out))
+        (push (if line
+                  (let ((tt (cond ((= s 0) 0d0) ((= s k) 1d0) (t (rnd 1d0)))))
+                    (%sb14-point-near (mapcar (lambda (x y) (+ (* (- 1 tt) x) (* tt y))) a b) scale))
+                  (list (rnd-range -50d0 50d0) (rnd-range -50d0 50d0) (rnd-range -50d0 50d0)))
+              out)))))
+
+(defun %sb15-surface ()
+  "A surface for N_SrfIsFlat: flattish or random ones (closed now and then),
+nets collapsed across u or v onto a curve (a line or not), surfaces with
+poles on two opposite boundaries (at one point or two), planar grids with
+straight or nearly straight boundaries, collinear corners, or all control
+points on one line."
+  (let* ((s (random-surface :two-d (zerop (rnd 8)) :max-extra 4))
+         (net (surface-cpoints s))
+         (rows (array-dimension net 0)) (cols (array-dimension net 1))
+         (n (1- rows)) (m (1- cols))
+         (scale (%sb14-nudge-scale)))
+    (flet ((set-all (fn)
+             (dotimes (i rows) (dotimes (j cols) (%sb14-set-euclid net i j (funcall fn i j))))))
+      (case (rnd 16)
+        ((0 1 2 3) (setf s (%sb-flattish-surface)))
+        (4 (let ((pts (%sb15-line-points m scale)))      ; collapsed across u
+             (set-all (lambda (i j) (declare (ignore i)) (%sb14-point-near (nth j pts) scale)))))
+        (5 (let ((pts (%sb15-line-points n scale)))      ; collapsed across v
+             (set-all (lambda (i j) (declare (ignore j)) (%sb14-point-near (nth i pts) scale)))))
+        ((6 7) (let* ((a (%sb15-line-points 1 0d0))     ; poles on left and right
+                      (pa (first a)) (pb (if (zerop (rnd 3)) pa (second a))))
+                 (dotimes (j cols)
+                   (%sb14-set-euclid net 0 j (%sb14-point-near pa scale))
+                   (%sb14-set-euclid net n j (%sb14-point-near pb scale)))
+                 (when (zerop (rnd 4))
+                   (set-all (lambda (i j) (declare (ignore i j)) (%sb14-point-near pa scale))))))
+        ((8 9) (let* ((a (%sb15-line-points 1 0d0))     ; poles on bottom and top
+                      (pa (first a)) (pb (if (zerop (rnd 3)) pa (second a))))
+                 (dotimes (i rows)
+                   (%sb14-set-euclid net i 0 (%sb14-point-near pa scale))
+                   (%sb14-set-euclid net i m (%sb14-point-near pb scale)))))
+        ((10 11 12)                                      ; a planar grid
+         (let ((o (list (rnd-range -50d0 50d0) (rnd-range -50d0 50d0) (rnd-range -50d0 50d0)))
+               (u (list (rnd-range -50d0 50d0) (rnd-range -50d0 50d0) (rnd-range -50d0 50d0)))
+               (v (list (rnd-range -50d0 50d0) (rnd-range -50d0 50d0) (rnd-range -50d0 50d0)))
+               (wiggle (case (rnd 3) (0 0d0) (1 1d-3) (t 1d0))))
+           (set-all (lambda (i j)
+                      (let ((a (+ (/ i (float n 1d0)) (if (< 0 i n) (rnd wiggle) 0d0)))
+                            (b (+ (/ j (float m 1d0)) (if (< 0 j m) (rnd wiggle) 0d0))))
+                        (mapcar (lambda (oo uu vv) (+ oo (* a uu) (* b vv))) o u v))))))
+        (13 (let ((pts (%sb15-line-points 3 0d0)))       ; collinear corners
+              (%sb14-set-euclid net 0 0 (first pts))
+              (%sb14-set-euclid net n 0 (second pts))
+              (%sb14-set-euclid net 0 m (third pts))
+              (%sb14-set-euclid net n m (fourth pts))))
+        (14 (let ((pts (if (zerop (rnd 2))               ; everything on one line,
+                           (%sb15-line-points 1 0d0)     ; the x-axis half the time
+                           (list (list (rnd-range -50d0 0d0) 0d0 0d0)  ; (no normal at all)
+                                 (list (rnd-range 1d0 50d0) 0d0 0d0)))))
+              (set-all (lambda (i j) (declare (ignore i j))
+                         (let ((tt (rnd 1d0)))
+                           (mapcar (lambda (x y) (+ (* (- 1 tt) x) (* tt y))) (first pts) (second pts)))))))
+        (t nil)))
+    s))
+
+(define-oracle-test srf-is-flat (:file "srf-basic" :trials 4000)
+  ;; the C leaves *dir (and, on an error, *flt) unset on some paths: both
+  ;; cells start at a sentinel the C never writes, read back as NIL
+  (let* ((s (%sb15-surface))
+         (eps (case (rnd 5) (0 0d0) (1 1d-5) (2 5d-2) (3 1d0) (t (rnd 50d0)))))
+    (agree (list :surface s :eps eps)
+           (multiple-value-list (batten::srf-is-flat s eps))
+           (with-foreign ((sp s :surface))
+             (with-scalars ((flt :short) (dir :short))
+               (setf (cffi:mem-ref flt :short) 77 (cffi:mem-ref dir :short) 77)
+               (let ((failed (c-flag-error-p (c-srf-is-flat sp eps flt dir))))
+                 (flet ((cell (c) (let ((x (cffi:mem-ref c :short))) (if (= x 77) nil x))))
+                   (values failed (unless failed (list (cell flt) (cell dir)))))))))))

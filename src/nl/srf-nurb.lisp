@@ -864,3 +864,20 @@ NLib: N_SrfType."
                    (setf stp +nextrusion+))
                  (setf stp +nruled+ curb-set t))))))
     (values (when cura-set cur-p) (when curb-set cur-s) r1 r2 ac al h stp dir)))
+
+;;; ------------------------------------------------------------- L15-g0
+
+(defun srf-eval-pt-crv-on-srf (sur cur tt s)
+  "Write into point S the point S(C(TT)_x, C(TT)_y) of surface SUR on the
+curve CUR of its parameter domain, the domain point clamped to the knot
+rectangle, and return S.  Signals as crv-eval and srf-eval-pt do.
+NLib: N_SrfEvalPtCrvOnSrf."
+  (declare (type surface sur) (type curve cur) (type double-float tt) (type point s))
+  (let ((c (make-point)))
+    (declare (dynamic-extent c))
+    (crv-eval cur tt +left+ c)
+    (multiple-value-bind (u v z) (pt-to-xyz c)
+      (declare (type double-float u v) (ignore z))
+      (multiple-value-bind (u v) (clamp-srf-at-params sur u v)
+        (declare (type double-float u v))
+        (srf-eval-pt sur u v +left+ +left+ s)))))

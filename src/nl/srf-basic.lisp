@@ -459,3 +459,206 @@ NLib: N_SrfIsSingular."
             ((= side +bottom+) (pole 0 n (1+ (truncate n 2))))
             ((= side +top+) (pole m n (1+ (truncate n 2))))
             (t nil)))))
+
+;;; ------------------------------------------------------------ level 15, group 0
+
+(defun srf-is-flat (sur eps)
+  "Whether surface SUR can be approximated to within EPS by a planar
+quadrilateral, and if not which way to subdivide it.  Returns (values flt
+dir): FLT +yes+ or +no+; DIR +udir+ (subdivide at a v value), +vdir+ (at a u
+value), or NIL where the C leaves *dir unset (always when FLT is +yes+, and
+for a surface with two opposite poles whose corners are not pairwise
+coincident).  A surface closed in u or v is flat only when its control net
+collapses across the closure and its boundary iso-curve is a line.  Otherwise
+every Euclidean control point must lie within EPS of the plane through the
+corners' centroid normal to the averaged corner normals (from evaluated
+normals near the corners when those cancel), and the interior control points
+of the boundaries within EPS of the chords between the corners.  Signals as
+srf-extract-iso-crv and dist-pt-line-seg do, and :geo-err when no plane
+normal is found.
+NLib: N_SrfIsFlat."
+  (declare (type surface sur) (type double-float eps))
+  (let* ((n (surface-n sur)) (m (surface-m sur))
+         (pw (surface-cpoints sur))
+         (mtol *mtol*)
+         (cw (make-cpoint)) (cw2 (make-cpoint)))
+    (declare (type fixnum n m) (type cpoint-net pw) (type double-float mtol)
+             (dynamic-extent cw cw2))
+    ;; closed in u
+    (when (srf-is-closed sur +udir+)
+      (let ((degen t))
+        (block scan
+          (dotimes (j (1+ m))
+            (do ((i 1 (1+ i))) ((> i n))
+              (declare (type fixnum i))
+              (when (> (dist-cpt-cpt (%net-c-pt pw (1- i) j cw) (%net-c-pt pw i j cw2)) mtol)
+                (setf degen nil)
+                (return-from scan)))))
+        (when degen
+          (let ((us (srf-get-parameter-bounds sur)))
+            (declare (type double-float us))
+            (return-from srf-is-flat
+              (if (crv-is-line (srf-extract-iso-crv sur us +vdir+) eps)
+                  (values +yes+ nil)
+                  (values +no+ +udir+)))))
+        (return-from srf-is-flat (values +no+ +vdir+))))
+    ;; closed in v
+    (when (srf-is-closed sur +vdir+)
+      (let ((degen t))
+        (block scan
+          (dotimes (i (1+ n))
+            (do ((j 1 (1+ j))) ((> j m))
+              (declare (type fixnum j))
+              (when (> (dist-cpt-cpt (%net-c-pt pw i (1- j) cw) (%net-c-pt pw i j cw2)) mtol)
+                (setf degen nil)
+                (return-from scan)))))
+        (when degen
+          (multiple-value-bind (us ue vs) (srf-get-parameter-bounds sur)
+            (declare (ignore us ue) (type double-float vs))
+            (return-from srf-is-flat
+              (if (crv-is-line (srf-extract-iso-crv sur vs +udir+) eps)
+                  (values +yes+ nil)
+                  (values +no+ +vdir+)))))
+        (return-from srf-is-flat (values +no+ +udir+))))
+    (let ((dist (make-real-matrix (1+ n) (1+ m)))
+          (sd (make-point-net 2 2))
+          (p00 (make-point)) (p10 (make-point)) (p01 (make-point)) (p11 (make-point))
+          (p (make-point)) (q (make-point))
+          (n00 (make-point)) (n10 (make-point)) (n01 (make-point)) (n11 (make-point))
+          (nn (make-point))
+          (va (make-point)) (vb (make-point)) (vc (make-point)) (vd (make-point))
+          (flat t) (straight nil)
+          (maxu 0d0) (maxv 0d0) (du 0d0) (dv 0d0)
+          (dir nil))
+      (declare (type real-matrix dist) (type point-net sd)
+               (dynamic-extent p00 p10 p01 p11 p q n00 n10 n01 n11 nn va vb vc vd)
+               (type double-float maxu maxv du dv))
+      ;; the four corner points
+      (c-pt-to-pt-euclid (%net-c-pt pw 0 0 cw) p00)
+      (c-pt-to-pt-euclid (%net-c-pt pw n 0 cw) p10)
+      (c-pt-to-pt-euclid (%net-c-pt pw 0 m cw) p01)
+      (c-pt-to-pt-euclid (%net-c-pt pw n m cw) p11)
+      ;; degenerate boundaries
+      (when (or (and (srf-is-singular sur +left+) (srf-is-singular sur +right+))
+                (and (srf-is-singular sur +bottom+) (srf-is-singular sur +top+)))
+        (let ((a (dist-pt-pt p00 p10)) (b (dist-pt-pt p01 p11))
+              (c (dist-pt-pt p00 p01)) (d (dist-pt-pt p10 p11)))
+          (declare (type double-float a b c d))
+          (return-from srf-is-flat
+            (cond ((and (< a mtol) (< b mtol) (< c mtol) (< d mtol))
+                   (if (srf-is-degen sur)
+                       (values +yes+ nil)
+                       (values +no+ +udir+)))
+                  ((and (< a mtol) (< b mtol))
+                   (values +no+ +udir+))
+                  ((and (< c mtol) (< d mtol))
+                   (values +no+ +vdir+))
+                  (t (values +no+ nil))))))
+      ;; the plane of the four corner points
+      (combine-4-pts 0.25d0 p00 0.25d0 p10 0.25d0 p01 0.25d0 p11 p)
+      (vector-diff p10 p00 va)
+      (vector-diff p01 p00 vb)
+      (vector-cross va vb n00)
+      (vector-diff p11 p10 vc)
+      (vector-cross va vc n10)
+      (vector-diff p11 p01 vd)
+      (vector-cross vd vb n01)
+      (vector-cross vd vc n11)
+      (dotimes (i 2)
+        (let* ((a (vector-magnitude n00)) (b (vector-magnitude n10))
+               (c (vector-magnitude n01)) (d (vector-magnitude n11))
+               (mx a))
+          (declare (type double-float a b c d mx))
+          ;; A is a copy of the longest corner normal
+          (vector-copy n00 va)
+          (when (> b mx) (setf mx b) (vector-copy n10 va))
+          (when (> c mx) (setf mx c) (vector-copy n01 va))
+          (when (> d mx) (setf mx d) (vector-copy n11 va)))
+        (when (< (vector-dot va n00) 0d0) (vector-scale n00 -1d0 n00))
+        (when (< (vector-dot va n10) 0d0) (vector-scale n10 -1d0 n10))
+        (when (< (vector-dot va n01) 0d0) (vector-scale n01 -1d0 n01))
+        (when (< (vector-dot va n11) 0d0) (vector-scale n11 -1d0 n11))
+        (combine-4-pts 0.25d0 n00 0.25d0 n10 0.25d0 n01 0.25d0 n11 nn)
+        (if (= i 1)
+            (vector-normalize-ref nn)   ; its error is the C's NL_OUT
+            (when (handler-case (progn (vector-normalize-ref nn) t)
+                    (nurbs-error () nil))
+              (return)))
+        ;; corner normals evaluated just inside the corners; the C ignores
+        ;; their errors
+        (multiple-value-bind (us ue vs ve) (srf-get-parameter-bounds sur)
+          (declare (type double-float us ue vs ve))
+          (let ((du (* 0.01d0 (- ue us)))
+                (dv (* 0.01d0 (- ve vs))))
+            (declare (type double-float du dv))
+            (setf us (+ us du) ue (- ue du)
+                  vs (+ vs dv) ve (- ve dv))
+            (flet ((normal (u v nv)
+                     (handler-case
+                         (srf-eval-pt-pt-deriv-normal-fast sur u v +left+ +left+ q vb vc nv sd)
+                       (nurbs-error () nil))))
+              (normal us vs n00)
+              (normal us ve n01)
+              (normal ue vs n10)
+              (normal ue ve n11)))))
+      (let ((pd (- (vector-dot p nn))))
+        (declare (type double-float pd))
+        (multiple-value-bind (a b c) (pt-to-xyz nn)
+          (declare (type double-float a b c))
+          ;; flatness of the control points
+          (dotimes (i (1+ n))
+            (dotimes (j (1+ m))
+              (c-pt-to-pt-euclid (%net-c-pt pw i j cw) p)
+              (setf (aref dist i j) (dist-signed-pt-plane a b c pd p))
+              (setf (aref dist i j) (abs (aref dist i j)))
+              (when (> (aref dist i j) eps)
+                (setf flat nil))))))
+      ;; straightness of the boundary curves
+      (when flat
+        (setf maxu 0d0 maxv 0d0
+              straight t)
+        (do ((i 1 (1+ i))) ((>= i n))
+          (declare (type fixnum i))
+          (c-pt-to-pt-euclid (%net-c-pt pw i 0 cw) p)
+          (setf du (dist-pt-line-seg p p00 p10))
+          (when (> du maxu) (setf maxu du))
+          (c-pt-to-pt-euclid (%net-c-pt pw i m cw) p)
+          (setf du (dist-pt-line-seg p p01 p11))
+          (when (> du maxu) (setf maxu du)))
+        (do ((j 1 (1+ j))) ((>= j m))
+          (declare (type fixnum j))
+          (c-pt-to-pt-euclid (%net-c-pt pw 0 j cw) p)
+          (setf dv (dist-pt-line-seg p p00 p01))
+          (when (> dv maxv) (setf maxv dv))
+          (c-pt-to-pt-euclid (%net-c-pt pw n j cw) p)
+          (setf dv (dist-pt-line-seg p p10 p11))
+          (when (> dv maxv) (setf maxv dv)))
+        (when (or (> maxu eps) (> maxv eps))
+          (setf straight nil)))
+      ;; which direction to subdivide
+      (if (or (not flat) (not straight))
+          (progn
+            (if (not flat)
+                (progn
+                  (setf du 0d0)
+                  (dotimes (j (1+ m))
+                    (let ((mn (aref dist 0 j)) (mx (aref dist 0 j)))
+                      (declare (type double-float mn mx))
+                      (dotimes (i (1+ n))
+                        (when (< (aref dist i j) mn) (setf mn (aref dist i j)))
+                        (when (> (aref dist i j) mx) (setf mx (aref dist i j))))
+                      (setf du (+ du (- mx mn)))))
+                  (setf du (/ du (+ (float m 1d0) 1d0)))
+                  (setf dv 0d0)
+                  (dotimes (i (1+ n))
+                    (let ((mn (aref dist i 0)) (mx (aref dist i 0)))
+                      (declare (type double-float mn mx))
+                      (dotimes (j (1+ m))
+                        (when (< (aref dist i j) mn) (setf mn (aref dist i j)))
+                        (when (> (aref dist i j) mx) (setf mx (aref dist i j))))
+                      (setf dv (+ dv (- mx mn)))))
+                  (setf dv (/ dv (+ (float n 1d0) 1d0)))
+                  (setf dir (if (> du dv) +vdir+ +udir+)))
+                (setf dir (if (> maxu maxv) +vdir+ +udir+)))
+            (values +no+ dir))
+          (values +yes+ dir)))))
