@@ -33,4 +33,6 @@
    #:find-span
    ;; shared by curves and surfaces (src/api/generics.lisp)
    #:domain #:bounding-box #:copy #:transform #:translate #:insert-knots #:elevate-degree
-   #:reparameterize #:split))
+   #:reparameterize #:split
+   ;; tessellation
+   #:tessellate-surface))
