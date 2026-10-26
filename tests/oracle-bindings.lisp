@@ -167,6 +167,10 @@
 (cffi:defcfun ("shim_N_BezEvalOneBasis" c-bez-eval-one-basis) :short
   (p :short) (i :long) (u :double) (b :pointer))
 
+;; NL_FLAG N_BezEvalBasis(NL_DEGREE p, NL_PARAMETER u, NL_REAL *B)
+(cffi:defcfun ("shim_N_BezEvalBasis" c-bez-eval-basis) :short
+  (p :short) (u :double) (b :pointer))
+
 ;; NL_VOID N_BezDegreeReduceCoefs(NL_DEGREE p, NL_REAL *alf, NL_REAL *oma, NL_REAL *bet, NL_REAL *omb)
 (cffi:defcfun ("shim_N_BezDegreeReduceCoefs" c-bez-degree-reduce-coefs) :void
   (p :short) (alf :pointer) (oma :pointer) (bet :pointer) (omb :pointer))
@@ -202,6 +206,10 @@
 ;; NL_FLAG N_BezCalcLength(NL_CPOINT *Pw, NL_DEGREE p, NL_REAL tol, NL_REAL *len)
 (cffi:defcfun ("shim_N_BezCalcLength" c-bez-calc-length) :short
   (pw :pointer) (p :short) (tol :double) (len :pointer))
+
+;; NL_FLAG N_BezInterp4Pts(NL_POINT *Q, NL_CPOINT *Pw)
+(cffi:defcfun ("shim_N_BezInterp4Pts" c-bez-interp-4-pts) :short
+  (q :pointer) (pw :pointer))
 
 ;; NL_FLAG N_BezCenterRadiusFrom3CPts(NL_CPOINT P0w, NL_CPOINT P1w, NL_CPOINT P2w, NL_POINT *C, NL_REAL *r, NL_REAL *alf, NL_REAL *bet, NL_POINT *Ps, NL_POINT *Pe)
 (cffi:defcfun ("shim_N_BezCenterRadiusFrom3CPts" c-bez-center-radius-from-3-c-pts) :short
@@ -1063,6 +1071,10 @@
 (cffi:defcfun ("shim_N_VectorDiff" c-vector-diff) :void
   (a :pointer) (b :pointer) (c :pointer))
 
+;; NL_VOID N_VectorDiffCPts(NL_CPOINT Pw, NL_CPOINT Qw, NL_VECTOR *V)
+(cffi:defcfun ("shim_N_VectorDiffCPts" c-vector-diff-c-pts) :void
+  (pw :pointer) (qw :pointer) (v :pointer))
+
 ;; NL_VOID N_VectorDir(NL_POINT Ps, NL_POINT Pe, NL_VECTOR *d)
 (cffi:defcfun ("shim_N_VectorDir" c-vector-dir) :void
   (ps :pointer) (pe :pointer) (d :pointer))
@@ -1110,6 +1122,10 @@
 ;; NL_FLAG N_IsectLineLine(NL_LINESEG ls1, NL_LINESEG ls2, NL_POINT *P, NL_REAL *t1, NL_REAL *t2, NL_FLAG *flg)
 (cffi:defcfun ("shim_N_IsectLineLine" c-isect-line-line) :short
   (ls-1 :pointer) (ls-2 :pointer) (p :pointer) (t-1 :pointer) (t-2 :pointer) (flg :pointer))
+
+;; NL_BOOLEAN N_LineSegs2dAreIntersecting(NL_REAL x1, NL_REAL y1, NL_REAL x2, NL_REAL y2, NL_REAL x3, NL_REAL y3, NL_REAL x4, NL_REAL y4, NL_REAL tol)
+(cffi:defcfun ("shim_N_LineSegs2dAreIntersecting" c-line-segs-2d-are-intersecting) :long
+  (x-1 :double) (y-1 :double) (x-2 :double) (y-2 :double) (x-3 :double) (y-3 :double) (x-4 :double) (y-4 :double) (tol :double))
 
 ;; NL_FLAG N_IsectLinePlane(NL_LINESEG lsg, NL_PLANE pln, NL_POINT *P, NL_REAL *t, NL_FLAG *flg)
 (cffi:defcfun ("shim_N_IsectLinePlane" c-isect-line-plane) :short
@@ -1198,6 +1214,10 @@
 ;; NL_VOID N_BBoxGetDiagonal(NL_MINMAXBOX *box, NL_REAL *diag)
 (cffi:defcfun ("shim_N_BBoxGetDiagonal" c-b-box-get-diagonal) :void
   (box :pointer) (diag :pointer))
+
+;; NL_VOID N_BBox2dCalcOverlap(NL_REAL xl, NL_REAL xr, NL_REAL yb, NL_REAL yt, NL_REAL ul, NL_REAL ur, NL_REAL vb, NL_REAL vt, NL_REAL tol, NL_REAL *A)
+(cffi:defcfun ("shim_N_BBox2dCalcOverlap" c-b-box-2d-calc-overlap) :void
+  (xl :double) (xr :double) (yb :double) (yt :double) (ul :double) (ur :double) (vb :double) (vt :double) (tol :double) (a :pointer))
 
 ;; NL_VOID N_CreateLinePtPt(NL_LINESEG *lsg, NL_POINT Ps, NL_POINT Pe, NL_FLAG flg)
 (cffi:defcfun ("shim_N_CreateLinePtPt" c-create-line-pt-pt) :void
@@ -1451,6 +1471,10 @@
 (cffi:defcfun ("shim_N_ShellSortReal" c-shell-sort-real) :void
   (a :pointer) (n :long))
 
+;; NL_VOID N_SearchInsertReal(NL_REAL *a, NL_INDEX n, NL_REAL t, NL_INDEX *k)
+(cffi:defcfun ("shim_N_SearchInsertReal" c-search-insert-real) :void
+  (a :pointer) (n :long) (t* :double) (k :pointer))
+
 ;; NL_VOID N_SwapCPts(NL_CPOINT *Pw, NL_CPOINT *Qw)
 (cffi:defcfun ("shim_N_SwapCPts" c-swap-c-pts) :void
   (pw :pointer) (qw :pointer))
@@ -1486,6 +1510,18 @@
 ;; NL_BOOLEAN N_RealMatrixIsNULL(NL_RMATRIX *rma)
 (cffi:defcfun ("shim_N_RealMatrixIsNULL" c-real-matrix-is-null) :long
   (rma :pointer))
+
+;; NL_FLAG N_InitRealHash(NL_REAL *** H, NL_INDEX n, NL_STACKS *S)
+(cffi:defcfun ("shim_N_InitRealHash" c-init-real-hash) :short
+  (h :pointer) (n :long) (s :pointer))
+
+;; NL_FLAG N_UpdateRealHash(NL_REAL ** H, NL_INDEX n, NL_REAL us, NL_REAL u, NL_REAL ue, NL_INDEX *m, NL_STACKS *S)
+(cffi:defcfun ("shim_N_UpdateRealHash" c-update-real-hash) :short
+  (h :pointer) (n :long) (us :double) (u :double) (ue :double) (m :pointer) (s :pointer))
+
+;; NL_VOID N_RetrieveRealHash(NL_REAL ** H, NL_INDEX n, NL_REAL *u)
+(cffi:defcfun ("shim_N_RetrieveRealHash" c-retrieve-real-hash) :void
+  (h :pointer) (n :long) (u :pointer))
 
 ;; NL_FLAG N_SetRealMatrix(NL_RMATRIX *rma, NL_INDEX n, NL_INDEX m, NL_MATRIXTYPE mtp, NL_INDEX bw, NL_STACKS *S)
 (cffi:defcfun ("shim_N_SetRealMatrix" c-set-real-matrix) :short
@@ -1695,6 +1731,10 @@
 (cffi:defcfun ("shim_N_SrfCompress" c-srf-compress) :short
   (sur :pointer) (sg :pointer))
 
+;; NL_VOID N_ClampSrfAtParams(NL_SURFACE *sur, NL_PARAMETER *u, NL_PARAMETER *v)
+(cffi:defcfun ("shim_N_ClampSrfAtParams" c-clamp-srf-at-params) :void
+  (sur :pointer) (u :pointer) (v :pointer))
+
 ;; NL_VOID N_SrfSetSizeIndices(NL_SURFACE *sur, NL_INDEX n, NL_INDEX m, NL_DEGREE p, NL_DEGREE q, NL_INDEX r, NL_INDEX s)
 (cffi:defcfun ("shim_N_SrfSetSizeIndices" c-srf-set-size-indices) :void
   (sur :pointer) (n :long) (m :long) (p :short) (q :short) (r :long) (s :long))
@@ -1715,6 +1755,10 @@
 (cffi:defcfun ("shim_N_IsSrfRat" c-is-srf-rat) :long
   (sur :pointer))
 
+;; NL_BOOLEAN N_SrfIsDegen(NL_SURFACE *sur)
+(cffi:defcfun ("shim_N_SrfIsDegen" c-srf-is-degen) :long
+  (sur :pointer))
+
 ;; NL_BOOLEAN N_SrfIsClosed(NL_SURFACE *sur, NL_FLAG dir)
 (cffi:defcfun ("shim_N_SrfIsClosed" c-srf-is-closed) :long
   (sur :pointer) (dir :short))
@@ -1722,6 +1766,14 @@
 ;; NL_BOOLEAN N_1dPtSetIsClosed(NL_VOID *A, NL_INDEX m, NL_FLAG ptp, NL_REAL tol)
 (cffi:defcfun ("shim_N_1dPtSetIsClosed" c-1d-pt-set-is-closed) :long
   (a :pointer) (m :long) (ptp :short) (tol :double))
+
+;; NL_BOOLEAN N_SrfIsSingular(NL_SURFACE *sur, NL_FLAG side)
+(cffi:defcfun ("shim_N_SrfIsSingular" c-srf-is-singular) :long
+  (sur :pointer) (side :short))
+
+;; NL_FLAG N_SrfIsFlat(NL_SURFACE *sur, NL_REAL eps, NL_FLAG *flt, NL_FLAG *dir)
+(cffi:defcfun ("shim_N_SrfIsFlat" c-srf-is-flat) :short
+  (sur :pointer) (eps :double) (flt :pointer) (dir :pointer))
 
 ;; NL_FLAG N_AllocSrfArrays(NL_SURFACE *sur, NL_INDEX n, NL_INDEX m, NL_DEGREE p, NL_DEGREE q, NL_INDEX r, NL_INDEX s, NL_STACKS *S)
 (cffi:defcfun ("shim_N_AllocSrfArrays" c-alloc-srf-arrays) :short
@@ -1847,6 +1899,10 @@
 (cffi:defcfun ("shim_N_SrfEvalPt" c-srf-eval-pt) :short
   (sur :pointer) (u :double) (v :double) (ufl :short) (vfl :short) (s :pointer))
 
+;; NL_FLAG N_SrfEvalPtCrvOnSrf(NL_SURFACE *sur, NL_CURVE *cur, NL_PARAMETER t, NL_POINT *S)
+(cffi:defcfun ("shim_N_SrfEvalPtCrvOnSrf" c-srf-eval-pt-crv-on-srf) :short
+  (sur :pointer) (cur :pointer) (t* :double) (s :pointer))
+
 ;; NL_VOID N_ComputeDerivativeMatrix(NL_BOOLEAN noW, NL_BOOLEAN noZ, NL_FLAG upper_derivative_matrix_only, NL_INDEX p, NL_INDEX q, NL_INDEX udr, NL_INDEX vdr, NL_CPOINT ** Pw, NL_INDEX l2, NL_INDEX l3, NL_BASISDERIVATIVES & BD, NL_POINT ** SD)
 (cffi:defcfun ("shim_N_ComputeDerivativeMatrix" c-compute-derivative-matrix) :void
   (no-w :long) (no-z :long) (upper-derivative-matrix-only :short) (p :long) (q :long) (udr :long) (vdr :long) (pw :pointer) (l-2 :long) (l-3 :long) (bd :pointer) (sd :pointer))
@@ -1951,6 +2007,22 @@
 (cffi:defcfun ("shim_N_SrfJoin" c-srf-join) :short
   (sur-1 :pointer) (sur-2 :pointer) (dir :short) (tol :double) (sur-j :pointer) (sg :pointer))
 
+;; NL_FLAG N_TessTrimmedSrf(NL_SURFACE *sur, NL_CURVE *** cuo, NL_CURVE **** cui, NL_INDEX m, NL_INDEX *ho, NL_INDEX *hi, NL_INDEX ** hs, NL_REAL epc, NL_REAL eps, NL_REAL tol, NL_PARAMETER ** u, NL_PARAMETER ** v, NL_INDEX *n, NL_INDEX *** DT, NL_INDEX ** hd, NL_STACKS *SG)
+(cffi:defcfun ("shim_N_TessTrimmedSrf" c-tess-trimmed-srf) :short
+  (sur :pointer) (cuo :pointer) (cui :pointer) (m :long) (ho :pointer) (hi :pointer) (hs :pointer) (epc :double) (eps :double) (tol :double) (u :pointer) (v :pointer) (n :pointer) (dt :pointer) (hd :pointer) (sg :pointer))
+
+;; NL_FLAG N_TessGetTriangleEdges(NL_INDEX ** DT, NL_INDEX *hd, NL_INDEX m, NL_INDEX ** alf, NL_INDEX ** bet, NL_INDEX *n, NL_STACKS *SG)
+(cffi:defcfun ("shim_N_TessGetTriangleEdges" c-tess-get-triangle-edges) :short
+  (dt :pointer) (hd :pointer) (m :long) (alf :pointer) (bet :pointer) (n :pointer) (sg :pointer))
+
+;; NL_FLAG N_TessGetTriangles(NL_INDEX ** DT, NL_INDEX *hd, NL_INDEX m, NL_INDEX ** alf, NL_INDEX ** bet, NL_INDEX ** gam, NL_INDEX *n, NL_STACKS *SG)
+(cffi:defcfun ("shim_N_TessGetTriangles" c-tess-get-triangles) :short
+  (dt :pointer) (hd :pointer) (m :long) (alf :pointer) (bet :pointer) (gam :pointer) (n :pointer) (sg :pointer))
+
+;; NL_FLAG N_TessSrfArea(NL_SURFACE *sur, NL_REAL *A, NL_REAL *lu, NL_REAL *lv)
+(cffi:defcfun ("shim_N_TessSrfArea" c-tess-srf-area) :short
+  (sur :pointer) (a :pointer) (lu :pointer) (lv :pointer))
+
 ;; NL_VOID N_InitNurbs(NL_STACKS *S)
 (cffi:defcfun ("shim_N_InitNurbs" c-init-nurbs) :void
   (s :pointer))
@@ -1967,12 +2039,32 @@
 (cffi:defcfun ("shim_N_Free" c-free) :void
   (mem-ptr :pointer))
 
+;; NL_FLAG * N_AllocFlag1dArray(NL_INDEX n, NL_STACKS *S)
+(cffi:defcfun ("shim_N_AllocFlag1dArray" c-alloc-flag-1d-array) :pointer
+  (n :long) (s :pointer))
+
+;; NL_FLAG ** N_AllocFlag2dArray(NL_INDEX n, NL_INDEX m, NL_STACKS *S)
+(cffi:defcfun ("shim_N_AllocFlag2dArray" c-alloc-flag-2d-array) :pointer
+  (n :long) (m :long) (s :pointer))
+
+;; NL_FLAG ** N_AllocFlagPtr1dArray(NL_INDEX n, NL_STACKS *S)
+(cffi:defcfun ("shim_N_AllocFlagPtr1dArray" c-alloc-flag-ptr-1d-array) :pointer
+  (n :long) (s :pointer))
+
 ;; NL_INTEGER * N_AllocInt1dArray(NL_INDEX n, NL_STACKS *S)
 (cffi:defcfun ("shim_N_AllocInt1dArray" c-alloc-int-1d-array) :pointer
   (n :long) (s :pointer))
 
 ;; NL_INTEGER ** N_AllocInt2dArray(NL_INDEX n, NL_INDEX m, NL_STACKS *S)
 (cffi:defcfun ("shim_N_AllocInt2dArray" c-alloc-int-2d-array) :pointer
+  (n :long) (m :long) (s :pointer))
+
+;; NL_INTEGER ** N_AllocIntPtr1dArray(NL_INDEX n, NL_STACKS *S)
+(cffi:defcfun ("shim_N_AllocIntPtr1dArray" c-alloc-int-ptr-1d-array) :pointer
+  (n :long) (s :pointer))
+
+;; NL_INTEGER *** N_AllocIntPtr2dArray(NL_INDEX n, NL_INDEX m, NL_STACKS *S)
+(cffi:defcfun ("shim_N_AllocIntPtr2dArray" c-alloc-int-ptr-2d-array) :pointer
   (n :long) (m :long) (s :pointer))
 
 ;; NL_REAL * N_AllocReal1dArray(NL_INDEX n, NL_STACKS *S)
@@ -1989,6 +2081,10 @@
 
 ;; NL_REAL ** N_AllocRealPtr1dArray(NL_INDEX n, NL_STACKS *S)
 (cffi:defcfun ("shim_N_AllocRealPtr1dArray" c-alloc-real-ptr-1d-array) :pointer
+  (n :long) (s :pointer))
+
+;; NL_REAL *** N_AllocRealPtr3dArray(NL_INDEX n, NL_STACKS *S)
+(cffi:defcfun ("shim_N_AllocRealPtr3dArray" c-alloc-real-ptr-3d-array) :pointer
   (n :long) (s :pointer))
 
 ;; NL_POINT * N_AllocPt1dArray(NL_INDEX n, NL_STACKS *S)
@@ -2023,6 +2119,26 @@
 (cffi:defcfun ("shim_N_FileClose" c-file-close) :void
   (fptr :pointer))
 
+;; NL_VOID N_FreeFlag1dArray(NL_FLAG *f1d, NL_STACKS *S)
+(cffi:defcfun ("shim_N_FreeFlag1dArray" c-free-flag-1d-array) :void
+  (f-1d :pointer) (s :pointer))
+
+;; NL_VOID N_FreeInt1dArray(NL_INTEGER *i1d, NL_STACKS *S)
+(cffi:defcfun ("shim_N_FreeInt1dArray" c-free-int-1d-array) :void
+  (i-1d :pointer) (s :pointer))
+
+;; NL_VOID N_FreeInt2dArray(NL_INTEGER ** i2d, NL_STACKS *S)
+(cffi:defcfun ("shim_N_FreeInt2dArray" c-free-int-2d-array) :void
+  (i-2d :pointer) (s :pointer))
+
+;; NL_VOID N_FreeIntPtr1dArray(NL_INTEGER ** i1p, NL_STACKS *S)
+(cffi:defcfun ("shim_N_FreeIntPtr1dArray" c-free-int-ptr-1d-array) :void
+  (i-1p :pointer) (s :pointer))
+
+;; NL_VOID N_FreeIntPtr2dArray(NL_INTEGER *** i2p, NL_STACKS *S)
+(cffi:defcfun ("shim_N_FreeIntPtr2dArray" c-free-int-ptr-2d-array) :void
+  (i-2p :pointer) (s :pointer))
+
 ;; NL_VOID N_FreeReal1dArray(NL_REAL *r1d, NL_STACKS *S)
 (cffi:defcfun ("shim_N_FreeReal1dArray" c-free-real-1d-array) :void
   (r-1d :pointer) (s :pointer))
@@ -2046,6 +2162,22 @@
 ;; NL_VOID N_FreeCPt2dArray(NL_CPOINT ** c2d, NL_STACKS *S)
 (cffi:defcfun ("shim_N_FreeCPt2dArray" c-free-c-pt-2d-array) :void
   (c-2d :pointer) (s :pointer))
+
+;; NL_FLAG N_Realloc1dFlagArray(NL_FLAG ** f1d, NL_INDEX n, NL_INDEX m, NL_STACKS *S)
+(cffi:defcfun ("shim_N_Realloc1dFlagArray" c-realloc-1d-flag-array) :short
+  (f-1d :pointer) (n :long) (m :long) (s :pointer))
+
+;; NL_FLAG N_Realloc1dIntArray(NL_INTEGER ** i1d, NL_INDEX n, NL_INDEX m, NL_STACKS *S)
+(cffi:defcfun ("shim_N_Realloc1dIntArray" c-realloc-1d-int-array) :short
+  (i-1d :pointer) (n :long) (m :long) (s :pointer))
+
+;; NL_FLAG N_Realloc2dIntArray(NL_INTEGER *** i2d, NL_INDEX n, NL_INDEX m, NL_INDEX k, NL_INDEX l, NL_STACKS *S)
+(cffi:defcfun ("shim_N_Realloc2dIntArray" c-realloc-2d-int-array) :short
+  (i-2d :pointer) (n :long) (m :long) (k :long) (l :long) (s :pointer))
+
+;; NL_FLAG N_Realloc2dIntPtrArray(NL_INTEGER **** i2p, NL_INDEX n, NL_INDEX m, NL_INDEX k, NL_INDEX l, NL_STACKS *S)
+(cffi:defcfun ("shim_N_Realloc2dIntPtrArray" c-realloc-2d-int-ptr-array) :short
+  (i-2p :pointer) (n :long) (m :long) (k :long) (l :long) (s :pointer))
 
 ;; NL_FLAG N_Realloc1dRealArray(NL_REAL ** r1d, NL_INDEX n, NL_INDEX m, NL_STACKS *S)
 (cffi:defcfun ("shim_N_Realloc1dRealArray" c-realloc-1d-real-array) :short
