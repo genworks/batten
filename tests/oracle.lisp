@@ -16,8 +16,10 @@
 (in-package :batten-oracle)
 
 (defvar *oracle-dir*
-  (or (uiop:getenv "BATTEN_ORACLE_DIR") "/projects/tmp-shots/batten-scratch/oracle/")
-  "Where build-oracle.sh put libnlib-oracle.so and libnlib-oracle-shims.so.")
+  (or (uiop:getenv "BATTEN_ORACLE_DIR")
+      (namestring (asdf:system-relative-pathname "batten" "oracle/")))
+  "Where build-oracle.sh put libnlib-oracle.so and libnlib-oracle-shims.so:
+$BATTEN_ORACLE_DIR, else oracle/ in the Batten checkout.")
 
 (defun load-oracle (&optional (dir *oracle-dir*))
   "Load NLib and the shims from DIR."

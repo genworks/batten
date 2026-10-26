@@ -67,7 +67,17 @@ are then not found by M-. on Allegro; the source is plain to read."
                                            (:file "srf-offset")
                                            ;; level 14: the tessellator
                                            (:file "tessellate")))
-                             (:file "api"))))
+                             ;; the readable API over the port (API.md)
+                             (:module "api"
+                              :serial t
+                              :components ((:file "generics")
+                                           (:file "evaluation")
+                                           (:file "construction")
+                                           (:file "curve-queries")
+                                           (:file "curve-operations")
+                                           (:file "surfaces")
+                                           (:file "geometry")
+                                           (:file "tessellation"))))))
   :in-order-to ((test-op (test-op "batten/tests"))))
 
 ;;; Random curves and surfaces from a seeded generator of its own, so every
@@ -109,7 +119,12 @@ are then not found by M-. on Allegro; the source is plain to read."
                                            (:file "srf-fit") (:file "crv-approx")
                                            (:file "crv-offset") (:file "spiral")
                                            (:file "srf-adv") (:file "srf-approx")
-                                           (:file "srf-offset") (:file "tessellate"))))))
+                                           (:file "srf-offset") (:file "tessellate")))
+                             (:module "api"
+                              :serial t
+                              :components ((:file "construction") (:file "curve-queries")
+                                           (:file "curve-operations") (:file "surfaces")
+                                           (:file "geometry") (:file "tessellation"))))))
   :perform (test-op (o c) (uiop:symbol-call :batten-tests :run-all)))
 
 ;;; Timings of the Lisp routines alone: any implementation.

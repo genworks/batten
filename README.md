@@ -28,6 +28,16 @@ came from, on random curves and parameters (`batten/tests`, which needs CFFI
 and the library).  Each docstring names its NLib source, e.g.
 `NLib: N_CrvDerivs`.
 
+To run the tests, build the oracle from a checkout of
+[usd-brep](https://github.com/NVIDIA-Omniverse/usd-brep) (a C++17 compiler is
+needed; it compiles SMLib once, a few minutes), then run them in a
+throwaway container of the public Gendl SBCL image:
+
+```sh
+tools/build-oracle.sh /path/to/usd-brep/source/SMLib oracle
+tools/run-tests.sh all          # or one NLib file's tests: tools/run-tests.sh crv-nurb
+```
+
 Because every routine performs the same IEEE double operations in the same
 order, the results are also identical across Common Lisp implementations.
 `batten-random:evaluation-digest` hashes the bits of 50,000 random

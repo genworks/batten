@@ -30,4 +30,7 @@
    #:cfun #:%make-cfun #:cfun-degree #:cfun-knots #:cfun-vals
    #:sfun #:%make-sfun #:sfun-degree-u #:sfun-degree-v #:sfun-knots-u #:sfun-knots-v #:sfun-vals
    ;; basis functions
-   #:find-span))
+   #:find-span
+   ;; shared by curves and surfaces (src/api/generics.lisp)
+   #:domain #:bounding-box #:copy #:transform #:translate #:insert-knots #:elevate-degree
+   #:reparameterize #:split))

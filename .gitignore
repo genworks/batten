@@ -1,2 +1,4 @@
 __pycache__/
 *.fasl
+# the NLib oracle, built by tools/build-oracle.sh
+oracle/

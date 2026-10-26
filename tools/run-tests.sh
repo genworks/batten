@@ -12,14 +12,15 @@
 # FILE-STEM.
 #
 # BATTEN_ORACLE_DIR  where tools/build-oracle.sh put the oracle libraries
-# BATTEN_TEST_IMAGE  an SBCL image with CFFI (default: the Gendl SBCL image)
+#                    (default: oracle/ in this checkout)
+# BATTEN_TEST_IMAGE  an SBCL image with CFFI (default: the public Gendl SBCL image)
 set -euo pipefail
 FILE=${1:-all}
 TRIALS=${2:-nil}
 NAME=${3:-}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-ORACLE=${BATTEN_ORACLE_DIR:-/home/dcooper8/projects/tmp-shots/batten-scratch/oracle}
-IMAGE=${BATTEN_TEST_IMAGE:-gornskew/gendl:devo-sbcl}
+ORACLE=${BATTEN_ORACLE_DIR:-$ROOT/oracle}
+IMAGE=${BATTEN_TEST_IMAGE:-genworks/gendl:devo-sbcl}
 if [ "$FILE" = all ]; then FILEARG=nil; else FILEARG="\"$FILE\""; fi
 if [ -n "$NAME" ]; then NAMEARG="\"$NAME\""; else NAMEARG=nil; fi
 
