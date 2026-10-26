@@ -15,26 +15,6 @@
 (defconstant +srf-offset--totalmax+ 10000
   "totalmax in NL_SrfOffset.cpp: the cap on the number of sampled points.")
 
-(defun %srf-offset-c-nan ()
-  "The NaN x86-64 produces for an invalid operation (the sign bit set)."
-  (sb-kernel:make-double-float -524288 0))
-
-(defun %srf-offset-c-sqrt (x)
-  "C's sqrt of the double X: X itself for a NaN, a NaN for a negative X, where
-CL's SQRT would return a complex."
-  (declare (type double-float x))
-  (cond ((>= x 0d0) (sqrt (the (double-float 0d0) x)))
-        ((/= x x) x)
-        (t (%srf-offset-c-nan))))
-
-(defun %srf-offset-c-pow (x y)
-  "C's pow of the doubles X and Y (Y not a whole number): a NaN for a negative
-X, where CL's EXPT would return a complex."
-  (declare (type double-float x y))
-  (if (< x 0d0)
-      (%srf-offset-c-nan)
-      (expt x y)))
-
 (defun %srf-offset-c-ceil (x)
   "C's ceil of the double X, passing a NaN, an infinity or a double too large
 to have a fraction through unchanged (where FCEILING would not)."
@@ -194,7 +174,7 @@ approximation, knot removal (see srf-offset)."
     (when (float-op-is-bad 1.0d0 tol +division+)
       (nurbs-error :num-err 'srf-offset))
     (setf f1 (/ 1.0d0 tol))
-    (setf f1 (%srf-offset-c-pow f1 ex))
+    (setf f1 (c-pow f1 ex))
     (setf pq (nl-max pp qq))
     (setf f2 (* 2.0d0 (float pq 1d0)))
     (setf du (* 0.00005d0 (- (aref up rp) (aref up 0))))
@@ -228,7 +208,7 @@ approximation, knot removal (see srf-offset)."
                       (multiple-value-bind (muu muv mvv) (srf-offset-get-max-deriv patch d)
                         (declare (type double-float muu muv mvv))
                         (let* ((num (+ (* 0.125d0 (+ muu mvv)) (* 0.25d0 muv)))
-                               (gro (nl-max f2 (%srf-offset-c-sqrt num)))
+                               (gro (nl-max f2 (c-sqrt num)))
                                (del (%srf-offset-c-ceil (* f1 gro))))
                           (declare (type double-float num gro del))
                           (if (>= del +srf-offset--slm+)
@@ -264,7 +244,7 @@ approximation, knot removal (see srf-offset)."
                                       (weight aa w cp)
                                       (%c-pt-net cp pw ii jj))))
                                 (let* ((a (values (srf-get-average-len patch)))
-                                       (del2 (%srf-offset-c-ceil (%srf-offset-c-sqrt (/ a tol))))
+                                       (del2 (%srf-offset-c-ceil (c-sqrt (/ a tol))))
                                        (cnt (%srf-offset-c-index del2)))
                                   (declare (type double-float a del2))
                                   (when (< cnt (aref nps i j))
@@ -289,7 +269,7 @@ approximation, knot removal (see srf-offset)."
           (setf mv (+ mv (svref nv j))))
         (when (> (* (1+ mu) (1+ mv)) +srf-offset--totalmax+)
           (let* ((ddd (* (+ (float mu 1d0) 1.0d0) (+ (float mv 1d0) 1.0d0)))
-                 (per (%srf-offset-c-sqrt (/ (float +srf-offset--totalmax+ 1d0) ddd))))
+                 (per (c-sqrt (/ (float +srf-offset--totalmax+ 1d0) ddd))))
             (declare (type double-float ddd per))
             (setf mu 0)
             (dotimes (i (1+ k))

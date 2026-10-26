@@ -500,7 +500,7 @@ zero count when every iso-curve it samples is degenerate."
   (let ((ss (vector-dot a a)))
     (declare (type double-float ss))
     (if (= ss ss)
-        (sqrt (the (double-float 0d0) ss))
+        (c-sqrt ss)
         ss)))
 
 (defun srf-type (sur tol aa bb cc dd xx yy)

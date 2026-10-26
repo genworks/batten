@@ -20,12 +20,12 @@
 (defun vector-magnitude (a)
   "|A|.  NLib: N_VectorMagnitude."
   (declare (type point a))
-  (sqrt (the (double-float 0d0) (vector-dot a a))))
+  (c-sqrt (vector-dot a a)))
 
 (defun vector-magnitude-ref (a)
   "|A|.  NLib: N_VectorMagnitudeRef."
   (declare (type point a))
-  (sqrt (the (double-float 0d0) (vector-dot a a))))
+  (c-sqrt (vector-dot a a)))
 
 (defun vector-scale (a alpha b)
   "B = ALPHA*A.  NLib: N_VectorScale."
@@ -84,7 +84,7 @@
   (with-point (px py pz) p
     (with-point (qx qy qz) q
       (let ((dx (- px qx)) (dy (- py qy)) (dz (- pz qz)))
-        (sqrt (the (double-float 0d0) (+ (+ (* dx dx) (* dy dy)) (* dz dz))))))))
+        (c-sqrt (+ (+ (* dx dx) (* dy dy)) (* dz dz)))))))
 
 (defun dist-cpt-cpt-homo (pw qw)
   "The distance between PW and QW in homogeneous space, using z and w only
@@ -98,7 +98,7 @@ where both points have them.  NLib: N_DistCptCptHomo."
           (incf disc (* (- pz qz) (- pz qz))))
         (when (and (/= pw* +no-w+) (/= qw* +no-w+))
           (incf disc (* (- pw* qw*) (- pw* qw*))))
-        (sqrt (the (double-float 0d0) disc))))))
+        (c-sqrt disc)))))
 
 (defun vector-normalize-ref (a)
   "Scale A to unit length in place.  Signals :geo-err for a zero vector.
@@ -199,7 +199,7 @@ NLib: N_ProjectPtLineParam."
       (let ((len (vector-dot ba ba))
             (dot (vector-dot pa ba)))
         (declare (type double-float len dot))
-        (setf len (sqrt (the (double-float 0d0) len)))
+        (setf len (c-sqrt len))
         (when (float-op-is-bad dot len +division+)
           (nurbs-error :num-err 'project-pt-line-param))
         (setf dis (/ dot len))
@@ -296,7 +296,7 @@ NLib: N_DistPerpPtLineSeg."
       (let ((num (vector-magnitude tt)))
         (declare (type double-float num))
         (when (< dotab 0d0) (setf dotab 0d0))
-        (let ((den (sqrt (the (double-float 0d0) dotab))))
+        (let ((den (c-sqrt dotab)))
           (declare (type double-float den))
           (when (float-op-is-bad num den +division+)
             (nurbs-error :num-err 'dist-perp-pt-line-seg))
@@ -1126,15 +1126,6 @@ NLib: N_LineFitPts."
 
 ;;; ------------------------------------------------------------- L5-g1
 
-(declaim (inline %geom-c-sqrt))
-(defun %geom-c-sqrt (x)
-  "C's sqrt of the double X: a NaN (glibc's -NaN) for a negative or NaN X,
-where CL's SQRT would return a complex."
-  (declare (type double-float x))
-  (if (>= x 0d0)
-      (sqrt (the (double-float 0d0) x))
-      (sb-kernel:make-double-float -524288 0)))
-
 (defun create-circ-from-2d-pts (pp n tol etp)
   "The least-squares circle through the points PP[0..N] (a point-array; x and
 y are fitted, the points' z only enters the collinearity check), minimizing
@@ -1224,7 +1215,7 @@ NLib: N_CreateCircFrom2dPts."
     ;; the initial center and radius and the error measures
     (let* ((xc (aref sol 0))
            (yc (aref sol 1))
-           (rc (%geom-c-sqrt (+ (+ (* xc xc) (* yc yc)) (aref sol 2))))
+           (rc (c-sqrt (+ (+ (* xc xc) (* yc yc)) (aref sol 2))))
            (eavp 0d0) (eavn 0d0) (eavo 0d0)
            (dm -1.0d0)
            (xo 0d0) (yo 0d0) (ro 0d0) (dao 0d0) (dmo 0d0))
@@ -1232,7 +1223,7 @@ NLib: N_CreateCircFrom2dPts."
       (dotimes (i (1+ n))
         (let* ((x (aref pp i 0))
                (y (aref pp i 1))
-               (ri (%geom-c-sqrt (+ (* (- x xc) (- x xc)) (* (- y yc) (- y yc))))))
+               (ri (c-sqrt (+ (* (- x xc) (- x xc)) (* (- y yc) (- y yc))))))
           (declare (type double-float x y ri))
           (setf eavp (+ eavp (abs (- rc ri))))
           (when (> (abs (- rc ri)) dm)
@@ -1264,7 +1255,7 @@ NLib: N_CreateCircFrom2dPts."
             (dotimes (i (1+ n))
               (let* ((x (aref pp i 0))
                      (y (aref pp i 1))
-                     (ri (%geom-c-sqrt (+ (* (- x xc) (- x xc)) (* (- y yc) (- y yc))))))
+                     (ri (c-sqrt (+ (* (- x xc) (- x xc)) (* (- y yc) (- y yc))))))
                 (declare (type double-float x y ri))
                 (when (float-op-is-bad 1.0d0 ri +division+)
                   (nurbs-error :num-err 'create-circ-from-2d-pts))
@@ -1287,7 +1278,7 @@ NLib: N_CreateCircFrom2dPts."
             (dotimes (i (1+ n))
               (let* ((x (aref pp i 0))
                      (y (aref pp i 1))
-                     (ri (%geom-c-sqrt (+ (* (- x xc) (- x xc)) (* (- y yc) (- y yc))))))
+                     (ri (c-sqrt (+ (* (- x xc) (- x xc)) (* (- y yc) (- y yc))))))
                 (declare (type double-float x y ri))
                 (setf eavn (+ eavn (abs (- rc ri))))
                 (when (> (abs (- rc ri)) dm)
@@ -1302,7 +1293,7 @@ NLib: N_CreateCircFrom2dPts."
                 (nurbs-error :num-err 'create-circ-from-2d-pts))
               (setf eavn (/ eavn rc))
               ;; check for convergence and save the best result
-              (setf dis (%geom-c-sqrt (+ (+ (* (aref sol 0) (aref sol 0)) (* (aref sol 1) (aref sol 1)))
+              (setf dis (c-sqrt (+ (+ (* (aref sol 0) (aref sol 0)) (* (aref sol 1) (aref sol 1)))
                                          (* (aref sol 2) (aref sol 2)))))
               (when (float-op-is-bad dis rc +division+)
                 (nurbs-error :num-err 'create-circ-from-2d-pts))

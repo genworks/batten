@@ -35,7 +35,9 @@ gives an infinity and an invalid operation a NaN instead of signaling, so a
 ported routine computes the same bits as its C source on every input,
 including the ones where NLib computes an infinity and tests for it
 afterwards.  Batten's routines assume this environment; the exported API
-establishes it."
+establishes it.  Allegro CL offers no way to mask the traps: there an input
+on which NLib divides by zero signals DIVISION-BY-ZERO instead (every other
+result is the same)."
   #+sbcl `(sb-int:with-float-traps-masked (:overflow :invalid :divide-by-zero :inexact :underflow)
             ,@body)
   #+ccl (let ((mode (gensym)))
@@ -108,6 +110,37 @@ establishes it."
   "NL_SIAB: |a| with the sign of b (b >= 0 counts as positive)."
   (declare (type double-float a b))
   (if (>= b 0d0) (abs a) (- (abs a))))
+
+;;; ------------------------------------------------ C's libm on the real line
+
+;;; CL's SQRT and EXPT go complex where C's sqrt and pow give a NaN, and a
+;;; declaration such as (the (double-float 0d0) x) signals on a NaN that C
+;;; carries on with.  Ported routines call these instead.
+
+(defvar *c-nan*
+  ;; Allegro has no trap masking (see with-c-float-environment): its bits,
+  ;; the x86-64 default NaN, are written out instead.
+  #+allegro (excl:shorts-to-double-float #xfff8 0 0 0)
+  #-allegro (with-c-float-environment
+              ;; read at load time so that no compiler folds (and traps on) 0/0
+              (let ((zero (read-from-string "0d0"))) (/ zero zero)))
+  "The NaN an invalid operation produces (0/0), as C gets from sqrt(-1).")
+
+(declaim (inline c-sqrt c-pow))
+(defun c-sqrt (x)
+  "C's sqrt of the double X: X itself for a NaN, a NaN for a negative X."
+  (declare (type double-float x))
+  (cond ((>= x 0d0) (sqrt (the (double-float 0d0) x)))
+        ((/= x x) x)
+        (t *c-nan*)))
+
+(defun c-pow (x y)
+  "C's pow of the doubles X and Y, Y not a whole number: a NaN for a negative
+X, where CL's EXPT would return a complex."
+  (declare (type double-float x y))
+  (if (< x 0d0)
+      *c-nan*
+      (the double-float (expt x y))))
 
 ;;; ------------------------------------------------------------------ errors
 

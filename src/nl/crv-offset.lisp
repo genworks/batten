@@ -64,7 +64,7 @@ NLib: N_CrvOffsetPtSampling."
       (when (float-op-is-bad 1.0d0 tol +division+)
         (nurbs-error :num-err 'crv-offset-pt-sampling))
       (setf f1 (/ 1.0d0 tol))
-      (setf f1 (expt f1 expo))
+      (setf f1 (c-pow f1 expo))
       (setf f2 (* 2.0d0 (float deg 1d0)))
       ;; B is passed by value in C
       (vector-copy b bn)
@@ -82,7 +82,7 @@ NLib: N_CrvOffsetPtSampling."
             (crv-reparam-to-interval (svref bez i) unitspan)
             (let* ((muu (crv-offset-get-max-2nd-deriv (svref bez i) d bn))
                    (num (* 0.125d0 muu))
-                   (gro (nl-max f2 (sqrt (the (double-float 0d0) num))))
+                   (gro (nl-max f2 (c-sqrt num)))
                    (del (* f1 gro)))
               (declare (type double-float muu num gro del))
               (setf del (fceiling del))

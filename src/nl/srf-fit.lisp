@@ -155,7 +155,7 @@ NLib: N_FitCalcSrfParamValues."
                            (dist-pt-pt (%net-pt a i0 j0 p0) (%net-pt a i1 j1 p1))
                            (dist-cpt-cpt-homo (%net-c-pt a i0 j0 q0) (%net-c-pt a i1 j1 q1)))))
                (declare (type double-float dd))
-               (if centripetal (sqrt (the (double-float 0d0) dd)) dd))))
+               (if centripetal (c-sqrt dd) dd))))
       (declare (inline dist))
       ;; u-directional parameters
       (do ((i 1 (1+ i))) ((>= i n))

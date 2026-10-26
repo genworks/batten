@@ -120,10 +120,14 @@ Same bits means same operations:
   early exits.
 - Integer-to-double conversions are explicit: `(float i 1d0)`.  C integer
   division truncates: `(truncate a b)`.
-- `sqrt` of a double known non-negative: `(sqrt (the (double-float 0d0) x))`.
+- `sqrt` is `(c-sqrt x)` and `pow(x, y)` with Y not a whole number is
+  `(c-pow x y)` (`src/types.lisp`): CL's `sqrt` and `expt` go complex where
+  C's give a NaN, and a declaration like `(the (double-float 0d0) x)` signals
+  on a NaN that the C carries on with.  `*c-nan*` is the NaN C's invalid
+  operations produce.  Nothing implementation-specific (`sb-kernel:` ...) in
+  ported code: Batten loads on every implementation.
   `fabs` is `abs`, `floor`/`ceil` of doubles are `ffloor`/`fceiling`.
-  `pow(x, y)` is `(expt x y)` with Y a double, even when it holds a whole
-  number.  `sin`, `cos`, `atan2` (`(atan y x)`), `acos`, `exp`, `log` call the
+  `pow(x, y)` with Y a whole number is `(expt x y)` with Y a double.  `sin`, `cos`, `atan2` (`(atan y x)`), `acos`, `exp`, `log` call the
   same libm on Linux.
 - Do not "simplify" or merge computations, even when they look redundant; two
   NLib routines computing the same quantity differently must stay different.

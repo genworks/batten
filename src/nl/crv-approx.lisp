@@ -36,7 +36,7 @@ NLib: N_ApproxNurbsWithNonRatCrv."
     (when (float-op-is-bad 1d0 tol +division+)
       (nurbs-error :num-err 'approx-nurbs-with-non-rat-crv))
     (setf f1 (/ 1d0 tol))
-    (setf f1 (expt f1 ex))
+    (setf f1 (c-pow f1 ex))
     (setf f2 (float deg 1d0))
     ;; the Bezier segments
     (multiple-value-bind (bez k) (crv-decompose-bez curp)
@@ -51,7 +51,7 @@ NLib: N_ApproxNurbsWithNonRatCrv."
           (crv-reparam-to-interval (svref bez i) unitspan)
           (let* ((muu (crv-get-max-2nd-deriv (svref bez i)))
                  (num (* 0.125d0 muu))
-                 (gro (nl-max f2 (sqrt (the (double-float 0d0) num))))
+                 (gro (nl-max f2 (c-sqrt num)))
                  (del (* f1 gro)))
             (declare (type double-float muu num gro del))
             (setf del (fceiling del))

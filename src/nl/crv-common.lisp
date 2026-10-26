@@ -14,7 +14,7 @@
   "C sqrt of X, known non-negative or NaN (a NaN goes through as the C's)."
   (declare (type double-float x))
   (if (>= x 0d0)
-      (sqrt (the (double-float 0d0) x))
+      (c-sqrt x)
       (- x x)))
 
 (defun %crv-common-row-weight (p w pw i)
