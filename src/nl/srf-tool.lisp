@@ -1826,3 +1826,490 @@ SUR.  Signals what make-srfs-compatible signals.
 NLib: N_MakeSrfsCompatibleUV."
   (declare (type simple-vector sur) (type fixnum k))
   (make-srfs-compatible sur k +uvdir+))
+
+;;; ------------------------------------------------------------- L10-g1
+
+(defun srf-insert-knot (sur-p tt mt dir)
+  "Surface SUR-P with the knot TT, strictly inside the domain, inserted MT
+times in direction DIR (+udir+ or +vdir+), as a fresh surface.  Signals
+:par-err when TT is on or outside an end of the domain, when MT is negative
+or when TT's multiplicity plus MT exceeds the degree, and :cal-err for a bad
+DIR.  The C's in-place case, surP = surQ, computes the same surface.
+NLib: N_SrfInsertKnot."
+  (declare (type surface sur-p) (type double-float tt) (type fixnum mt dir))
+  (let* ((n (surface-n sur-p)) (m (surface-m sur-p))
+         (pw (surface-cpoints sur-p))
+         (p (surface-degree-u sur-p)) (q (surface-degree-v sur-p))
+         (up (surface-knots-u sur-p)) (vp (surface-knots-v sur-p))
+         (r (1- (length up))) (s (1- (length vp)))
+         (spu 0) (mlu 0) (spv 0) (mlv 0)
+         (ni 0) (mi 0) (ri 0) (si 0))
+    (declare (type fixnum n m p q r s spu mlu spv mlv ni mi ri si)
+             (type cpoint-net pw) (type real-vector up vp))
+    ;; check parameters and compute highest indexes
+    (cond
+      ((= dir +udir+)
+       (knot-vector-is-end-param up tt 'srf-insert-knot)
+       (multiple-value-setq (spu mlu) (basis-find-span-and-mult up p tt +left+))
+       (when (or (> (+ mlu mt) p) (< mt 0))
+         (nurbs-error :par-err 'srf-insert-knot))
+       (setf ni (+ n mt) mi m ri (+ r mt) si s))
+      ((= dir +vdir+)
+       (knot-vector-is-end-param vp tt 'srf-insert-knot)
+       (multiple-value-setq (spv mlv) (basis-find-span-and-mult vp q tt +left+))
+       (when (or (> (+ mlv mt) q) (< mt 0))
+         (nurbs-error :par-err 'srf-insert-knot))
+       (setf ni n mi (+ m mt) ri r si (+ s mt)))
+      (t (nurbs-error :cal-err 'srf-insert-knot)))
+    (let* ((qw (make-cpoint-net (1+ ni) (1+ mi)))
+           (uq (make-real-vector (1+ ri)))
+           (vq (make-real-vector (1+ si)))
+           (a (nl-max p q))
+           (alf (make-real-matrix (1+ a) (1+ a)))
+           (oma (make-real-matrix (1+ a) (1+ a)))
+           (rw (make-cpoint-net 1 (1+ a))))
+      (declare (type cpoint-net qw rw) (type real-vector uq vq) (type fixnum a)
+               (type real-matrix alf oma))
+      ;; insert the knot
+      (when (= dir +udir+)
+        ;; save the alphas
+        (do ((i 1 (1+ i))) ((> i mt))
+          (declare (type fixnum i))
+          (setf a (+ (- spu p) i))
+          (do ((j 0 (1+ j))) ((> j (- p i mlu)))
+            (declare (type fixnum j))
+            (setf (aref alf i j) (/ (- tt (aref up (+ a j))) (- (aref up (+ spu j 1)) (aref up (+ a j)))))
+            (setf (aref oma i j) (- 1d0 (aref alf i j)))))
+        ;; for each row
+        (do ((l 0 (1+ l))) ((> l m))
+          (declare (type fixnum l))
+          (setf a (- spu p))
+          ;; load auxiliary control points
+          (do ((i 0 (1+ i))) ((> i (- p mlu)))
+            (declare (type fixnum i))
+            (%copy-c-pt-net pw (+ a i) l rw 0 i))
+          ;; save unaltered control points
+          (do ((i 0 (1+ i))) ((> i a))
+            (declare (type fixnum i))
+            (%copy-c-pt-net pw i l qw i l))
+          (do ((i (- spu mlu) (1+ i))) ((> i n))
+            (declare (type fixnum i))
+            (%copy-c-pt-net pw i l qw (+ i mt) l))
+          ;; now insert the knot
+          (do ((i 1 (1+ i))) ((> i mt))
+            (declare (type fixnum i))
+            (setf a (+ (- spu p) i))
+            (do ((j 0 (1+ j))) ((> j (- p i mlu)))
+              (declare (type fixnum j))
+              (%net-combine (aref alf i j) rw 0 (1+ j) (aref oma i j) rw 0 j rw 0 j))
+            (%copy-c-pt-net rw 0 0 qw a l)
+            (%copy-c-pt-net rw 0 (- p i mlu) qw (- (+ spu mt) i mlu) l))
+          ;; load the remaining control points
+          (do ((i (1+ a) (1+ i))) ((>= i (- spu mlu)))
+            (declare (type fixnum i))
+            (%copy-c-pt-net rw 0 (- i a) qw i l)))
+        ;; load knot vectors
+        (do ((i 0 (1+ i))) ((> i spu))
+          (declare (type fixnum i))
+          (setf (aref uq i) (aref up i)))
+        (do ((i 1 (1+ i))) ((> i mt))
+          (declare (type fixnum i))
+          (setf (aref uq (+ i spu)) tt))
+        (do ((i (1+ spu) (1+ i))) ((> i r))
+          (declare (type fixnum i))
+          (setf (aref uq (+ i mt)) (aref up i)))
+        (do ((i 0 (1+ i))) ((> i s))
+          (declare (type fixnum i))
+          (setf (aref vq i) (aref vp i))))
+      (when (= dir +vdir+)
+        ;; save the alphas
+        (do ((i 1 (1+ i))) ((> i mt))
+          (declare (type fixnum i))
+          (setf a (+ (- spv q) i))
+          (do ((j 0 (1+ j))) ((> j (- q i mlv)))
+            (declare (type fixnum j))
+            (setf (aref alf i j) (/ (- tt (aref vp (+ a j))) (- (aref vp (+ spv j 1)) (aref vp (+ a j)))))
+            (setf (aref oma i j) (- 1d0 (aref alf i j)))))
+        ;; for each column
+        (do ((k 0 (1+ k))) ((> k n))
+          (declare (type fixnum k))
+          (setf a (- spv q))
+          ;; load auxiliary control points
+          (do ((i 0 (1+ i))) ((> i (- q mlv)))
+            (declare (type fixnum i))
+            (%copy-c-pt-net pw k (+ a i) rw 0 i))
+          ;; save unaltered control points
+          (do ((i 0 (1+ i))) ((> i a))
+            (declare (type fixnum i))
+            (%copy-c-pt-net pw k i qw k i))
+          (do ((i (- spv mlv) (1+ i))) ((> i m))
+            (declare (type fixnum i))
+            (%copy-c-pt-net pw k i qw k (+ i mt)))
+          ;; now insert the knot
+          (do ((i 1 (1+ i))) ((> i mt))
+            (declare (type fixnum i))
+            (setf a (+ (- spv q) i))
+            (do ((j 0 (1+ j))) ((> j (- q i mlv)))
+              (declare (type fixnum j))
+              (%net-combine (aref alf i j) rw 0 (1+ j) (aref oma i j) rw 0 j rw 0 j))
+            (%copy-c-pt-net rw 0 0 qw k a)
+            (%copy-c-pt-net rw 0 (- q i mlv) qw k (- (+ spv mt) i mlv)))
+          ;; load the remaining control points
+          (do ((i (1+ a) (1+ i))) ((>= i (- spv mlv)))
+            (declare (type fixnum i))
+            (%copy-c-pt-net rw 0 (- i a) qw k i)))
+        ;; load knot vectors
+        (do ((i 0 (1+ i))) ((> i spv))
+          (declare (type fixnum i))
+          (setf (aref vq i) (aref vp i)))
+        (do ((i 1 (1+ i))) ((> i mt))
+          (declare (type fixnum i))
+          (setf (aref vq (+ i spv)) tt))
+        (do ((i (1+ spv) (1+ i))) ((> i s))
+          (declare (type fixnum i))
+          (setf (aref vq (+ i mt)) (aref vp i)))
+        (do ((i 0 (1+ i))) ((> i r))
+          (declare (type fixnum i))
+          (setf (aref uq i) (aref up i))))
+      (%make-surface p q uq vq qw))))
+
+(defun srf-remove-knot-conditional (sur-p tt nt tol dir)
+  "Remove the interior knot TT of surface SUR-P up to NT times (at most its
+multiplicity) in direction DIR (+udir+ or +vdir+), each removal allowed only
+while it moves every row (column) by no more than TOL (scaled by the weights
+for a rational surface) and keeps the weights inside [*wmin*, *wmax*].
+Returns (values rt sur-q): RT the number of knots removed and SUR-Q the
+resulting fresh surface.  As in the C, a removal refused at some row leaves
+the rows before it already rewritten, even when nothing is removed.  A
+failure of N_BasisFindGlobalMax is absorbed (the bound falls back to 1), but
+the C returns the error flag the last such call left: when that call failed
+the Lisp signals its condition.  Signals :par-err when TT is on or outside an
+end of the domain and :cal-err for a bad DIR.  The C's in-place case, surP =
+surQ, computes the same surface.
+NLib: N_SrfRemoveKnotConditional."
+  (declare (type surface sur-p) (type double-float tt tol) (type fixnum nt dir))
+  (let* ((n (surface-n sur-p)) (m (surface-m sur-p))
+         (pw (surface-cpoints sur-p))
+         (p (surface-degree-u sur-p)) (q (surface-degree-v sur-p))
+         (up (surface-knots-u sur-p)) (vp (surface-knots-v sur-p))
+         (r (1- (length up))) (s (1- (length vp)))
+         (rat (is-srf-rat sur-p))
+         (spn 0) (mlt 0))
+    (declare (type fixnum n m p q r s spn mlt) (type cpoint-net pw) (type real-vector up vp))
+    ;; adjust the removal tolerance for a rational surface
+    (when rat
+      (multiple-value-bind (wmin wmax pmin pmax) (srf-min-max-weight-pos-vectors sur-p)
+        (declare (type double-float wmin pmax) (ignore wmax pmin))
+        (setf tol (/ (* tol wmin) (+ 1d0 pmax)))))
+    ;; check parameters: the span and multiplicity of TT
+    (cond
+      ((= dir +udir+)
+       (knot-vector-is-end-param up tt 'srf-remove-knot-conditional)
+       (multiple-value-setq (spn mlt) (basis-find-span-and-mult up p tt +left+)))
+      ((= dir +vdir+)
+       (knot-vector-is-end-param vp tt 'srf-remove-knot-conditional)
+       (multiple-value-setq (spn mlt) (basis-find-span-and-mult vp q tt +left+)))
+      (t (nurbs-error :cal-err 'srf-remove-knot-conditional)))
+    ;; limit the removal count to the multiplicity of the knot
+    (when (> nt mlt)
+      (setf nt mlt))
+    (let* ((qw (make-cpoint-net (1+ n) (1+ m)))
+           (uq (make-real-vector (1+ r)))
+           (vq (make-real-vector (1+ s)))
+           (a (nl-max p q))
+           (size (1+ (* 2 a)))
+           (alf (make-real-vector size)) (oma (make-real-vector size))
+           (bet (make-real-vector size)) (omb (make-real-vector size))
+           (rw (make-cpoint-net 1 size))
+           (acp (make-cpoint)) (ca (make-cpoint)) (cb (make-cpoint))
+           (lam 0d0) (oml 0d0)
+           (k 0)
+           ;; the C's error flag: NIL, or the condition of the failed
+           ;; N_BasisFindGlobalMax call that last set it
+           (err nil))
+      (declare (type cpoint-net qw rw) (type real-vector uq vq alf oma bet omb)
+               (type fixnum a size k) (type cpoint acp ca cb) (type double-float lam oml)
+               (dynamic-extent acp ca cb))
+      ;; initialize
+      (dotimes (row (1+ n))
+        (dotimes (col (1+ m))
+          (%copy-c-pt-net pw row col qw row col)))
+      (dotimes (i (1+ r))
+        (setf (aref uq i) (aref up i)))
+      (dotimes (j (1+ s))
+        (setf (aref vq j) (aref vp j)))
+      (flet ((global-max (kn i deg lto)
+               ;; error = N_BasisFindGlobalMax( ... ); a failure gives 1.0
+               (declare (type real-vector kn) (type fixnum i deg) (type double-float lto))
+               (handler-case (multiple-value-prog1 (values (basis-find-global-max kn i deg lto))
+                               (setf err nil))
+                 (nurbs-error (c) (setf err c) 1d0)))
+             (rw-c-pt (i cp)
+               (declare (type fixnum i) (type cpoint cp))
+               (%net-c-pt rw 0 i cp)))
+        (declare (inline rw-c-pt))
+        (cond
+          ;; remove in the u-direction
+          ((= dir +udir+)
+           (let ((fout (truncate (- (* 2 spn) mlt p) 2))
+                 (rmf t)
+                 (first (- spn p))
+                 (last (- spn mlt))
+                 (lto (* +srf-tool--sto+ (abs (- (aref up r) (aref up 0))))))
+             (declare (type fixnum fout first last) (type double-float lto))
+             ;; try to remove the knot NT times
+             (block kloop
+               (do () ((not (< k nt)))
+                 (let ((off (1- first)) (i first) (j last) (del 0d0) (omd 0d0) (mx 0d0))
+                   (declare (type fixnum off i j) (type double-float del omd mx))
+                   ;; save some parameters
+                   (do () ((not (> (- j i) k)))
+                     (setf (aref alf (- i first)) (/ (- (aref uq (+ i p 1)) (aref uq i)) (- tt (aref uq i))))
+                     (setf (aref oma (- i first)) (- 1d0 (aref alf (- i first))))
+                     (setf (aref bet (- j first)) (/ (- (aref uq (+ (- j k) p 1)) (aref uq (- j k)))
+                                                     (- (aref uq (+ (- j k) p 1)) tt)))
+                     (setf (aref omb (- j first)) (- 1d0 (aref bet (- j first))))
+                     (incf i)
+                     (decf j))
+                   (setf del (/ (- tt (aref uq i)) (- (aref uq (+ i p 1)) (aref uq i)))
+                         omd (- 1d0 del))
+                   (if (< (- j i) k)
+                       (if (and (>= (- i first 1) 0) (>= (+ (- j first) 1) 0))
+                           (let ((maxl 0d0) (maxr 0d0))
+                             (declare (type double-float maxl maxr))
+                             (setf lam (/ (aref alf (- i first 1))
+                                          (+ (aref alf (- i first 1)) (aref bet (+ (- j first) 1))))
+                                   oml (- 1d0 lam))
+                             (setf maxl (global-max uq (1- i) p lto))
+                             (setf maxr (global-max uq i p lto))
+                             (setf mx (nl-max (* (* lam (aref alf (- i first 1))) maxl)
+                                              (* (* oml omd) maxr))))
+                           (setf lam 0.5d0
+                                 oml 0.5d0
+                                 mx 1d0))
+                       (setf mx (global-max uq i p lto)))
+                   ;; try to remove one knot along each row
+                   (block cols
+                     (dotimes (col (1+ m))
+                       (let ((ii 1) (jj (- last off)))
+                         (declare (type fixnum ii jj))
+                         (setf i first
+                               j last)
+                         (%copy-c-pt-net qw off col rw 0 0)
+                         (%copy-c-pt-net qw (1+ last) col rw 0 (- (1+ last) off))
+                         ;; new control points for one removal step
+                         (do () ((not (> (- j i) k)))
+                           (%net-combine (aref alf (- i first)) qw i col (aref oma (- i first))
+                                         rw 0 (1- ii) rw 0 ii)
+                           (%net-combine (aref bet (- j first)) qw j col (aref omb (- j first))
+                                         rw 0 (1+ jj) rw 0 jj)
+                           (incf i) (decf j) (incf ii) (decf jj))
+                         ;; is the knot removable?
+                         (if (< (- j i) k)
+                             (let ((dw (dist-cpt-cpt-homo (rw-c-pt (1- ii) ca) (rw-c-pt (1+ jj) cb))))
+                               (declare (type double-float dw))
+                               (when (> (* mx dw) tol)
+                                 (setf rmf nil)
+                                 (return-from cols))
+                               (%net-combine lam rw 0 (1+ jj) oml rw 0 (1- ii) rw 0 (1+ jj)))
+                             (progn
+                               (combine-2-c-pts del (rw-c-pt (1+ jj) ca) omd (rw-c-pt (1- ii) cb) acp)
+                               (let ((dw (dist-cpt-cpt-homo (%net-c-pt qw i col ca) acp)))
+                                 (declare (type double-float dw))
+                                 (when (> (* mx dw) tol)
+                                   (setf rmf nil)
+                                   (return-from cols)))))
+                         ;; disallowed weights
+                         (when rat
+                           (let ((wmin +bigd+) (wmax +smad+))
+                             (declare (type double-float wmin wmax))
+                             (setf i first
+                                   j last)
+                             (do () ((not (> (- j i) k)))
+                               (let ((wi (aref rw 0 (- i off) 3))
+                                     (wj (aref rw 0 (- j off) 3)))
+                                 (declare (type double-float wi wj))
+                                 (when (< wi wmin) (setf wmin wi))
+                                 (when (< wj wmin) (setf wmin wj))
+                                 (when (> wi wmax) (setf wmax wi))
+                                 (when (> wj wmax) (setf wmax wj)))
+                               (incf i) (decf j))
+                             (when (or (< wmin (the double-float *wmin*))
+                                       (> wmax (the double-float *wmax*)))
+                               (setf rmf nil)
+                               (return-from cols))))
+                         ;; save the new control points
+                         (setf i first
+                               j last)
+                         (do () ((not (> (- j i) k)))
+                           (%copy-c-pt-net rw 0 (- i off) qw i col)
+                           (%copy-c-pt-net rw 0 (- j off) qw j col)
+                           (incf i) (decf j)))))
+                   ;; was the knot removable along every row?
+                   (unless rmf
+                     (return-from kloop))
+                   ;; successful removal: shift down the knots
+                   (do ((l (- spn k) (1+ l))) ((> l (- r k 1)))
+                     (declare (type fixnum l))
+                     (setf (aref uq l) (aref uq (1+ l))))
+                   (decf first)
+                   (incf last)
+                   (incf k))))
+             ;; the C returns the error flag as the last call left it
+             (when err
+               (error err))
+             ;; no knot removed
+             (when (= k 0)
+               (return-from srf-remove-knot-conditional (values 0 (%make-surface p q uq vq qw))))
+             ;; shift down the control points
+             (let ((j fout) (i fout))
+               (declare (type fixnum i j))
+               (do ((l 1 (1+ l))) ((>= l k))
+                 (declare (type fixnum l))
+                 (if (oddp l) (incf i) (decf j)))
+               (dotimes (col (1+ m))
+                 (let ((a j))
+                   (declare (type fixnum a))
+                   (do ((l (1+ i) (1+ l))) ((> l n))
+                     (declare (type fixnum l))
+                     (%copy-c-pt-net qw l col qw a col)
+                     (incf a)))))
+             ;; the output surface's highest indexes are n-k and r-k
+             (let ((qw2 (make-cpoint-net (1+ (- n k)) (1+ m))))
+               (declare (type cpoint-net qw2))
+               (dotimes (row (1+ (- n k)))
+                 (dotimes (col (1+ m))
+                   (%copy-c-pt-net qw row col qw2 row col)))
+               (values k (%make-surface p q (subseq uq 0 (1+ (- r k))) vq qw2)))))
+          ;; remove in the v-direction
+          (t
+           (let ((fout (truncate (- (* 2 spn) mlt q) 2))
+                 (rmf t)
+                 (first (- spn q))
+                 (last (- spn mlt))
+                 (lto (* +srf-tool--sto+ (abs (- (aref vp s) (aref vp 0))))))
+             (declare (type fixnum fout first last) (type double-float lto))
+             ;; try to remove the knot NT times
+             (block kloop
+               (do () ((not (< k nt)))
+                 (let ((off (1- first)) (i first) (j last) (del 0d0) (omd 0d0) (mx 0d0))
+                   (declare (type fixnum off i j) (type double-float del omd mx))
+                   ;; save some parameters
+                   (do () ((not (> (- j i) k)))
+                     (setf (aref alf (- i first)) (/ (- (aref vq (+ i q 1)) (aref vq i)) (- tt (aref vq i))))
+                     (setf (aref oma (- i first)) (- 1d0 (aref alf (- i first))))
+                     (setf (aref bet (- j first)) (/ (- (aref vq (+ (- j k) q 1)) (aref vq (- j k)))
+                                                     (- (aref vq (+ (- j k) q 1)) tt)))
+                     (setf (aref omb (- j first)) (- 1d0 (aref bet (- j first))))
+                     (incf i)
+                     (decf j))
+                   (setf del (/ (- tt (aref vq i)) (- (aref vq (+ i q 1)) (aref vq i)))
+                         omd (- 1d0 del))
+                   (if (< (- j i) k)
+                       (if (and (>= (- i first 1) 0) (>= (+ (- j first) 1) 0))
+                           (let ((maxl 0d0) (maxr 0d0))
+                             (declare (type double-float maxl maxr))
+                             (setf lam (/ (aref alf (- i first 1))
+                                          (+ (aref alf (- i first 1)) (aref bet (+ (- j first) 1))))
+                                   oml (- 1d0 lam))
+                             (setf maxl (global-max vq (1- i) q lto))
+                             (setf maxr (global-max vq i q lto))
+                             (setf mx (nl-max (* (* lam (aref alf (- i first 1))) maxl)
+                                              (* (* oml omd) maxr))))
+                           (setf lam 0.5d0
+                                 oml 0.5d0
+                                 mx 1d0))
+                       (setf mx (global-max vq i q lto)))
+                   ;; try to remove one knot along each column
+                   (block rows
+                     (dotimes (row (1+ n))
+                       (let ((ii 1) (jj (- last off)))
+                         (declare (type fixnum ii jj))
+                         (setf i first
+                               j last)
+                         (%copy-c-pt-net qw row off rw 0 0)
+                         (%copy-c-pt-net qw row (1+ last) rw 0 (- (1+ last) off))
+                         ;; new control points for one removal step
+                         (do () ((not (> (- j i) k)))
+                           (%net-combine (aref alf (- i first)) qw row i (aref oma (- i first))
+                                         rw 0 (1- ii) rw 0 ii)
+                           (%net-combine (aref bet (- j first)) qw row j (aref omb (- j first))
+                                         rw 0 (1+ jj) rw 0 jj)
+                           (incf i) (decf j) (incf ii) (decf jj))
+                         ;; is the knot removable?
+                         (if (< (- j i) k)
+                             (let ((dw (dist-cpt-cpt-homo (rw-c-pt (1- ii) ca) (rw-c-pt (1+ jj) cb))))
+                               (declare (type double-float dw))
+                               (when (> (* mx dw) tol)
+                                 (setf rmf nil)
+                                 (return-from rows))
+                               (%net-combine lam rw 0 (1+ jj) oml rw 0 (1- ii) rw 0 (1+ jj)))
+                             (progn
+                               (combine-2-c-pts del (rw-c-pt (1+ jj) ca) omd (rw-c-pt (1- ii) cb) acp)
+                               (let ((dw (dist-cpt-cpt-homo (%net-c-pt qw row i ca) acp)))
+                                 (declare (type double-float dw))
+                                 (when (> (* mx dw) tol)
+                                   (setf rmf nil)
+                                   (return-from rows)))))
+                         ;; disallowed weights
+                         (when rat
+                           (let ((wmin +bigd+) (wmax +smad+))
+                             (declare (type double-float wmin wmax))
+                             (setf i first
+                                   j last)
+                             (do () ((not (> (- j i) k)))
+                               (let ((wi (aref rw 0 (- i off) 3))
+                                     (wj (aref rw 0 (- j off) 3)))
+                                 (declare (type double-float wi wj))
+                                 (when (< wi wmin) (setf wmin wi))
+                                 (when (< wj wmin) (setf wmin wj))
+                                 (when (> wi wmax) (setf wmax wi))
+                                 (when (> wj wmax) (setf wmax wj)))
+                               (incf i) (decf j))
+                             (when (or (< wmin (the double-float *wmin*))
+                                       (> wmax (the double-float *wmax*)))
+                               (setf rmf nil)
+                               (return-from rows))))
+                         ;; save the new control points
+                         (setf i first
+                               j last)
+                         (do () ((not (> (- j i) k)))
+                           (%copy-c-pt-net rw 0 (- i off) qw row i)
+                           (%copy-c-pt-net rw 0 (- j off) qw row j)
+                           (incf i) (decf j)))))
+                   ;; was the knot removable along every column?
+                   (unless rmf
+                     (return-from kloop))
+                   ;; successful removal: shift down the knots
+                   (do ((l (- spn k) (1+ l))) ((> l (- s k 1)))
+                     (declare (type fixnum l))
+                     (setf (aref vq l) (aref vq (1+ l))))
+                   (decf first)
+                   (incf last)
+                   (incf k))))
+             ;; the C returns the error flag as the last call left it
+             (when err
+               (error err))
+             ;; no knot removed
+             (when (= k 0)
+               (return-from srf-remove-knot-conditional (values 0 (%make-surface p q uq vq qw))))
+             ;; shift down the control points
+             (let ((j fout) (i fout))
+               (declare (type fixnum i j))
+               (do ((l 1 (1+ l))) ((>= l k))
+                 (declare (type fixnum l))
+                 (if (oddp l) (incf i) (decf j)))
+               (dotimes (row (1+ n))
+                 (let ((a j))
+                   (declare (type fixnum a))
+                   (do ((l (1+ i) (1+ l))) ((> l m))
+                     (declare (type fixnum l))
+                     (%copy-c-pt-net qw row l qw row a)
+                     (incf a)))))
+             ;; the output surface's highest indexes are m-k and s-k
+             (let ((qw2 (make-cpoint-net (1+ n) (1+ (- m k)))))
+               (declare (type cpoint-net qw2))
+               (dotimes (row (1+ n))
+                 (dotimes (col (1+ (- m k)))
+                   (%copy-c-pt-net qw row col qw2 row col)))
+               (values k (%make-surface p q uq (subseq vq 0 (1+ (- s k))) qw2))))))))))

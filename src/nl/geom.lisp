@@ -1316,3 +1316,55 @@ NLib: N_CreateCircFrom2dPts."
             (incf itc))))
       ;; the output
       (values xo yo ro dao dmo +true+))))
+
+;;; ------------------------------------------------------------- L10-g1
+
+(defun dist-pt-arc (p c r alf bet ps pe)
+  "The distance between point P and the circular arc of center C, radius R,
+start and end angles ALF and BET (degrees, the arc sweeping less than 180
+degrees) and end points PS and PE: |dist(C, P) - R| when P lies within
+*mtol* of an end point or its direction from C lies within the arc's sweep,
+else +undefined+.  R = +infinite+ marks a straight segment PS-PE: the
+perpendicular distance of P from it, +undefined+ where P does not project
+inside it (signals what DIST-PERP-PT-LINE-SEG signals).  When P is C the C
+reads an uninitialized angle (it ignores N_VectorDirectedAngle's error);
+the Lisp takes that angle as 0.
+NLib: N_DistPtArc."
+  (declare (type point p c ps pe) (type double-float r alf bet))
+  ;; see if the segment is a line
+  (when (= r +infinite+)
+    (let ((dis (dist-perp-pt-line-seg p ps pe)))
+      (declare (type double-float dis))
+      (return-from dist-pt-arc (if (>= dis 0d0) dis +undefined+))))
+  ;; check the special case
+  (let* ((ds (dist-pt-pt p ps))
+         (de (dist-pt-pt p pe))
+         (dis (dist-pt-pt c p))
+         (dif (abs (- dis r)))
+         (mtol *mtol*))
+    (declare (type double-float ds de dis dif mtol))
+    (when (or (<= ds mtol) (<= de mtol))
+      (return-from dist-pt-arc dif))
+    ;; process the circle case now
+    (let ((rr (make-point)) (v (make-point)) (ang 0d0))
+      (declare (dynamic-extent rr v) (type double-float ang))
+      (vector-create 1d0 0d0 0d0 rr)
+      (vector-diff p c v)
+      ;; the C ignores N_VectorDirectedAngle's error
+      (handler-case (setf ang (vector-directed-angle rr v))
+        (nurbs-error () nil))
+      (cond ((<= (abs (- alf bet)) 180d0)
+             (cond ((< alf bet)
+                    (if (and (<= alf ang) (<= ang bet)) dif +undefined+))
+                   ((> alf bet)
+                    (if (and (>= alf ang) (>= ang bet)) dif +undefined+))
+                   (t +undefined+)))
+            ((> (abs (- alf bet)) 180d0)
+             (cond ((and (< alf 180d0) (> bet 180d0))
+                    (if (or (and (<= 0d0 ang) (<= ang alf)) (and (<= bet ang) (<= ang 360d0)))
+                        dif +undefined+))
+                   ((and (> alf 180d0) (< bet 180d0))
+                    (if (or (and (<= 0d0 ang) (<= ang bet)) (and (<= alf ang) (<= ang 360d0)))
+                        dif +undefined+))
+                   (t +undefined+)))
+            (t +undefined+)))))

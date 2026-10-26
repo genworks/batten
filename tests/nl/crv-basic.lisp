@@ -429,3 +429,30 @@ unrelated curve."
              (with-stacks (s)
                (let ((r (c-crvs-are-coincident cp cq tol s)))
                  (values nil (list r (from-foreign cp :curve) (from-foreign cq :curve)))))))))
+
+;;; ------------------------------------------------------------ level 10, group 1
+
+(defun %crv-expand-view (c min-n min-m)
+  "What N_CrvExpand defines of curve C: its degree, its highest indexes, and
+its first MIN-N + 1 control points and MIN-M + 1 knots (the rest the C leaves
+uninitialized)."
+  (let ((pw (curve-cpoints c)) (u (curve-knots c))
+        (rows (make-cpoint-array (1+ min-n))))
+    (dotimes (i (1+ min-n))
+      (dotimes (k 4) (setf (aref rows i k) (aref pw i k))))
+    (list (curve-degree c) (1- (array-dimension pw 0)) (1- (length u))
+          rows (subseq u 0 (1+ min-m)))))
+
+(define-oracle-test crv-expand (:file "crv-basic" :trials 2000)
+  (let* ((c (random-curve))
+         (n (batten::curve-n c)) (m (batten::curve-m c))
+         (new-n (case (rnd 4) (0 n) (1 (rnd (1+ n))) (t (+ n (rnd 8)))))
+         (new-m (case (rnd 4) (0 m) (1 (rnd (1+ m))) (t (+ m (rnd 8)))))
+         (min-n (min n new-n)) (min-m (min m new-m)))
+    (agree (list :curve c :new-n new-n :new-m new-m)
+           (%crv-expand-view (batten::crv-expand (batten::crv-copy c) new-n new-m) min-n min-m)
+           (with-stacks (s)
+             (with-foreign ((cp c :curve))
+               (let ((rc (c-crv-expand cp new-n new-m s)))
+                 (values (c-flag-error-p rc)
+                         (%crv-expand-view (from-foreign cp :curve) min-n min-m))))))))
