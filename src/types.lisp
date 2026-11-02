@@ -283,12 +283,15 @@ code is :quit."
 ;;; NL_LINESEG and NL_PLANE.  NL_INTERVAL, NL_RECTANGLE and NL_MINMAXBOX are
 ;;; real-vectors of 2, 4 and 6 in the C field order (ul ur), (ul ur vb vt),
 ;;; (xl xr yb yt zn zf).
-(defstruct (lineseg (:constructor %make-lineseg (p v bounded)))
+;;; No predicate: the slot P's accessor is already LINESEG-P (and PLANE-P
+;;; below), and a predicate of the same name is undefined behavior --
+;;; Clasp refuses it, SBCL and CCL silently keep one of the two.
+(defstruct (lineseg (:constructor %make-lineseg (p v bounded)) (:predicate nil))
   (p (make-point) :type point)
   (v (make-point) :type point)
   (bounded 0 :type fixnum))
 
-(defstruct (plane (:constructor %make-plane (p n)))
+(defstruct (plane (:constructor %make-plane (p n)) (:predicate nil))
   (p (make-point) :type point)
   (n (make-point) :type point))
 
